@@ -1,0 +1,10 @@
+# Install with Python 3.11 or 3.12. PaddlePaddle wheels are not currently
+# published for Python 3.14 on Windows.
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+pydantic==2.11.3
+PyMuPDF==1.25.5
+paddleocr>=3.0.0,<4.0.0
+# Install the platform-specific CPU/GPU PaddlePaddle wheel separately:
+# https://www.paddlepaddle.org.cn/install/quick

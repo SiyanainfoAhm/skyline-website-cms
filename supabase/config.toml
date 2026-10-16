@@ -1,0 +1,13 @@
+[functions.portal-document-extract]
+# The browser enqueue branch verifies the user's bearer token in code. The
+# scheduled worker branch is authenticated with the separate worker secret.
+verify_jwt = false
+
+[functions.public-assistant]
+# Public endpoint; database access is service-role-only and it contains no
+# caller-controlled table, source or document identifier.
+verify_jwt = false
+
+[functions.public-assistant-index]
+# Worker is authenticated with x-worker-secret, not a browser JWT.
+verify_jwt = false

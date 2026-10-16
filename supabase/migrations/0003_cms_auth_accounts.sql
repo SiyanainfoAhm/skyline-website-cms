@@ -1,0 +1,32 @@
+-- =====================================================================
+-- Skyline Website CMS — staff accounts (0003) — DEPRECATED
+-- Project: Skyline Test (dev)  |  Target ref: xcpydisstlvtvcsqnjob
+--
+-- ⛔ THIS FILE NO LONGER CREATES ACCOUNTS.
+--
+-- The previous version of this file inserted rows directly into auth.users and
+-- auth.identities with hardcoded UUIDs and plaintext passwords. That is unsafe
+-- and unsupported: writing the `auth` schema by hand bypasses GoTrue and caused
+-- the `unexpected_failure: Database error querying schema` sign-in error.
+--
+-- HOW STAFF ACCOUNTS ARE CREATED NOW
+-- ----------------------------------
+-- All staff provisioning goes through the Supabase Auth Admin API, exposed as
+-- the `cms-admin-users` Edge Function (see supabase/functions/cms-admin-users).
+-- It is the ONLY supported path and is guarded so that only a signed-in,
+-- Active Admin can call it.
+--
+--   • Invite a staff member  → CMS → Users & Permissions → "Invite user"
+--                              (auth.admin.inviteUserByEmail)
+--   • Reset a password        → Users & Permissions → the key icon on a row
+--                              (auth.admin.generateLink, type "recovery")
+--   • Remove a staff member   → Users & Permissions → delete
+--                              (auth.admin.deleteUser)
+--
+-- No password is ever hardcoded here, in the app, or in the repository. A user
+-- sets their own password through a single-use invite/reset link, which the
+-- client can also trigger from the login screen via "Forgot password?".
+--
+-- See 0004_cms_auth_hardening.sql for the public-schema changes that link each
+-- CMS profile to its real Auth user id and enforce password rotation.
+-- =====================================================================
