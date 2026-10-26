@@ -6,7 +6,7 @@ import {
   setAgencyStatus,
   updateAgency,
 } from "@/pages/agency/lib/portalData";
-import type { PortalAgency } from "@/pages/agency/lib/portalAuth";
+import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
 import {
   PageHeading,
   PermanentBadge,

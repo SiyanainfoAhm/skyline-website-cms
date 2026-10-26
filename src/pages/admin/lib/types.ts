@@ -126,6 +126,8 @@ export interface AdminFormField {
 }
 
 export interface AdminForm {
+  submitUrl?: string;
+  submissionApproved?: boolean;
   id: string;
   name: string;
   description: string;
@@ -201,6 +203,9 @@ export interface NavMenuItem {
 }
 
 export interface FooterConfig {
+  quickLinks?: { label: string; to: string }[];
+  studentLinks?: { label: string; to: string }[];
+  linksConfigured?: boolean;
   about: string;
   quickLinksTitle: string;
   studentLinksTitle: string;
@@ -210,6 +215,11 @@ export interface FooterConfig {
 }
 
 export interface AdminSettings {
+  primaryColor?: string;
+  headingFont?: string;
+  bodyFont?: string;
+  themeConfigured?: boolean;
+  mapEmbedSrc?: string;
   name: string;
   shortName: string;
   logo: string;

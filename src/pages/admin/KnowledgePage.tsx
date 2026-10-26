@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/pages/admin/lib/supabase";
-import { Button, Card, Field, Modal, PageHeader, Select, TextArea, TextInput, useToast } from "@/pages/admin/components/ui";
+import { Button, Card, Field, Modal, PageHeader, Select, TextArea, TextInput } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 type Faq={id:string;question:string;normalized_question:string;answer:string;source_url:string;status:"draft"|"published"|"archived";aliases:string[];source_version:string;updated_at:string}; const normalise=(v:string)=>v.trim().toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim(); const empty=():Faq=>({id:"",question:"",normalized_question:"",answer:"",source_url:"/",status:"draft",aliases:[],source_version:"1",updated_at:""});
 export default function KnowledgePage(){const [items,setItems]=useState<Faq[]>([]),[draft,setDraft]=useState<Faq|null>(null),[loading,setLoading]=useState(true);const {push}=useToast();const load=async()=>{setLoading(true);const {data,error}=await supabase.from("public_assistant_faqs").select("*").order("updated_at",{ascending:false});if(error)push(error.message,"error");else setItems((data??[]) as Faq[]);setLoading(false);}; // The initial fetch is intentionally once; save/delete explicitly reload.
 // eslint-disable-next-line react-hooks/exhaustive-deps

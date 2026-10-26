@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useAdminData } from "@/pages/admin/lib/store";
-import { Button, Card, Field, SectionTabs, Select, StatusBadge, TextArea, TextInput, Toggle, useToast } from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Button, Card, Field, SectionTabs, Select, StatusBadge, TextArea, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import { WorkflowActions } from "@/pages/admin/components/workflow";
 import RichTextEditor from "@/pages/admin/components/RichTextEditor";
 import { courseCategories } from "@/pages/admin/lib/seed";

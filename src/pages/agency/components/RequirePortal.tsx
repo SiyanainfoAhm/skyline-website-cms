@@ -1,5 +1,5 @@
 import { Navigate, useNavigate } from "react-router-dom";
-import { usePortalAuth } from "@/pages/agency/lib/portalAuth";
+import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import PortalLayout from "@/pages/agency/components/PortalLayout";
 
 function WorkspaceLoader() {

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { useAdminData } from "@/pages/admin/lib/store";
-import { Button, Card, Field, PageHeader, TextArea, TextInput, Toggle, useToast } from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Button, Card, Field, PageHeader, TextArea, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { FooterConfig } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 import { footerLinks, studentLinks } from "@/data/site";
 
 export default function FooterPage() {
-  const { data, update, logActivity, recordRevision } = useAdminData();
+  const { data, saveNow, logActivity, recordRevision } = useAdminData();
   const { push } = useToast();
   const [draft, setDraft] = useState<FooterConfig>(data.footer);
 
@@ -18,11 +19,13 @@ export default function FooterPage() {
   const set = <K extends keyof FooterConfig>(key: K, value: FooterConfig[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  const save = () => {
-    update((d) => ({ ...d, footer: draft }));
+  const save = async () => {
+    try {
+    await saveNow((d) => ({ ...d, footer: draft }));
     recordRevision({ entity: "footer", entityId: "footer", title: "Footer", action: "Saved draft", status: "Draft", snapshot: draft });
     logActivity("Updated", "Footer", "Footer");
     push("Footer saved");
+    } catch (e) { push(e instanceof Error ? e.message : "Footer save failed", "error"); }
   };
 
   const settings = data.settings;
@@ -41,6 +44,18 @@ export default function FooterPage() {
         }
       />
 
+      <Card className="mb-5 p-5">
+        <h2 className="font-heading text-base font-semibold">Footer links</h2>
+        {(["quickLinks", "studentLinks"] as const).map((key) => <div key={key} className="my-4 space-y-2">
+          <h3>{key === "quickLinks" ? "Quick links" : "Student links"}</h3>
+          {(draft[key] ?? []).map((link, i) => <div className="flex gap-2" key={i}>
+            <TextInput aria-label={`${key} label ${i + 1}`} value={link.label} onChange={(e) => setDraft((d) => ({ ...d, linksConfigured: true, [key]: (d[key] ?? []).map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))} />
+            <TextInput aria-label={`${key} destination ${i + 1}`} value={link.to} onChange={(e) => setDraft((d) => ({ ...d, linksConfigured: true, [key]: (d[key] ?? []).map((x, j) => j === i ? { ...x, to: e.target.value } : x) }))} />
+            <Button aria-label={`Remove ${key} ${i + 1}`} onClick={() => setDraft((d) => ({ ...d, linksConfigured: true, [key]: (d[key] ?? []).filter((_, j) => j !== i) }))}>Remove</Button>
+          </div>)}
+          <Button onClick={() => setDraft((d) => ({ ...d, linksConfigured: true, [key]: [...(d[key] ?? []), { label: "New link", to: "/" }] }))}>Add {key === "quickLinks" ? "quick link" : "student link"}</Button>
+        </div>)}
+      </Card>
       <Card className="p-5">
         <h2 className="mb-4 font-heading text-base font-semibold text-foreground-950">Footer content</h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

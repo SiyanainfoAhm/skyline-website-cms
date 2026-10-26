@@ -1,5 +1,5 @@
 import { supabase } from "@/pages/admin/lib/supabase";
-import type { PortalAgency } from "@/pages/agency/lib/portalAuth";
+import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
 
 /** Data access for the Agency Portal. Every read is scoped by database RLS. */
 
@@ -196,18 +196,9 @@ export async function listPortalUsers(): Promise<PortalUserRow[]> {
 
 /** Totals for the signed-in user's authorized scope (RLS decides the rows). */
 export async function getDashboardCounts(): Promise<DashboardCounts> {
-  const { data, error } = await supabase.from("enrollment_applications").select("status");
+  const { data, error } = await supabase.rpc("portal_dashboard");
   if (error) throw new Error(error.message);
-  const counts: DashboardCounts = { total: 0, drafts: 0, inReview: 0, actionRequired: 0, enrolled: 0 };
-  for (const row of data ?? []) {
-    const status = String((row as { status?: string }).status ?? "draft");
-    counts.total += 1;
-    if (status === "draft") counts.drafts += 1;
-    else if (status === "submitted" || status === "under_review") counts.inReview += 1;
-    else if (status === "action_required") counts.actionRequired += 1;
-    else if (status === "enrolled") counts.enrolled += 1;
-  }
-  return counts;
+  return { total: data.total, drafts: data.statuses.draft ?? 0, inReview: data.statuses.under_review ?? 0, actionRequired: data.statuses.action_required ?? 0, enrolled: data.statuses.enrolled ?? 0 };
 }
 
 export async function listNotifications(): Promise<NotificationRow[]> {
@@ -231,14 +222,16 @@ export async function listNotifications(): Promise<NotificationRow[]> {
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
-  await supabase.from("portal_notifications").update({ read: true }).eq("id", id);
+  const { error } = await supabase.from("portal_notifications").update({ read: true }).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
   const { data: session } = await supabase.auth.getSession();
   const uid = session.session?.user?.id;
   if (!uid) return;
-  await supabase.from("portal_notifications").update({ read: true }).eq("recipient", uid).eq("read", false);
+  const { error } = await supabase.from("portal_notifications").update({ read: true }).eq("recipient", uid).eq("read", false);
+  if (error) throw new Error(error.message);
 }
 
 export function formatDate(value: string | null): string {

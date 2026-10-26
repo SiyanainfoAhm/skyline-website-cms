@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "@/pages/admin/lib/auth";
+import { useAuth } from "@/pages/admin/lib/authContext";
 import { AdminLoading, Button, Field, TextInput } from "@/pages/admin/components/ui";
+import { requestWebsiteDomain } from "@/lib/tenantHost";
 
 export default function AdminLoginPage() {
+  const tenant = requestWebsiteDomain();
   const { user, authLoading, login, sendPasswordReset } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,7 +77,7 @@ export default function AdminLoginPage() {
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-background-50/20">
             <i className="ri-building-2-line text-xl" aria-hidden="true" />
           </span>
-          <span className="font-heading text-lg font-bold">Skyline Institute of Technology</span>
+          <span className="font-heading text-lg font-bold">{tenant || "Skyline Institute of Technology"}</span>
         </div>
         <div>
           <h1 className="font-heading text-3xl font-bold leading-tight">
@@ -84,7 +86,7 @@ export default function AdminLoginPage() {
             Management System
           </h1>
           <p className="mt-4 max-w-md text-sm text-background-50/85">
-            One place for Skyline staff to manage courses, pages, navigation, documents, forms and
+            One place for website staff to manage courses, pages, navigation, documents, forms and
             every part of the public website — without touching code.
           </p>
         </div>
@@ -103,7 +105,7 @@ export default function AdminLoginPage() {
           </div>
           <h2 className="font-heading text-2xl font-bold text-foreground-950">Admin sign in</h2>
           <p className="mt-1.5 text-sm text-foreground-600">
-            Sign in to manage the Skyline website content.
+            Sign in to manage your website content.
           </p>
 
           <form onSubmit={submit} className="mt-7 space-y-4">
@@ -113,7 +115,7 @@ export default function AdminLoginPage() {
                 name="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@slit.edu.au"
+                placeholder={tenant ? "you@your-institution.edu.au" : "you@slit.edu.au"}
                 autoComplete="username"
               />
             </Field>

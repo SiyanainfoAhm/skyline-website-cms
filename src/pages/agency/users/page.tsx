@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { supabase } from "@/pages/admin/lib/supabase";
-import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuth";
+import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 import { listAgencies, listPortalUsers, ROLE_LABELS, type PortalUserRow } from "@/pages/agency/lib/portalData";
-import type { PortalAgency } from "@/pages/agency/lib/portalAuth";
+import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
 import { PageHeading, PortalEmpty, PortalError, PortalLoading, PortalModal } from "@/pages/agency/components/PortalUI";
+import { usePortalAuth } from "../lib/portalAuthContext";
+import InstitutionAgents from "../components/InstitutionAgents";
 
 const fieldClass =
   "w-full rounded-md border border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-950 placeholder:text-foreground-400 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40";
@@ -19,6 +21,11 @@ interface EditState {
 }
 
 export default function AdminUsersPage() {
+  const { selectedScope } = usePortalAuth();
+  return selectedScope?.tenantId ? <InstitutionAgents /> : <LegacyUsersPage />;
+}
+
+function LegacyUsersPage() {
   const [users, setUsers] = useState<PortalUserRow[]>([]);
   const [agencies, setAgencies] = useState<PortalAgency[]>([]);
   const [loading, setLoading] = useState(true);

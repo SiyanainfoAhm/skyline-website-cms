@@ -1,7 +1,9 @@
+import { StoreStatus, NewRevision, StoreContextValue, StoreContext, useAdminData } from "./storeContext";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { buildSeed } from "@/pages/admin/lib/seed";
+import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { loadAdminData, persistAdminData, emptyAdminData } from "@/pages/admin/lib/db";
-import { useAuth } from "@/pages/admin/lib/auth";
+import { useAuth } from "@/pages/admin/lib/authContext";
 import type {
   ActivityItem,
   AdminCourse,
@@ -19,34 +21,6 @@ import type {
   SeoEntry,
 } from "@/pages/admin/lib/types";
 
-export type StoreStatus = "loading" | "error" | "ready";
-
-interface NewRevision {
-  entity: RevisionEntity;
-  entityId: string;
-  title: string;
-  action: string;
-  status: PublishStatus;
-  snapshot: unknown;
-}
-
-interface StoreContextValue {
-  data: AdminData;
-  status: StoreStatus;
-  error: string | null;
-  reload: () => void;
-  update: (updater: (draft: AdminData) => AdminData) => void;
-  /** Applies an update AND persists it immediately, surfacing any DB error. */
-  saveNow: (updater: (draft: AdminData) => AdminData) => Promise<void>;
-  logActivity: (action: string, item: string, area: string) => void;
-  recordRevision: (rev: NewRevision) => void;
-  revisionsFor: (entity: RevisionEntity, entityId: string) => Revision[];
-  restoreRevision: (id: string) => void;
-  resetToSeed: () => void;
-}
-
-const StoreContext = createContext<StoreContextValue | null>(null);
-
 function now() {
   return new Date().toISOString().slice(0, 16).replace("T", " ");
 }
@@ -59,12 +33,35 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const loadedRef = useRef(false);
   const syncedRef = useRef<AdminData | null>(null);
   const dataRef = useRef<AdminData>(data);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveFailed = useRef(false);
+
+  const commit = useCallback((snapshot: AdminData) => {
+    const operation = saveQueue.current.catch(() => {}).then(async () => {
+      if (saveFailed.current) throw new Error("Reload the CMS to resolve the previous save failure.");
+      const previous = syncedRef.current;
+      if (!previous) throw new Error("CMS data has not finished loading.");
+      try {
+        await persistAdminData(previous, snapshot);
+        syncedRef.current = snapshot;
+      } catch (e) {
+        saveFailed.current = true;
+        setError(e instanceof Error ? e.message : "CMS save failed.");
+        setStatus("error");
+        throw e;
+      }
+    });
+    saveQueue.current = operation;
+    return operation;
+  }, []);
 
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
   const load = useCallback(async () => {
+    await saveQueue.current.catch(() => {});
+    saveFailed.current = false;
     setStatus("loading");
     setError(null);
     try {
@@ -114,14 +111,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       const previous = syncedRef.current;
       if (!previous) return;
       try {
-        await persistAdminData(previous, snapshot);
-        syncedRef.current = snapshot;
+        await commit(snapshot);
       } catch (e) {
-        console.error("CMS save failed", e);
+        setError(e instanceof Error ? e.message : "CMS save failed.");
       }
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [data]);
+  }, [data, commit]);
 
   const update = useCallback((updater: (draft: AdminData) => AdminData) => {
     setData((prev) => updater(prev));
@@ -138,11 +134,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     const next = updater(dataRef.current);
     dataRef.current = next;
     setData(next);
-    if (!previous) return;
+    if (!previous) throw new Error("CMS data has not finished loading.");
     // If the write throws, syncedRef is left untouched so a retry re-diffs.
-    await persistAdminData(previous, next);
-    syncedRef.current = next;
-  }, []);
+    await commit(next);
+  }, [commit]);
 
   const logActivity = useCallback(
     (action: string, item: string, area: string) => {
@@ -241,6 +236,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   );
 
   const resetToSeed = useCallback(() => {
+    if (requestWebsiteDomain()) throw new Error("Tenant sites do not use Skyline seed content.");
     loadedRef.current = true;
     if (!syncedRef.current) syncedRef.current = emptyAdminData();
     setData(buildSeed());
@@ -252,10 +248,4 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
-}
-
-export function useAdminData() {
-  const ctx = useContext(StoreContext);
-  if (!ctx) throw new Error("useAdminData must be used within AdminStoreProvider");
-  return ctx;
 }

@@ -1,20 +1,9 @@
 import { useState } from "react";
-import { useAuth, passwordResetUrl } from "@/pages/admin/lib/auth";
+import { useAuth, passwordResetUrl } from "@/pages/admin/lib/authContext";
 import { supabase } from "@/pages/admin/lib/supabase";
-import { useAdminData } from "@/pages/admin/lib/store";
-import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  Field,
-  Modal,
-  PageHeader,
-  Select,
-  TextInput,
-  Toggle,
-  useToast,
-} from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Badge, Button, Card, ConfirmDialog, Field, Modal, PageHeader, Select, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { AdminUser, Role } from "@/pages/admin/lib/types";
 
 const PERMISSIONS: { area: string; admin: boolean; editor: boolean }[] = [

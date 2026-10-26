@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
-import { useAuth } from "@/pages/admin/lib/auth";
+import { useAuth } from "@/pages/admin/lib/authContext";
 
 /**
  * Role authorization gate for Admin-only CMS routes.

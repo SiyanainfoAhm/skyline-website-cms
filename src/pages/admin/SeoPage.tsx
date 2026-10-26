@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useAdminData } from "@/pages/admin/lib/store";
-import { Button, Card, Field, Modal, PageHeader, TextArea, TextInput, useToast } from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Button, Card, Field, Modal, PageHeader, TextArea, TextInput } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { SeoEntry } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 
 export default function SeoPage() {
-  const { data, update, logActivity, recordRevision } = useAdminData();
+  const { data, saveNow, logActivity, recordRevision } = useAdminData();
   const { push } = useToast();
   const [editing, setEditing] = useState<SeoEntry | null>(null);
   const [draft, setDraft] = useState<SeoEntry | null>(null);
@@ -19,13 +20,16 @@ export default function SeoPage() {
     setEditing(null);
   };
 
-  const save = () => {
+  const save = async () => {
     if (!draft) return;
-    update((d) => ({ ...d, seo: d.seo.map((s) => (s.id === draft.id ? draft : s)) }));
+    if (!/^\/(?!\/)/.test(draft.path)) { push("Enter a website path beginning with /", "error"); return; }
+    try {
+    await saveNow((d) => ({ ...d, seo: editing ? d.seo.map((s) => (s.id === draft.id ? draft : s)) : [...d.seo, draft] }));
     recordRevision({ entity: "seo", entityId: draft.id, title: `${draft.page} SEO`, action: "Updated", status: "Draft", snapshot: draft });
     logActivity("Updated", `${draft.page} SEO`, "SEO");
     push("SEO settings saved");
     close();
+    } catch (e) { push(e instanceof Error ? e.message : "SEO save failed", "error"); }
   };
 
   const charGood = (v: number, max: number) => v > 0 && v <= max;
@@ -36,6 +40,7 @@ export default function SeoPage() {
         title="SEO / Page Settings"
         description="Search titles, descriptions and keywords for every public page."
         breadcrumb="Governance"
+        actions={<Button onClick={() => { setEditing(null); setDraft({ id: crypto.randomUUID(), page: "", path: "/", title: "", description: "", keywords: "" }); }}>Add page SEO</Button>}
       />
 
       <Card>

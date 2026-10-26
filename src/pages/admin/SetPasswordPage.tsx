@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { useAuth } from "@/pages/admin/lib/auth";
+import { useAuth } from "@/pages/admin/lib/authContext";
 import { AdminLoading, Button, Field, TextInput } from "@/pages/admin/components/ui";
 
 const MIN_LENGTH = 10;

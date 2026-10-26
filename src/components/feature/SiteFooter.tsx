@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { usePublicSite } from "@/hooks/usePublicSite";
+import { usePublicSite } from "@/hooks/publicSiteContext";
 
 export default function SiteFooter() {
   const { data } = usePublicSite();
@@ -11,7 +11,7 @@ export default function SiteFooter() {
         <div className="border-t border-background-200 bg-background-100">
           <div className="site-container flex flex-col items-start gap-4 py-6 md:flex-row md:items-center">
             <img
-              src="https://slit.edu.au/wp-content/uploads/2023/09/slit-c.png"
+              src={data.tenantSite ? settings.logo : "https://slit.edu.au/wp-content/uploads/2023/09/slit-c.png"}
               alt={settings.logoAlt}
               className="h-12 w-auto shrink-0 object-contain md:h-14"
             />
@@ -24,7 +24,7 @@ export default function SiteFooter() {
         <div className="site-container grid grid-cols-1 gap-10 py-14 sm:grid-cols-2 lg:grid-cols-12 lg:gap-8">
           <div className="sm:col-span-2 lg:col-span-4">
             <img
-              src="https://slit.edu.au/wp-content/uploads/2023/06/footer-logo.png"
+              src={data.tenantSite ? settings.logo : "https://slit.edu.au/wp-content/uploads/2023/06/footer-logo.png"}
               alt={settings.logoAlt}
               className="h-12 w-auto object-contain"
             />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { usePortalAuth } from "@/pages/agency/lib/portalAuth";
+import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_META, formatDate } from "@/pages/agency/lib/portalData";
 import { isEditableApplicationStatus } from "@/pages/agency/lib/applicationAccess";
 import {
@@ -20,7 +20,10 @@ import {
 } from "@/pages/agency/lib/portalApplications";
 import ApplicationWorkspace from "@/pages/agency/components/ApplicationWorkspace";
 import ApplicationWizard from "@/pages/agency/components/ApplicationWizard";
+import ApplicationMessages from "@/pages/agency/components/ApplicationMessages";
 import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/agency/components/PortalUI";
+
+import { portalScopeCacheKey } from "@/lib/portalScope";
 
 type Tab = "overview" | "form" | "documents" | "history" | "messages";
 
@@ -33,7 +36,7 @@ const TABS: Array<{ id: Tab; label: string; icon: string }> = [
 ];
 
 function wizardOpenKey(applicationId: string): string {
-  return `slit-portal-wizard-open:${applicationId}`;
+  return `slit-portal-wizard-open:${portalScopeCacheKey()}:${applicationId}`;
 }
 
 function wasWizardOpen(applicationId: string): boolean {
@@ -87,6 +90,8 @@ export default function ApplicationDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const refreshAfterSave = useCallback(() => { void getApplication(id, false).then(detail => { if (detail) setApplication(detail); }).catch(e => setActionError(e.message)); }, [id]);
 
   const openWizard = useCallback(() => {
     try { window.sessionStorage.setItem(wizardOpenKey(id), "1"); } catch { /* session storage unavailable */ }
@@ -327,6 +332,7 @@ export default function ApplicationDetailPage() {
                   </p>
                   <select
                     value=""
+                    aria-label="Change status"
                     disabled={busy}
                     onChange={(event) => void handleStatus(event.target.value)}
                     className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
@@ -387,7 +393,7 @@ export default function ApplicationDetailPage() {
             agentPhone={profile?.phone ?? ""}
             agencyName={agencyName}
             readOnly={readOnly}
-            onSaved={() => void load()}
+            onSaved={refreshAfterSave}
           />
         ) : null}
 
@@ -467,13 +473,7 @@ export default function ApplicationDetailPage() {
           )
         ) : null}
 
-        {tab === "messages" ? (
-          <PortalEmpty
-            icon="ri-chat-3-line"
-            title="Messages & requests arrive in Phase 6"
-            message="Two-way messages between your agency and SLIT admissions, plus document and correction requests, are built in Phase 6."
-          />
-        ) : null}
+        {tab === "messages" ? <ApplicationMessages applicationId={id} /> : null}
       </div>
 
       {wizardOpen ? (

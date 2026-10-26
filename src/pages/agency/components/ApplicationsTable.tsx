@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { ApplicationListRow } from "@/pages/agency/lib/portalApplications";
+import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
 import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
 import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/agency/components/PortalUI";
 
@@ -13,6 +13,7 @@ interface Option {
 
 interface ApplicationsTableProps {
   rows: ApplicationListRow[];
+  remote?: boolean;
   loading?: boolean;
   error?: string;
   onRetry?: () => void;
@@ -59,7 +60,8 @@ function sortValue(row: ApplicationListRow, key: SortKey): string | number {
 }
 
 export default function ApplicationsTable({
-  rows,
+  rows: providedRows,
+  remote = false,
   loading,
   error,
   onRetry,
@@ -83,6 +85,22 @@ export default function ApplicationsTable({
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
 
+  const [remoteRows, setRemoteRows] = useState<ApplicationListRow[]>([]);
+  const [remoteTotal, setRemoteTotal] = useState(0);
+  const [remoteError, setRemoteError] = useState("");
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const rows = remote ? remoteRows : providedRows;
+  useEffect(() => {
+    if (!remote) return;
+    let active = true;
+    setRemoteLoading(true); setRemoteError("");
+    const timer = window.setTimeout(() => { void queryApplications({search,status,agencyId,agentId,courseCode,intake,sort,direction:dir,limit:pageSize,offset:(page-1)*pageSize}).then(result => {
+      if (active) { setRemoteRows(result.rows); setRemoteTotal(result.total); }
+    }).catch(e => { if (active) setRemoteError(e.message); }).finally(() => { if (active) setRemoteLoading(false); }); }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [remote, search, status, agencyId, agentId, courseCode, intake, sort, dir, page, pageSize, retry]);
+
   const courseOptions = useMemo(() => {
     const map = new Map<string, string>();
     rows.forEach((row) => row.courses.forEach((c) => map.set(c.code, c.code)));
@@ -90,6 +108,7 @@ export default function ApplicationsTable({
   }, [rows]);
 
   const filtered = useMemo(() => {
+    if (remote) return rows;
     const term = search.trim().toLowerCase();
     return rows
       .filter((row) => {
@@ -110,11 +129,11 @@ export default function ApplicationsTable({
         const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
         return dir === "asc" ? cmp : -cmp;
       });
-  }, [rows, search, status, agencyId, agentId, courseCode, intake, sort, dir]);
+  }, [rows, search, status, agencyId, agentId, courseCode, intake, sort, dir, remote]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil((remote ? remoteTotal : filtered.length) / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const paged = showPagination
+  const paged = remote ? rows : showPagination
     ? filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
     : filtered.slice(0, pageSize);
 
@@ -151,11 +170,13 @@ export default function ApplicationsTable({
     </th>
   );
 
-  if (loading) return <PortalLoading label="Loading applications\u2026" />;
+  if (loading && !remote) return <PortalLoading label="Loading applications\u2026" />;
   if (error) return <PortalError message={error} onRetry={onRetry} />;
 
   return (
     <div>
+      {remoteLoading ? <p role="status">Loading applications...</p> : null}
+      {remoteError ? <PortalError message={remoteError} onRetry={() => setRetry(value => value + 1)} /> : null}
       {showFilters ? (
         <div className="mb-4 rounded-card border border-background-200 bg-background-50 p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
@@ -360,8 +381,8 @@ export default function ApplicationsTable({
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-foreground-500">
-              Showing {paged.length} of {filtered.length} application{filtered.length === 1 ? "" : "s"}
-              {showFilters ? ` (of ${rows.length} total)` : ""}
+              Showing {paged.length} of {remote ? remoteTotal : filtered.length} application{filtered.length === 1 ? "" : "s"}
+              {showFilters && !remote ? ` (of ${rows.length} total)` : ""}
             </p>
             {showPagination && totalPages > 1 ? (
               <div className="flex items-center gap-2">

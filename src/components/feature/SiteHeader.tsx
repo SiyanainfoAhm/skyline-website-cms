@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { NavItem } from "@/data/site";
-import { usePublicSite } from "@/hooks/usePublicSite";
+import { usePublicSite } from "@/hooks/publicSiteContext";
 
 function Logo({ src, alt }: { src: string; alt: string }) {
   return <img src={src} alt={alt} className="h-11 w-auto object-contain md:h-12" />;

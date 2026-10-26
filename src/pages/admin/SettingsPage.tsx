@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useAdminData } from "@/pages/admin/lib/store";
-import { Button, Card, Field, MediaUrlInput, PageHeader, Select, TextInput, Toggle, useToast } from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Button, Card, Field, MediaUrlInput, PageHeader, Select, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { AdminSettings } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 import { SOCIAL_PLATFORMS, isKnownPlatform, socialIconFor } from "@/lib/socialPlatforms";
-import { useAuth } from "@/pages/admin/lib/auth";
+import { useAuth } from "@/pages/admin/lib/authContext";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 
 export default function SettingsPage() {
@@ -58,6 +59,7 @@ export default function SettingsPage() {
   const addHero = () => set("homeHeroImages", [...draft.homeHeroImages, ""]);
 
   const save = async () => {
+    if (!draft.name.trim()) { push("Website name is required.", "error"); return; }
     const missing = draft.social.find((item) => item.enabled && !item.href.trim());
     if (missing) {
       push(`Add a profile URL for ${missing.label} (or turn it off) before saving.`, "error");
@@ -118,6 +120,15 @@ export default function SettingsPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Card className="p-5">
+          <h2 className="mb-4 font-heading text-base font-semibold">Website theme</h2>
+          <Field label="Primary color"><TextInput type="color" value={draft.primaryColor ?? "#2563eb"} onChange={(e) => setDraft((d) => ({ ...d, primaryColor: e.target.value, themeConfigured: true }))} /></Field>
+          {(["headingFont", "bodyFont"] as const).map((key) => <Field key={key} label={key === "headingFont" ? "Heading font" : "Body font"}>
+            <Select aria-label={key === "headingFont" ? "Heading font" : "Body font"} value={draft[key] ?? "Arial"} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value, themeConfigured: true }))}>
+              {["Arial", "Georgia", "Verdana", "system-ui"].map((font) => <option key={font}>{font}</option>)}
+            </Select>
+          </Field>)}
+        </Card>
         <Card className="p-5">
           <h2 className="mb-1 font-heading text-base font-semibold text-foreground-950">Change password</h2>
           <p className="mb-4 text-sm text-foreground-500">Confirm your current password before choosing a new one.</p>

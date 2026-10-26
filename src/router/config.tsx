@@ -1,9 +1,9 @@
 import { Navigate } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
-import NotFound from "@/pages/NotFound";
 import SiteLayout from "@/components/feature/SiteLayout";
 import Home from "@/pages/home/page";
 import ContentPageRoute from "@/pages/content/page";
+import CmsPageRoute from "@/pages/content/CmsPageRoute";
 import CoursesPage from "@/pages/courses/page";
 import CourseDetailPage from "@/pages/course-detail/page";
 import ContactPage from "@/pages/contact/page";
@@ -72,7 +72,7 @@ const routes: RouteObject[] = [
       { path: "become-an-agent", element: <BecomeAnAgentPage /> },
       { path: "contact", element: <ContactPage /> },
       { path: "enroll-now", element: <EnrollPage /> },
-      { path: "*", element: <NotFound /> },
+      { path: "*", element: <CmsPageRoute /> },
     ],
   },
   {

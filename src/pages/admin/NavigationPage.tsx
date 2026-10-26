@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useAdminData } from "@/pages/admin/lib/store";
-import { Button, Card, PageHeader, TextInput, Toggle, useToast } from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Button, Card, PageHeader, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { NavMenuItem } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 
 export default function NavigationPage() {
-  const { data, update, logActivity, recordRevision } = useAdminData();
+  const { data, saveNow, logActivity, recordRevision } = useAdminData();
   const { push } = useToast();
   const [items, setItems] = useState<NavMenuItem[]>(data.navigation);
 
@@ -32,11 +33,13 @@ export default function NavigationPage() {
     setItems(next);
   };
 
-  const save = () => {
-    update((d) => ({ ...d, navigation: items }));
+  const save = async () => {
+    try {
+    await saveNow((d) => ({ ...d, navigation: items }));
     recordRevision({ entity: "navigation", entityId: "navigation", title: "Header navigation", action: "Saved draft", status: "Draft", snapshot: items });
     logActivity("Updated", "Header navigation", "Navigation");
     push("Navigation saved");
+    } catch (e) { push(e instanceof Error ? e.message : "Navigation save failed", "error"); }
   };
 
   return (

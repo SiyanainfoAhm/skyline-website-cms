@@ -1,21 +1,7 @@
 import { useMemo, useRef, useState } from "react";
-import { useAdminData } from "@/pages/admin/lib/store";
-import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  Field,
-  Modal,
-  PageHeader,
-  Select,
-  StatusBadge,
-  TextArea,
-  TextInput,
-  Toggle,
-  useToast,
-} from "@/pages/admin/components/ui";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Select, StatusBadge, TextArea, TextInput, Toggle } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
 import type { DocItem } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 import { removeCmsObject, uploadCmsDocument } from "@/pages/admin/lib/storage";
@@ -336,6 +322,7 @@ export default function DocumentsPage() {
               </Field>
               <Field label="File name"><TextInput value={draft.originalFileName || draft.fileName} readOnly placeholder="No file uploaded" /></Field>
             </div>
+            <p className="rounded-md border border-background-300 p-3 text-sm">Website uploads are public. Draft or unpublished status hides the listing, but anyone with the file URL can still open it. Upload only approved public material here. Private student and agency documents belong in the private portal workflow.</p>
             <Field label="Document file" hint={editing ? "Each upload receives a unique Storage path; upload again to replace." : "Save the record first, then upload its file."}>
               <div className="flex gap-2"><TextInput value={draft.storagePath || draft.url} readOnly placeholder="No file uploaded" /><input ref={documentInput} className="hidden" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv" onChange={(event) => void uploadDocument(event.target.files?.[0])} /><Button variant="outline" disabled={!editing || uploading} onClick={() => documentInput.current?.click()}>{uploading ? "Uploading…" : "Upload / replace"}</Button></div>
             </Field>

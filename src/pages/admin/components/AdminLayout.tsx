@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "@/pages/admin/lib/auth";
-import { useAdminData } from "@/pages/admin/lib/store";
+import { useAuth } from "@/pages/admin/lib/authContext";
+import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { PrototypeNotice, AdminLoading, AdminError } from "@/pages/admin/components/ui";
+import { requestWebsiteDomain } from "@/lib/tenantHost";
 
 interface NavEntry {
   to: string;
@@ -60,7 +61,8 @@ export default function AdminLayout() {
     return <Navigate to="/admin/set-password" replace />;
   }
 
-  const items = NAV.filter((n) => !(n.adminOnly && user.role !== "Admin"));
+  const tenant = requestWebsiteDomain();
+  const items = NAV.filter((n) => !(n.adminOnly && user.role !== "Admin") && !(tenant && (n.to === "/admin/users" || n.to.startsWith("/admin/knowledge"))));
 
   const sidebar = (
     <nav className="flex h-full flex-col">
@@ -69,7 +71,7 @@ export default function AdminLayout() {
           <i className="ri-building-2-line text-lg" aria-hidden="true" />
         </span>
         <div className="leading-tight">
-          <p className="font-heading text-sm font-bold text-foreground-950">Skyline CMS</p>
+          <p className="font-heading text-sm font-bold text-foreground-950">{tenant ? `${data.settings.shortName || data.settings.name} CMS` : "Skyline CMS"}</p>
           <p className="text-[11px] text-foreground-500">Website Admin</p>
         </div>
       </div>
