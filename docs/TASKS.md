@@ -11,16 +11,16 @@ Phase order (ADR-012, 2026-10-26): 5 Azure, 6 RTO administration, 7 Postmark, 8 
 | 2 Multi-tenant DB and security foundation | 10 | 10 | 0 | VERIFIED |
 | 3 Tenant-driven website, branding, CMS | 5 | 5 | 0 | VERIFIED |
 | 4 Agency portal and admission isolation | 5 | 5 | 0 | VERIFIED |
-| 5 Azure AI Document Intelligence | 4 | 2 | 2 | PENDING |
-| 6 RTO and company administration | 3 | 0 | 3 | PENDING |
-| 7 Postmark email and notifications | 3 | 0 | 3 | PENDING |
-| 8 PRISMS registration (manual) | 3 | 0 | 3 | PENDING |
+| 5 Azure AI Document Intelligence | 4 | 3 | 1 | PENDING |
+| 6 RTO and company administration | 4 | 4 | 0 | PENDING |
+| 7 Postmark email and notifications | 3 | 3 | 0 | PENDING |
+| 8 PRISMS registration (manual) | 3 | 3 | 0 | PENDING |
 | 9 Multi-tenant RAG chatbot | 5 | 0 | 5 | PENDING |
 | 10 Stripe subscriptions and billing | 3 | 0 | 3 | PENDING |
 | 11 Performance, security, observability, deploy | 4 | 0 | 4 | PENDING |
-| **Total** | **49** | **26** | **23** | |
+| **Total** | **50** | **37** | **13** | |
 
-**Next eligible: P05-03** (local, mock-only; needs owner "continue phase 5"/"go").
+**Next eligible: P09-01.** P05-04 live run needs explicit owner approval and a hosted release.
 
 ## Phases 1-4 (DONE)
 
@@ -53,57 +53,64 @@ Phase order (ADR-012, 2026-10-26): 5 Azure, 6 RTO administration, 7 Postmark, 8 
 
 - P05-01 Document provider interface and fixtures. DONE (local, 2026-10-26). Provider contract, OpenAI adapter behind it, test-only mock; 17+9+3+20+4 cases and native lab 10/0 PASS.
 - P05-02 Configured-safe Azure adapter. DONE (local, 2026-10-26). REST 2024-11-30, async poll, bounded timeouts, 429/5xx/invalid-JSON/failed/mismatch mapping; 22 cases PASS. Not deployed; live Azure NOT RUN.
-- P05-03 Verify provider orchestration and history parity. status: TODO. Deps: P05-02.
+- P05-03 Verify provider orchestration and history parity. status: DONE (local, 2026-10-26; migration undeployed). Orchestration `_shared/document-extraction/run.ts`, receipt table + fenced RPC (migration 20261026130000); 12 job-matrix cases, 13 pgTAP cases and native lab Azure path 4/0 PASS. Deps: P05-02.
   - Scope: wire `resumeOperationId`/`onOperationAccepted` into leased jobs (persist operation id, likely additive migration); audit/provenance and manual review parity.
   - Acceptance: no duplicate activation or confirmed overwrite; cancellation/retry/dead-letter limits and privacy hold; provider switch rolls back cleanly.
   - Tests: REG-DOC/JOBS failure matrix, versioned fixture parity (supabase/functions/portal-document-extract/index.ts, supabase/tests); native lab `scripts/lab/native-extraction.mjs`.
-- P05-04 Optional live Azure acceptance gate. status: TODO. Deps: P05-03.
+- P05-04 Optional live Azure acceptance gate. status: BLOCKED (mock-only readiness DONE locally 2026-10-26; live Azure NOT RUN, needs owner approval + hosted release). Deps: P05-03.
   - Scope: document synthetic fixture run and accuracy/cost evidence format; run only with credentials and explicit approval.
   - Acceptance: mock-only readiness reported separately; live result stays NOT RUN until approved and executed.
   - Tests: optional per-category real-fixture run; field-level outcomes, no invented accuracy.
 
 ## Phase 6 - RTO and company administration
 
-- P06-01 Tenant and platform administration. status: TODO. Deps: P03-05, P04-05 (re-derived by reorder; owner to confirm).
+- P06-01 Tenant and platform administration. status: DONE (local, 2026-10-26; migration 74 undeployed). Scoped commands (migration 20261026140000), `/admin/institution` page, 36-case admin matrix in `supabase/tests/phase2_authorization_red.sql` PASS, native lab 10/0 + Azure 4/0. Deps: P03-05, P04-05.
   - Scope: manage institution details/domains/memberships/agency relationships via scoped commands (src/pages/admin).
   - Acceptance: tenant admin cannot grant platform powers or touch another tenant; shared agencies preserved.
   - Tests: REG-AUTH/SEC admin matrix; domain verification/revocation.
-- P06-02 Versioned workflow and configuration administration. status: TODO. Deps: P06-01.
+- P06-02 Versioned workflow and configuration administration. status: DONE (local, 2026-10-26; migration 75 undeployed). Draft/publish/restore commands, `ConfigurationPanel`, 41 pgTAP cases; all 12 SQL suites 250/250, native lab 10/0 + Azure 4/0. Deps: P06-01.
   - Scope: validated role/workflow/integration/branding config with audit and safe defaults.
   - Acceptance: invalid config rejected; published workflows pin a version; secret values never returned.
   - Tests: config schema, transition versioning, restore regression.
-- P06-03 Verify organization lifecycle and access audit. status: TODO. Deps: P06-02.
+- P06-03 Verify organization lifecycle and access audit. status: DONE (local, 2026-10-26; migration 77 undeployed). Invitation-based membership (uniform response), onboarding, platform suspend/reactivate, platform overview/audit, UI Platform tab. 44 new pgTAP cases, all 12 SQL suites 329/329, native lab 10/0 + Azure 4/0. Admin accessibility checked by review only (labels on new controls), not automated. Deps: P06-02, P06-04.
   - Scope: onboarding/suspension/member revocation, shared identity safety, admin usability.
+  - Scope (add): make add-member by email return the same response whether or not the account exists.
   - Acceptance: suspension denies new operations without destroying records; audit attributes actor and tenant.
   - Tests: REG-AUTH/SEC/CMS/AGENCY plus admin accessibility.
+- P06-04 Enforce pinned workflow and role configuration. status: DONE (local, 2026-10-26; migration 76 undeployed). `tenant_has_role` binds the three policy role sets to cms.edit/cms.read/applications.review; `portal_set_application_status` follows the pinned version. 33 new pgTAP cases, all 12 SQL suites 283/283, native lab 10/0 + Azure 4/0. Priority P0. Deps: P06-02.
+  - Scope: make `portal_set_application_status` and the role/permission checks read the pinned workflow version and the published role config; the default (nothing published) must behave exactly like the current hard-coded rules. Remove the "not yet applied" notice in the admin Configuration tab when done.
+  - Acceptance: transitions follow the pinned version; role restrictions are enforced server-side by RLS/RPC; old pinned applications keep working; no behavior change with default config.
+  - Tests: REG-AUTH/AGENCY transition matrix per version; default-equals-hardcoded parity; restore regression.
 
 ## Phase 7 - Postmark email and notification events
 
-- P07-01 Transactional notification outbox. status: TODO. Deps: P04-03, P06-02.
+- P07-01 Transactional notification outbox. status: DONE (local, 2026-10-26; migration 78 undeployed). Outbox events expand in-transaction into `notification_deliveries` (versioned templates/sender/defaults via config kind `notifications`, per-user opt-out); inbox untouched; nothing is sent. 39 new pgTAP cases, all 12 SQL suites 368/368, native lab 10/0 + Azure 4/0. Deps: P04-03, P06-02.
   - Scope: versioned template/sender/preferences and durable deliveries on top of in-app events.
   - Acceptance: committed transition yields one outbox event, rollback none; inbox preserved.
   - Tests: REG-NOTIFY/AGENCY rollback, duplicate status request, recipients.
-- P07-02 Mock-first Postmark delivery and callbacks. status: TODO. Deps: P07-01.
+- P07-02 Mock-first Postmark delivery and callbacks. status: DONE (local, 2026-10-26; migration 79 and new function `notification-delivery` undeployed; its `supabase/config.toml` verify_jwt=false entry is added; both routes fail closed). Leased claim, bounded retries, unknown outcomes never resent, Basic-auth deduplicated callbacks; 36 pgTAP + 9 unit cases, all 12 SQL suites 402/402, native lab OpenAI 10/0, Azure 4/0, Notify 7/0. Live Postmark NOT RUN. Deps: P07-01.
   - Scope: provider interface, safe unconfigured adapter, bounded attempts, current documented webhook verification.
   - Acceptance: mock lifecycle recorded; callbacks authenticated and deduped; disabled config sends nothing.
   - Tests: 429/timeout/replay/untrusted callback, template escaping.
-- P07-03 Delivery preferences and recovery. status: TODO. Deps: P07-02.
+- P07-03 Delivery preferences and recovery. status: DONE (local, 2026-10-26; migration 80 undeployed). Sweep marks dead workers' deliveries `unknown` (never auto-resent; administrators retry or close with a reason), sender ownership (approved address or verified hostname), per-institution owner activation gate, masked administrator delivery overview, email preferences in the agency portal. 39 new pgTAP cases, all 12 SQL suites 443/443, native lab OpenAI 10/0, Azure 4/0, Notify 8/0. Browser flows reviewed only, not automated. Live Postmark NOT RUN. Deps: P07-02.
   - Scope: queue crashes, opt-outs, sender ownership, admin delivery visibility.
   - Acceptance: no lost/duplicate notification across partial failures; owner review before live activation.
   - Tests: REG-NOTIFY plus inbox/browser tests.
 
 ## Phase 8 - PRISMS registration (manual workflow)
 
-- P08-01 Manual registration and CoE lifecycle model. status: TODO. Deps: P04-05, P06-02.
+- P08-01 Manual registration and CoE lifecycle model. status: DONE (local, 2026-10-26; migration 81 undeployed). `enrollment_registrations` (draft/lodged/verified/cancelled), append-only evidence and history, reviewer-only commands; `coe_issued` stays distinct from a verified registration. 51 new pgTAP cases, all 12 SQL suites 494/494, native lab 10/0 + Azure 4/0 + Notify 8/0. No UI yet (P08-02); no government interaction. Deps: P04-05, P06-02, P06-04.
   - Scope: validated registration references/states/evidence and operator history (migrations).
   - Acceptance: required fields and tenant relations enforced; `coe_issued` distinct from verified external registration.
   - Tests: REG-REGISTER/SEC incomplete, duplicate, foreign reference, transitions.
-- P08-02 Authorized manual registration workbench. status: TODO. Deps: P08-01.
+- P08-02 Authorized manual registration workbench. status: DONE (local, 2026-10-26; migration 82 undeployed). `/agency/registrations` (reviewers only): list with warning for coe_issued/enrolled without a verified registration (never a block), checklist, evidence, lodge/verify/cancel, minimized audited CSV export; commands audited in the portal audit log. 28 new pgTAP + 6 unit cases, all 12 SQL suites 522/522, native lab 10/0 + Azure 4/0 + Notify 8/0. Page reviewed only, not run in a browser. No government interaction. Deps: P08-01.
   - Scope: checklist/export/manual confirmation/reconciliation views in src/pages/agency; keep evidence and CoE retention.
+  - Scope (add): show a warning when an application is enrolled/coe_issued without a verified registration.
   - Acceptance: only authorized operators act; no automated government interaction; audit records confirmation.
   - Tests: REG-REGISTER browser validation, permissions, export minimization.
-- P08-03 Reconciliation and exception handling. status: TODO. Deps: P08-02.
+- P08-03 Reconciliation and exception handling. status: DONE (local, 2026-10-26; migration 83 undeployed). Computed exceptions (enrolled without verified registration, lodged > 14 days, verified on a withdrawn/rejected application, possible duplicate student), accept/reopen decisions with notes, attributable append-only CoE corrections, Exceptions tab in the workbench. 42 new pgTAP + 3 unit cases, all 12 SQL suites 564/564, native lab 10/0 + Azure 4/0 + Notify 8/0. Page reviewed only, not run in a browser. No government interaction. Deps: P08-02.
   - Scope: resolve duplicate/missing/outdated external records through reviewed manual actions.
+  - Scope (add): list enrolled-without-verified-registration as a reconciliation exception.
   - Acceptance: every correction attributable; status/history consistent; no unsupported API assumptions.
   - Tests: REG-REGISTER/AGENCY correction, cancellation, mismatch, retention.
 

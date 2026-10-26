@@ -9,6 +9,8 @@ insert into public.enrollment_applications(id,agency_id,assigned_agent_id,status
  ('43000000-0000-0000-0000-000000000001','13000000-0000-0000-0000-000000000001','23000000-0000-0000-0000-000000000001','draft','{}');
 -- SQL actor claims are stand-ins; native Auth provisioning is tested separately.
 -- The SEC-11 contract requires an explicit UID mapping, never email alone.
+-- cms_users.auth_user_id references auth.users (migration 0004): provision the Auth row inside the rolled-back transaction.
+insert into auth.users(id,email) values ('33000000-0000-0000-0000-000000000002','positive-admin@example.test');
 insert into public.cms_users(id,name,email,role,status,auth_user_id) values ('phase2-positive-admin','Positive admin','positive-admin@example.test','Admin','Active','33000000-0000-0000-0000-000000000002');
 insert into public.portal_notifications(id,recipient,title) values ('63000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Original');
 set local role authenticated;

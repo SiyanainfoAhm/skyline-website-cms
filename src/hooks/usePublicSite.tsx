@@ -12,6 +12,7 @@ import {
 import { fallbackSiteData, loadPublicSiteData, type PublicSiteData } from "@/lib/publicData";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { supabase } from "@/pages/admin/lib/supabase";
+import TenantLoader, { cacheBrand } from "@/components/TenantLoader";
 
 /**
  * Loads all CMS-managed content from Supabase once on mount and keeps it in
@@ -28,6 +29,7 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const [resolved, setResolved] = useState(false);
+  const [overlay, setOverlay] = useState<"fading" | "gone">("fading");
   const revisionRef = useRef<number | null>(null);
   const tenantRef = useRef<string | null>(null);
 
@@ -44,6 +46,8 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
     try {
       const next = await loadPublicSiteData();
       setData(next);
+      // Remember this site's branding (cms_settings.name / logo / primary_color) for a branded loader on the next visit.
+      cacheBrand({ name: next.settings.name, logoUrl: next.settings.logo, primary: next.theme?.primaryColor });
       revisionRef.current = next.publicVersion ?? null;
       tenantRef.current = next.tenantSite?.tenantId ?? null;
       setResolved(true);
@@ -123,9 +127,18 @@ export function PublicSiteProvider({ children }: { children: ReactNode }) {
     [data, status, error, refresh, reload],
   );
 
-  if (!resolved) return <main className="site-container py-20" role="status">
-    <h1>{status === "error" ? "Website unavailable" : "Loading website"}</h1>
-    {status === "error" ? <button type="button" onClick={reload}>Try again</button> : null}
-  </main>;
-  return <PublicSiteContext.Provider value={value}>{children}</PublicSiteContext.Provider>;
+  // Once the tenant has loaded, the page renders underneath while the loader fades out, so there is no abrupt flash.
+  useEffect(() => {
+    if (!resolved) { setOverlay("fading"); return undefined; }
+    const timer = window.setTimeout(() => setOverlay("gone"), 450);
+    return () => window.clearTimeout(timer);
+  }, [resolved]);
+
+  if (!resolved) return <TenantLoader error={status === "error"} onRetry={reload} />;
+  return (
+    <PublicSiteContext.Provider value={value}>
+      {children}
+      {overlay === "fading" ? <TenantLoader leaving brand={{ name: data.settings.name, logoUrl: data.settings.logo, primary: data.theme?.primaryColor }} /> : null}
+    </PublicSiteContext.Provider>
+  );
 }

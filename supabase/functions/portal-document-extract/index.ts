@@ -1,8 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { backendConfiguration, requiredConfiguration } from "../_shared/config.ts";
-import { buildExtractionEnvelope, EXTRACTION_CATEGORIES, isSupportedDocument } from "../_shared/document-extraction/contract.ts";
+import { EXTRACTION_CATEGORIES, isSupportedDocument } from "../_shared/document-extraction/contract.ts";
 import { createDocumentExtractionProvider } from "../_shared/document-extraction/select.ts";
+import { runLeasedExtraction, settleFailure, type JobPort } from "../_shared/document-extraction/run.ts";
 
 // Supabase's background-task API is supplied by the Edge runtime, not Deno CLI.
 declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
@@ -34,7 +35,8 @@ async function enqueue(request: Request) {
   if (!(EXTRACTION_CATEGORIES as readonly string[]).includes(String(doc.category))) return reply({ ok: false, error: "This document category is not supported for extraction." }, 422);
   const { data: job, error: jobError } = await caller.rpc("portal_enqueue_document_job", { p_document_id: doc.id, p_reextract: reextract });
   if (jobError || !job) return reply({ ok: false, error: "Document saved, but extraction could not be queued. It can be retried." }, 503);
-  if (requiredConfiguration({ DOCUMENT_EXTRACTION_WORKER_SECRET: workerSecret, OPENAI_API_KEY: openAiKey, OPENAI_DOCUMENT_MODEL: model })) {
+  // Availability follows the selected provider (OpenAI or Azure), not only the OpenAI variables; manual entry continues either way.
+  if (requiredConfiguration({ DOCUMENT_EXTRACTION_WORKER_SECRET: workerSecret }) || createDocumentExtractionProvider(providerConfig).unavailable) {
     return reply({ ok: true, jobId: job.id, state: job.state ?? "queued", extractionAvailable: false, configurationCode: "configuration_unavailable" });
   }
   // The caller is already authorised above. This is an in-process execution,
@@ -60,17 +62,39 @@ async function processOne(scope?: { job: string; tenant: string }) {
   if (error) return reply({ ok: false, error: error.message }, 500);
   const job = Array.isArray(claimed) ? claimed[0] : claimed;
   if (!job) return reply({ ok: true, processed: false });
+  // Every write below is fenced by the job lease inside the database function.
+  const port: JobPort = {
+    loadOperation: async () => {
+      const { data } = await admin.from("enrollment_document_extraction_operations").select("provider_engine, operation_id").eq("job_id", job.id).maybeSingle();
+      return data ? { engine: String(data.provider_engine), operationId: String(data.operation_id) } : null;
+    },
+    recordOperation: async (engine, operationId) => {
+      const { data, error } = await admin.rpc("portal_record_document_job_operation", { p_job: job.id, p_lease: job.lease_token, p_engine: engine, p_operation: operationId });
+      if (error) throw new Error("operation receipt");
+      return data === true;
+    },
+    finish: async (extraction, responseId, usage) => {
+      // The database atomically validates lease/cancellation, merges current confirmed
+      // metadata, applies candidates and records the terminal attempt exactly once.
+      const { data, error } = await admin.rpc(scope ? "portal_finish_tenant_document_job" : "portal_finish_document_extraction_job", {
+        ...(scope ? { p_tenant: scope.tenant } : {}),
+        p_job: job.id, p_lease: job.lease_token, p_extraction: extraction, p_response_id: responseId, p_usage: usage,
+      });
+      if (error) throw new Error("persistence");
+      return data === true;
+    },
+    fail: async (code, message, retry, delay) => {
+      const { data, error } = await admin.rpc("portal_fail_document_extraction_job", { p_job: job.id, p_lease: job.lease_token, p_code: code, p_message: message, p_retry: retry, p_delay: delay });
+      if (error) throw new Error("persistence");
+      return data === true;
+    },
+  };
   const fail = async (code: string, message: string, retryable: boolean) => {
-    const attempts = Number(job.attempt_count ?? 1);
-    const retry = retryable && attempts < 3;
-    const delay = Math.min(900, 30 * 2 ** attempts) + Math.floor(Math.random() * 20);
-    const { data: accepted, error } = await admin.rpc("portal_fail_document_extraction_job", {
-      p_job: job.id, p_lease: job.lease_token, p_code: code, p_message: message,
-      p_retry: retry, p_delay: delay,
-    });
-    if (error) return reply({ ok: false, error: "Unable to persist extraction outcome." }, 503);
-    if (!accepted) return reply({ ok: true, processed: false, stale: true });
-    return reply({ ok: false, jobId: job.id, retrying: retry, error: message }, retry ? 202 : 422);
+    let settled: Awaited<ReturnType<typeof settleFailure>>;
+    try { settled = await settleFailure(port, Number(job.attempt_count ?? 1), code, message, retryable); }
+    catch { return reply({ ok: false, error: "Unable to persist extraction outcome." }, 503); }
+    if (!settled.accepted) return reply({ ok: true, processed: false, stale: true });
+    return reply({ ok: false, jobId: job.id, retrying: settled.retrying, error: message }, settled.retrying ? 202 : 422);
   };
   try {
   const { data: doc } = await admin.from("enrollment_application_documents").select("id, application_id, category, bucket_name, storage_path, filename, mime_type, file_size, metadata, is_current, tenant_id").eq("id", job.document_id).maybeSingle();
@@ -89,24 +113,13 @@ async function processOne(scope?: { job: string; tenant: string }) {
   const selection = createDocumentExtractionProvider(providerConfig);
   if (!selection.provider) return await fail("configuration", "The extraction provider is not configured.", true);
   const provider = selection.provider;
-  const outcome = await provider.extract({
+  const result = await runLeasedExtraction(provider, {
     bytes, mimeType: doc.mime_type || blob.type, filename: doc.filename, category: doc.category, jobId: job.id, attempt: Number(job.attempt_count ?? 1),
     // Cancellation is fenced by the database lease; there is no cooperative abort source yet.
     signal: new AbortController().signal,
-  });
-  if (!outcome.ok) return await fail(outcome.code, outcome.message, outcome.retryable);
-  // A wrong category can be retained as an auditable outcome but can never
-  // populate an application (see buildExtractionEnvelope).
-  const extraction = buildExtractionEnvelope(provider, outcome, new Date().toISOString());
-  // The database atomically validates lease/cancellation, merges current confirmed
-  // metadata, applies candidates and records the terminal attempt exactly once.
-  const { data: accepted, error: finishError } = await admin.rpc(scope ? "portal_finish_tenant_document_job" : "portal_finish_document_extraction_job", {
-    ...(scope ? { p_tenant: scope.tenant } : {}),
-    p_job: job.id, p_lease: job.lease_token, p_extraction: extraction,
-    p_response_id: outcome.operationId, p_usage: outcome.usage,
-  });
-  if (finishError) return await fail("persistence", "Extraction completion needs retry/review.", true);
-  if (!accepted) return reply({ ok: true, processed: false, stale: true });
+  }, port);
+  if (result.kind === "failure") return await fail(result.code, result.message, result.retryable);
+  if (result.kind === "stale") return reply({ ok: true, processed: false, stale: true });
   return reply({ ok: true, processed: true, jobId: job.id });
   } catch {
     // The durable claim lease remains available for recovery even if this

@@ -5,6 +5,9 @@ import { useToast } from "@/pages/admin/components/toastContext";
 import type { DocItem } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 import { removeCmsObject, uploadCmsDocument } from "@/pages/admin/lib/storage";
+import DraftStatus from "@/pages/admin/components/DraftStatus";
+import DraftResume from "@/pages/admin/components/DraftResume";
+import { useSlotDraft } from "@/pages/admin/lib/useSlotDraft";
 
 /* The public Forms & Policies page is split into exactly two sections,
    in this order. New documents must belong to one of them. */
@@ -28,7 +31,10 @@ export default function DocumentsPage() {
   const { push } = useToast();
   const [category, setCategory] = useState("All");
   const [editing, setEditing] = useState<DocItem | null>(null);
-  const [draft, setDraft] = useState<DocItem | null>(null);
+  const blankDoc = () => emptyDoc(data.documents.filter((d) => d.category === CATEGORIES[0]).length + 1);
+  const slot = useSlotDraft<DocItem>("document", (id) => data.documents.find((d) => d.id === id) ?? null, blankDoc);
+  const draft = slot.draft;
+  const setDraft = slot.setDraft;
   const [pendingDelete, setPendingDelete] = useState<DocItem | null>(null);
   const documentInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -53,16 +59,17 @@ export default function DocumentsPage() {
 
   const openNew = () => {
     setEditing(null);
-    setDraft(emptyDoc(data.documents.filter((d) => d.category === CATEGORIES[0]).length + 1));
+    slot.openNew();
   };
   const openEdit = (d: DocItem) => {
     setEditing(d);
-    setDraft({ ...d });
+    slot.openEdit(d.id, { ...d });
   };
   const close = () => {
-    setDraft(null);
+    slot.close();
     setEditing(null);
   };
+  const resumeDraft = (id: string) => { setEditing(id === "new" ? null : data.documents.find((d) => d.id === id) ?? null); slot.resume(id); };
 
   const save = () => {
     if (!draft) return;
@@ -141,7 +148,7 @@ export default function DocumentsPage() {
         await removeCmsObject(stored.bucketName, stored.storagePath).catch(() => undefined);
         throw error;
       }
-      setEditing(next); setDraft(next); push("File uploaded and document record verified.");
+      setEditing(next); slot.openEdit(next.id, next); push("File uploaded and document record verified.");
     } catch (error) {
       if (stored) await removeCmsObject(stored.bucketName, stored.storagePath).catch(() => undefined);
       push(error instanceof Error ? error.message : "Upload failed.", "error");
@@ -161,6 +168,7 @@ export default function DocumentsPage() {
           </Button>
         }
       />
+      <DraftResume items={slot.pending.map((d) => ({ id: d.id, label: d.id === "new" ? "New document (not saved yet)" : `Document: ${data.documents.find((x) => x.id === d.id)?.name ?? d.id}` }))} onResume={resumeDraft} onDiscard={slot.dropPending} />
 
       <Card className="mb-5 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -307,6 +315,7 @@ export default function DocumentsPage() {
       >
         {draft ? (
           <div className="space-y-4">
+            <DraftStatus draft={slot} />
             <Field label="Document name" required>
               <TextInput value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </Field>

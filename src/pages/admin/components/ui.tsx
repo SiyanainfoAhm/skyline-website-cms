@@ -462,33 +462,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/* ------------------------------------------------------- Connection banner */
-
-export function PrototypeNotice() {
-  const [open, setOpen] = useState(true);
-  useEffect(() => {
-    setOpen(true);
-  }, []);
-  if (!open) return null;
-  return (
-    <div className="flex items-start gap-2.5 border-b border-primary-200 bg-primary-50 px-5 py-2.5 text-[13px] text-primary-900">
-      <i className="ri-database-2-line mt-0.5 text-base" aria-hidden="true" />
-      <span className="flex-1">
-        <strong className="font-semibold">Connected to your database.</strong> Content you edit here is saved to
-        Supabase and shown on the public website.
-      </span>
-      <button
-        type="button"
-        onClick={() => setOpen(false)}
-        aria-label="Dismiss"
-        className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-primary-700 hover:bg-primary-100"
-      >
-        <i className="ri-close-line text-sm" aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
-
 /* -------------------------------------------------------- Loading / Error */
 
 export function AdminLoading({ label = "Loading your content…" }: { label?: string }) {

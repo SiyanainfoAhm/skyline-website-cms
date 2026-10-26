@@ -31,6 +31,7 @@ import AdminAgenciesPage from "@/pages/agency/agencies/page";
 import AdminUsersPage from "@/pages/agency/users/page";
 import AllApplicationsPage from "@/pages/agency/all-applications/page";
 import AdminAuditLogPage from "@/pages/agency/audit-log/page";
+import RegistrationWorkbenchPage from "@/pages/agency/registrations/page";
 
 import AdminProviders from "@/pages/admin/components/AdminProviders";
 import AdminLayout from "@/pages/admin/components/AdminLayout";
@@ -50,6 +51,7 @@ import FormBuilderPage from "@/pages/admin/FormBuilderPage";
 import AdminContactPage from "@/pages/admin/ContactPage";
 import AdminSeoPage from "@/pages/admin/SeoPage";
 import UsersPage from "@/pages/admin/UsersPage";
+import InstitutionPage from "@/pages/admin/InstitutionPage";
 import ActivityPage from "@/pages/admin/ActivityPage";
 import KnowledgePage from "@/pages/admin/KnowledgePage";
 import DocumentIndexPage from "@/pages/admin/DocumentIndexPage";
@@ -104,6 +106,7 @@ const routes: RouteObject[] = [
           { path: "users", element: <AdminUsersPage /> },
           { path: "all-applications", element: <AllApplicationsPage /> },
           { path: "audit-log", element: <AdminAuditLogPage /> },
+          { path: "registrations", element: <RegistrationWorkbenchPage /> },
         ],
       },
     ],
@@ -130,6 +133,7 @@ const routes: RouteObject[] = [
           { path: "contact", element: <AdminContactPage /> },
           { path: "seo", element: <AdminSeoPage /> },
           { path: "users", element: <RequireAdmin><UsersPage /></RequireAdmin> },
+          { path: "institution", element: <RequireAdmin><InstitutionPage /></RequireAdmin> },
           { path: "activity", element: <ActivityPage /> },
           { path: "knowledge", element: <RequireAdmin><KnowledgePage /></RequireAdmin> },
           { path: "knowledge/documents", element: <RequireAdmin><DocumentIndexPage /></RequireAdmin> },

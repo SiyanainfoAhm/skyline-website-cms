@@ -1,6 +1,7 @@
 import { supabase } from "@/pages/admin/lib/supabase";
 import { resolveTenantSite, type TenantSite } from "@/lib/tenantSite";
 import type { SiteTheme } from "@/lib/tenantTheme";
+import { LOADER_STYLES, type LoaderStyle } from "@/config/cmsLimits";
 import { safeContentUrl } from "@/lib/contentUrl";
 import { indexCmsPages } from "@/lib/cmsPath";
 import {
@@ -55,6 +56,8 @@ export interface PublicSocialLink {
 }
 
 export interface PublicSettings {
+  /** The logo saved in Website Settings, or "" when none is set (logo itself falls back to the default image). */
+  logoConfigured: string;
   name: string;
   shortName: string;
   logo: string;
@@ -153,6 +156,8 @@ function orderCategories(categories: string[]): string[] {
 
 /* -------------------------------------------------------------- Mappings */
 
+const loaderStyleOf = (value: unknown): LoaderStyle => ((LOADER_STYLES as readonly unknown[]).includes(value) ? (value as LoaderStyle) : "ring");
+
 function buildSettings(rows: Row[], socialRows: Row[], tenant = false): PublicSettings {
   const row = rows[0] ?? {};
   const social = socialRows
@@ -177,7 +182,7 @@ function buildSettings(rows: Row[], socialRows: Row[], tenant = false): PublicSe
 
   if (tenant) {
     return {
-      name: str(row.name), shortName: str(row.short_name), logo: str(row.logo), favicon: str(row.favicon),
+      logoConfigured: str(row.logo), name: str(row.name), shortName: str(row.short_name), logo: str(row.logo), favicon: str(row.favicon),
       phone: str(row.phone), phoneHref: telHref(str(row.phone)), email: str(row.email), emailHref: `mailto:${str(row.email)}`,
       admissionsEmail: str(row.admissions_email), admissionsHref: `mailto:${str(row.admissions_email)}`,
       address: str(row.address), rto, cricos, legal: [rto && `RTO ${rto}`, cricos && `CRICOS ${cricos}`].filter(Boolean).join(" "),
@@ -187,6 +192,7 @@ function buildSettings(rows: Row[], socialRows: Row[], tenant = false): PublicSe
   }
 
   return {
+    logoConfigured: str(row.logo),
     name: str(row.name) || staticSite.name,
     shortName: str(row.short_name) || staticSite.shortName,
     logo: str(row.logo) || DEFAULT_LOGO,
@@ -506,7 +512,7 @@ export async function loadPublicSiteData(): Promise<PublicSiteData> {
     tenantSite: tenantSite ?? undefined,
     publicVersion,
     courseContent: Object.fromEntries(courseRows.map((row) => [str(row.slug), { description: str(row.full_description), sections: sectionRows.filter((section) => section.course_id === row.id).map((section) => ({ title: str(section.title), body: str(section.body) })) }])),
-    theme: tenantSite || settingsRows[0]?.theme_configured ? { primaryColor: str(settingsRows[0]?.primary_color), headingFont: str(settingsRows[0]?.heading_font), bodyFont: str(settingsRows[0]?.body_font) } : undefined,
+    theme: tenantSite || settingsRows[0]?.theme_configured ? { primaryColor: str(settingsRows[0]?.primary_color), accentColor: str(settingsRows[0]?.accent_color) || undefined, loaderStyle: loaderStyleOf(settingsRows[0]?.loader_style), headingFont: str(settingsRows[0]?.heading_font), bodyFont: str(settingsRows[0]?.body_font) } : undefined,
     seo: (snapshot?.cms_seo ?? []).map((s: Row) => ({ path: str(s.path), title: str(s.title), description: str(s.description), keywords: str(s.keywords) })),
     settings,
     navigation: buildNavigation(navRows, courseColumns),

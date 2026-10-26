@@ -57,6 +57,7 @@ function settingsRow(s: AdminSettings): Row {
     body_font: s.bodyFont ?? "Arial",
     theme_configured: s.themeConfigured ?? false,
     map_embed_src: s.mapEmbedSrc ?? "",
+    ...(s.accentColor !== undefined || s.loaderStyle !== undefined ? { accent_color: s.accentColor ? s.accentColor : null, loader_style: s.loaderStyle || "ring" } : {}),
   };
 }
 
@@ -483,6 +484,8 @@ export async function loadAdminData(): Promise<LoadResult> {
         headingFont: str(settingsRow.heading_font),
         bodyFont: str(settingsRow.body_font),
         themeConfigured: bool(settingsRow.theme_configured),
+        accentColor: settingsRow.accent_color ? str(settingsRow.accent_color) : undefined,
+        loaderStyle: settingsRow.loader_style ? str(settingsRow.loader_style) : undefined,
         mapEmbedSrc: str(settingsRow.map_embed_src),
         shortName: str(settingsRow.short_name),
         logo: str(settingsRow.logo),

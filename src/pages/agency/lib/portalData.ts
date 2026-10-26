@@ -221,6 +221,25 @@ export async function listNotifications(): Promise<NotificationRow[]> {
   });
 }
 
+export type NotificationEvent = "application_submitted" | "application_status_changed";
+
+/** Email preferences of the signed-in user; an event with no row is on by default. */
+export async function getEmailPreferences(): Promise<Record<NotificationEvent, boolean>> {
+  const { data, error } = await supabase.from("notification_preferences").select("event, email_enabled");
+  if (error) throw new Error(error.message);
+  const result: Record<NotificationEvent, boolean> = { application_submitted: true, application_status_changed: true };
+  for (const row of data ?? []) {
+    const r = row as { event: NotificationEvent; email_enabled: boolean };
+    if (r.event in result) result[r.event] = r.email_enabled;
+  }
+  return result;
+}
+
+export async function setEmailPreference(event: NotificationEvent, enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc("portal_set_notification_preference", { p_event: event, p_email_enabled: enabled });
+  if (error) throw new Error(error.message);
+}
+
 export async function markNotificationRead(id: string): Promise<void> {
   const { error } = await supabase.from("portal_notifications").update({ read: true }).eq("id", id);
   if (error) throw new Error(error.message);

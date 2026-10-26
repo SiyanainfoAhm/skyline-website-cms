@@ -1,4 +1,4 @@
-// P05-02 Azure adapter contract (REG-DOC / REG-JOBS). Deterministic mocks only:
+// P05-02 Azure adapter contract, P05-03 leased-job orchestration (REG-DOC / REG-JOBS) and P07-02 notification delivery (REG-NOTIFY). Deterministic mocks only:
 // the global fetch is replaced so any accidental network use fails, and the
 // adapter receives an injected fake Azure plus a fake clock/sleep.
 import assert from "node:assert/strict";
@@ -6,6 +6,9 @@ import test from "node:test";
 import { buildExtractionEnvelope, type ExtractionCategory, type ExtractionRequest, type ExtractionSuccess } from "../supabase/functions/_shared/document-extraction/contract.ts";
 import { createAzureProvider } from "../supabase/functions/_shared/document-extraction/azure.ts";
 import { createDocumentExtractionProvider } from "../supabase/functions/_shared/document-extraction/select.ts";
+import { MAX_ATTEMPTS, runLeasedExtraction, settleFailure, type JobPort } from "../supabase/functions/_shared/document-extraction/run.ts";
+import type { DocumentExtractionProvider } from "../supabase/functions/_shared/document-extraction/contract.ts";
+import { createMockEmailProvider, createPostmarkProvider, dispatchBatch, parseWebhook, selectEmailProvider, verifyBasicAuth, type ClaimedDelivery, type DeliveryPort, type EmailMessage, type SendOutcome, type WebhookEvent } from "../supabase/functions/_shared/notification/delivery.ts";
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (() => { throw new Error("Network is forbidden in Azure adapter tests"); }) as typeof fetch;
@@ -295,4 +298,313 @@ test("provider selection: default stays OpenAI, Azure needs its own complete val
     assert.deepEqual(result.unavailable?.variables, ["EF_DOCUMENT_EXTRACTION_PROVIDER"], value);
   }
   assert.ok(!JSON.stringify(badEndpoint).includes("example.com") && !JSON.stringify(missing).includes(KEY));
+});
+
+// ---- P05-03: leased-job orchestration against an in-memory queue that mirrors the SQL fences ----
+// Mirrors portal_claim/finish/fail/record: state + lease fencing, candidates fill only empty fields,
+// the operation receipt is dropped on every terminal state and kept across a retryable requeue.
+class FakeQueue {
+  state = "queued"; attempts = 0; lease: string | null = null; leaseLive = false;
+  operation: { engine: string; operationId: string } | null = null;
+  values: Record<string, string> = {};
+  activations = 0; lastError: string | null = null; responseId: string | null = null; envelopes: unknown[] = []; attemptsLog: string[] = [];
+  failReceipts = false;
+  claim() {
+    if (this.state === "processing" && this.leaseLive) return null;
+    if (this.state !== "queued" && this.state !== "processing") return null;
+    this.state = "processing"; this.attempts += 1; this.lease = `lease-${this.attempts}`; this.leaseLive = true;
+    return { lease: this.lease, attempt: this.attempts };
+  }
+  expireLease() { this.leaseLive = false; }
+  cancel() { this.state = "cancelled"; this.leaseLive = false; this.operation = null; }
+  private held(lease: string) { return this.state === "processing" && this.leaseLive && this.lease === lease; }
+  port(lease: string): JobPort {
+    return {
+      loadOperation: async () => this.operation,
+      recordOperation: async (engine, operationId) => {
+        if (this.failReceipts) throw new Error("db down");
+        if (!this.held(lease)) return false;
+        this.operation = operationId ? { engine, operationId } : null; return true;
+      },
+      finish: async (extraction, responseId) => {
+        if (!this.held(lease)) return false;
+        const env = extraction as { extracted: Record<string, string> };
+        for (const [key, value] of Object.entries(env.extracted)) if (!(key in this.values)) this.values[key] = value;
+        this.activations += 1; this.state = "succeeded"; this.operation = null; this.responseId = responseId; this.envelopes.push(extraction); this.attemptsLog.push("succeeded");
+        return true;
+      },
+      fail: async (code, _message, retry) => {
+        if (!this.held(lease)) return false;
+        this.lastError = code; this.attemptsLog.push("failed:" + code);
+        this.state = retry && this.attempts < MAX_ATTEMPTS ? "queued" : "failed";
+        this.leaseLive = false; if (this.state === "failed") this.operation = null;
+        return true;
+      },
+    };
+  }
+}
+// One worker pass, exactly as the Edge function drives it.
+async function work(queue: FakeQueue, provider: DocumentExtractionProvider, category: ExtractionCategory = "Passport") {
+  const claimed = queue.claim(); if (!claimed) return null;
+  const port = queue.port(claimed.lease);
+  const result = await runLeasedExtraction(provider, req(category, { attempt: claimed.attempt }), port);
+  if (result.kind === "failure") await settleFailure(port, claimed.attempt, result.code, result.message, result.retryable);
+  return result;
+}
+const posts = (calls: Call[]) => calls.filter((c) => c.method === "POST").length;
+const failedOp = (code = "InternalServerError") => json({ status: "failed", error: { code, message: "x" } });
+
+test("jobs: 429 on submission requeues with no receipt; the next attempt succeeds and activates once", async () => {
+  const q = new FakeQueue();
+  const { provider, calls } = harness([json({}, 429), accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await work(q, provider))?.kind, "failure");
+  assert.deepEqual([q.state, q.lastError, q.operation], ["queued", "rate_limit", null]);
+  assert.equal((await work(q, provider))?.kind, "processed");
+  assert.deepEqual([q.state, q.activations, posts(calls), q.operation, q.responseId], ["succeeded", 1, 2, null, RESULT]);
+});
+
+test("jobs: a timeout while polling keeps the receipt and the retry polls it without resubmitting", async () => {
+  const q = new FakeQueue();
+  const first = harness([accepted(), running()], { maxPolls: 1 });
+  assert.equal((await work(q, first.provider))?.kind, "failure");
+  assert.deepEqual([q.state, q.lastError, q.operation], ["queued", "timeout", { engine: "azure-document-intelligence", operationId: RESULT }]);
+  const second = harness([() => succeeded([passportDoc()])]);
+  assert.equal((await work(q, second.provider))?.kind, "processed");
+  assert.deepEqual(second.calls.map((c) => c.method), ["GET"]);
+  assert.deepEqual([q.state, q.activations, q.operation], ["succeeded", 1, null]);
+});
+
+test("jobs: invalid JSON from the provider clears the receipt, retries and resubmits once", async () => {
+  const q = new FakeQueue();
+  const first = harness([accepted(), new Response("not json", { status: 200 })]);
+  assert.equal((await work(q, first.provider))?.kind, "failure");
+  assert.deepEqual([q.state, q.lastError, q.operation], ["queued", "schema", null]);
+  const second = harness([accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await work(q, second.provider))?.kind, "processed");
+  assert.equal(posts(second.calls), 1);
+});
+
+test("jobs: a failed provider operation is not polled again; a permanent rejection dead-letters at once", async () => {
+  const q = new FakeQueue();
+  assert.equal((await work(q, harness([accepted(), failedOp()]).provider))?.kind, "failure");
+  assert.deepEqual([q.state, q.operation], ["queued", null]);
+  const retry = harness([accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await work(q, retry.provider))?.kind, "processed");
+  assert.equal(posts(retry.calls), 1);
+  const permanent = new FakeQueue();
+  assert.equal((await work(permanent, harness([accepted(), failedOp("InvalidContent")]).provider))?.kind, "failure");
+  assert.deepEqual([permanent.state, permanent.lastError, permanent.operation, permanent.activations], ["failed", "validation", null, 0]);
+});
+
+test("jobs: category mismatch is recorded but never populates a value or overwrites a manual one", async () => {
+  const q = new FakeQueue(); q.values = { first_name: "Manual" };
+  const { provider } = harness([accepted(), () => succeeded([passportDoc("idDocument.driverLicense")])]);
+  assert.equal((await work(q, provider, "Passport"))?.kind, "processed");
+  const envelope = q.envelopes[0] as { extracted: object; source: { categoryMismatch: boolean } };
+  assert.deepEqual([envelope.source.categoryMismatch, envelope.extracted, q.values], [true, {}, { first_name: "Manual" }]);
+});
+
+test("jobs: missing Azure configuration claims nothing and leaves the job queued for manual entry", () => {
+  const q = new FakeQueue();
+  const selection = createDocumentExtractionProvider({ EF_DOCUMENT_EXTRACTION_PROVIDER: "azure" });
+  assert.equal(selection.provider, null);
+  assert.deepEqual([selection.unavailable?.code, selection.unavailable?.variables], ["configuration_unavailable", ["EF_AZURE_DOCUMENT_ENDPOINT", "EF_AZURE_DOCUMENT_API_KEY", "EF_AZURE_DOCUMENT_MODEL"]]);
+  assert.deepEqual([q.state, q.attempts, q.activations], ["queued", 0, 0]);
+});
+
+test("jobs: dead-letter after the retry limit, with no receipt and no activation", async () => {
+  const q = new FakeQueue();
+  const { provider } = harness([json({}, 429)]);
+  for (let i = 0; i < MAX_ATTEMPTS; i++) assert.equal((await work(q, provider))?.kind, "failure");
+  assert.deepEqual([q.state, q.attempts, q.lastError, q.operation, q.activations], ["failed", MAX_ATTEMPTS, "rate_limit", null, 0]);
+  assert.equal(await work(q, provider), null, "a dead-lettered job is never claimed again");
+});
+
+test("jobs: duplicate delivery and lease takeover activate exactly once; the stale worker is fenced out", async () => {
+  const q = new FakeQueue();
+  const stale = q.claim()!;
+  assert.equal(q.claim(), null, "a live lease blocks a duplicate delivery");
+  q.expireLease();
+  const fresh = q.claim()!;
+  const { provider } = harness([accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await runLeasedExtraction(provider, req("Passport"), q.port(stale.lease))).kind, "stale");
+  assert.deepEqual([q.activations, q.state, q.operation], [0, "processing", null], "the stale worker must not record a receipt either");
+  assert.equal((await runLeasedExtraction(harness([accepted(), () => succeeded([passportDoc()])]).provider, req("Passport"), q.port(fresh.lease))).kind, "processed");
+  assert.equal(q.activations, 1);
+});
+
+test("jobs: a job cancelled mid-flight writes nothing and keeps no receipt", async () => {
+  const q = new FakeQueue();
+  const claimed = q.claim()!;
+  const { provider } = harness([accepted(), () => { q.cancel(); return running(); }, () => succeeded([passportDoc()])]);
+  const result = await runLeasedExtraction(provider, req("Passport"), q.port(claimed.lease));
+  assert.equal(result.kind, "stale");
+  assert.deepEqual([q.state, q.activations, q.operation, q.values], ["cancelled", 0, null, {}]);
+});
+
+test("jobs: a crash after acceptance but before the receipt persisted costs one repeat submission, never a duplicate activation", async () => {
+  const q = new FakeQueue(); q.failReceipts = true;
+  const first = harness([accepted(), running()], { maxPolls: 1 });
+  assert.equal((await work(q, first.provider))?.kind, "failure");
+  assert.equal(q.operation, null);
+  q.failReceipts = false;
+  const second = harness([accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await work(q, second.provider))?.kind, "processed");
+  assert.deepEqual([posts(first.calls) + posts(second.calls), q.activations, q.state], [2, 1, "succeeded"]);
+});
+
+test("jobs: a provider switch ignores the other provider's receipt in both directions and never overwrites a manual value", async () => {
+  const q = new FakeQueue(); q.values = { first_name: "Manual" }; q.operation = { engine: "openai", operationId: "resp_foreign" };
+  const azure = harness([accepted(), () => succeeded([passportDoc()])]);
+  assert.equal((await work(q, azure.provider))?.kind, "processed");
+  assert.equal(posts(azure.calls), 1, "an OpenAI receipt is never polled on Azure");
+  assert.ok(azure.calls.every((c) => !c.url.includes("resp_foreign")));
+  assert.deepEqual([q.values.first_name, q.values.last_name, q.activations], ["Manual", "Testperson", 1]);
+
+  const back = new FakeQueue(); back.operation = { engine: "azure-document-intelligence", operationId: RESULT };
+  let seen: ExtractionRequest | null = null;
+  const other: DocumentExtractionProvider = { id: "openai", model: "m", extract: async (request) => { seen = request; return { ok: false, code: "provider", message: "x", retryable: true }; } };
+  await work(back, other);
+  assert.equal((seen as ExtractionRequest | null)?.resumeOperationId, undefined);
+  assert.equal(back.operation, null, "a failure on the new provider drops the receipt rather than leaving it dangling");
+});
+
+test("jobs: Azure outcomes persist the same envelope shape, response id and history as the OpenAI path", async () => {
+  const q = new FakeQueue();
+  assert.equal((await work(q, harness([accepted(), () => succeeded([passportDoc()])]).provider))?.kind, "processed");
+  const env = q.envelopes[0] as { extracted: object; confirmed: object; status: string; source: Record<string, unknown> };
+  assert.deepEqual(Object.keys(env).sort(), ["confirmed", "extracted", "source", "status"]);
+  for (const key of ["engine", "parser", "model", "extractedAt", "documentType", "categoryMismatch", "rawFields", "evidence"]) assert.ok(key in env.source, key);
+  assert.deepEqual([env.confirmed, env.status, q.responseId, q.attemptsLog], [{}, "unreviewed", RESULT, ["succeeded"]]);
+});
+
+// ---- P07-02: notification delivery (mock-only; the Postmark adapter receives an injected fake fetch) ----
+const PM_TOKEN = "synthetic-postmark-token-0001";
+const pmMessage: EmailMessage = { deliveryId: "d-1", from: { name: 'Skyline "Admissions"', email: "admissions@example.test" }, to: "agent@example.test", subject: "Application 42000000 is now under review", textBody: "Plain text only." };
+type PmCall = { url: string; method: string; headers: Record<string, string>; body: Record<string, unknown> };
+function pmHarness(respond: (call: PmCall) => Response | Error) {
+  const calls: PmCall[] = [];
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const call: PmCall = { url: String(url), method: init?.method ?? "GET", headers: Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>)), body: JSON.parse(String(init?.body ?? "{}")) };
+    calls.push(call);
+    const result = respond(call);
+    if (result instanceof Error) throw result;
+    return result;
+  }) as typeof fetch;
+  return { provider: createPostmarkProvider({ serverToken: PM_TOKEN, fetch: fetchImpl }), calls };
+}
+const pmOk = () => new Response(JSON.stringify({ ErrorCode: 0, Message: "OK", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d", To: "agent@example.test" }), { status: 200 });
+
+test("notify: Postmark request is a plain-text transactional send with the server token and no tracking", async () => {
+  const { provider, calls } = pmHarness(pmOk);
+  const outcome = await provider.send(pmMessage);
+  assert.deepEqual(outcome, { kind: "accepted", messageId: "0a129aee-e1cd-480d-b08d-4f48548ff48d" });
+  const call = calls[0];
+  assert.equal(call.url, "https://api.postmarkapp.com/email");
+  assert.equal(call.method, "POST");
+  assert.equal(call.headers["X-Postmark-Server-Token"], PM_TOKEN);
+  assert.equal(call.headers["Content-Type"], "application/json");
+  assert.equal(call.body.From, '"Skyline Admissions" <admissions@example.test>', "quotes in the display name are removed");
+  assert.deepEqual([call.body.To, call.body.TextBody, call.body.HtmlBody, call.body.MessageStream, call.body.TrackOpens, call.body.TrackLinks], ["agent@example.test", "Plain text only.", undefined, "outbound", false, "None"]);
+  assert.deepEqual(call.body.Metadata, { deliveryId: "d-1" });
+});
+
+test("notify: only a definitive refusal is retryable; an ambiguous outcome is never retried", async () => {
+  const expectOutcome = async (respond: (call: PmCall) => Response | Error, expected: SendOutcome) => assert.deepEqual(await pmHarness(respond).provider.send(pmMessage), expected);
+  await expectOutcome(() => new Response("{}", { status: 429 }), { kind: "retry", code: "rate_limit" });
+  await expectOutcome(() => new Response("{}", { status: 503 }), { kind: "retry", code: "provider" });
+  await expectOutcome(() => Object.assign(new Error("slow"), { name: "TimeoutError" }), { kind: "unknown", code: "timeout" });
+  await expectOutcome(() => new Error("socket closed"), { kind: "unknown", code: "network" });
+  await expectOutcome(() => new Response("not json", { status: 200 }), { kind: "unknown", code: "schema" });
+  await expectOutcome(() => new Response(JSON.stringify({ ErrorCode: 0 }), { status: 200 }), { kind: "unknown", code: "schema" });
+  await expectOutcome(() => new Response(JSON.stringify({ ErrorCode: 406, Message: "inactive" }), { status: 422 }), { kind: "failed", code: "inactive_recipient" });
+  await expectOutcome(() => new Response(JSON.stringify({ ErrorCode: 300 }), { status: 422 }), { kind: "failed", code: "invalid_recipient" });
+  await expectOutcome(() => new Response(JSON.stringify({ ErrorCode: 10 }), { status: 401 }), { kind: "failed", code: "unauthorized" });
+  await expectOutcome(() => new Response(JSON.stringify({ ErrorCode: 701 }), { status: 422 }), { kind: "failed", code: "rejected" });
+});
+
+test("notify: outcomes never carry the token, the address or provider text", async () => {
+  for (const respond of [() => new Response(JSON.stringify({ ErrorCode: 406, Message: "agent@example.test is inactive" }), { status: 422 }), () => new Error(`failed for ${PM_TOKEN}`)]) {
+    const text = JSON.stringify(await pmHarness(respond).provider.send(pmMessage));
+    assert.ok(!text.includes(PM_TOKEN) && !text.includes("agent@example.test") && !text.includes("is inactive"), text);
+  }
+});
+
+test("notify: sending is off unless explicitly enabled and fully configured", () => {
+  assert.deepEqual(selectEmailProvider({}).unavailable?.variables, ["EF_NOTIFICATION_EMAIL_ENABLED", "EF_POSTMARK_SERVER_TOKEN"]);
+  for (const value of ["", "TRUE", "1", "yes", "true "]) {
+    const result = selectEmailProvider({ EF_NOTIFICATION_EMAIL_ENABLED: value, EF_POSTMARK_SERVER_TOKEN: PM_TOKEN });
+    assert.equal(result.provider === null, value.trim() !== "true", JSON.stringify(value));
+  }
+  assert.deepEqual(selectEmailProvider({ EF_NOTIFICATION_EMAIL_ENABLED: "true" }).unavailable?.variables, ["EF_POSTMARK_SERVER_TOKEN"]);
+  assert.equal(selectEmailProvider({ EF_NOTIFICATION_EMAIL_ENABLED: "true", EF_POSTMARK_SERVER_TOKEN: PM_TOKEN }).provider?.id, "postmark");
+  assert.ok(!JSON.stringify(selectEmailProvider({ EF_POSTMARK_SERVER_TOKEN: PM_TOKEN })).includes(PM_TOKEN));
+});
+
+function fakePort(deliveries: ClaimedDelivery[]) {
+  const queue = [...deliveries]; const recorded: { id: string; outcome: string; messageId: string | null; code: string | null; retry: boolean; delay: number }[] = [];
+  let staleIds = new Set<string>();
+  const port: DeliveryPort = {
+    claim: async () => queue.shift() ?? null,
+    record: async (d, outcome, messageId, code, retry, delay) => { if (staleIds.has(d.id)) return false; recorded.push({ id: d.id, outcome, messageId, code, retry, delay }); return true; },
+  };
+  return { port, recorded, stale: (id: string) => { staleIds = new Set([...staleIds, id]); } };
+}
+const claimed = (id: string, attempt = 1, sender: ClaimedDelivery["sender"] = { name: "Skyline", email: "admissions@example.test" }): ClaimedDelivery => ({ id, leaseToken: `lease-${id}`, recipientEmail: "agent@example.test", subject: "s", body: "b", sender, attempt });
+
+test("notify: the dispatcher records each outcome kind exactly as the lifecycle expects", async () => {
+  const { port, recorded } = fakePort([claimed("a"), claimed("b"), claimed("c", 3), claimed("d"), claimed("e")]);
+  const provider = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }, { kind: "retry", code: "rate_limit" }, { kind: "retry", code: "rate_limit" }, { kind: "unknown", code: "timeout" }, { kind: "failed", code: "inactive_recipient" }]);
+  const summary = await dispatchBatch(port, provider, null, 10);
+  assert.deepEqual(summary, { accepted: 1, retried: 1, failed: 2, unknown: 1, stale: 0 });
+  assert.deepEqual(recorded.map((r) => `${r.id}:${r.outcome}:${r.retry}`), ["a:accepted:false", "b:failed:true", "c:failed:true", "d:unknown:false", "e:failed:false"]);
+  assert.equal(recorded[1].delay, 60);
+  assert.equal(recorded[3].code, "timeout");
+});
+
+test("notify: the dispatcher is bounded, uses the fallback sender and never calls the provider without one", async () => {
+  const bounded = fakePort([claimed("a"), claimed("b"), claimed("c")]);
+  const mock = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]);
+  assert.equal((await dispatchBatch(bounded.port, mock, null, 2)).accepted, 2);
+  const fallback = fakePort([claimed("f", 1, null)]);
+  const used = createMockEmailProvider([{ kind: "accepted", messageId: "pm-7654321" }]);
+  await dispatchBatch(fallback.port, used, { name: "Skyline", email: "platform@example.test" }, 5);
+  assert.equal(used.sent[0].from.email, "platform@example.test");
+  const none = fakePort([claimed("g", 1, null)]);
+  const unused = createMockEmailProvider([{ kind: "accepted", messageId: "pm-0000000" }]);
+  const summary = await dispatchBatch(none.port, unused, null, 5);
+  assert.deepEqual([unused.sent.length, summary.failed, none.recorded[0].code], [0, 1, "sender_unconfigured"]);
+});
+
+test("notify: a delivery whose lease was lost is counted stale and not reported as sent", async () => {
+  const { port, stale } = fakePort([claimed("a")]); stale("a");
+  const summary = await dispatchBatch(port, createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]), null, 5);
+  assert.deepEqual([summary.accepted, summary.stale], [0, 1]);
+});
+
+const basic = (user: string, password: string) => `Basic ${btoa(`${user}:${password}`)}`;
+
+test("notify: webhook callers must present the configured Basic credentials", async () => {
+  assert.equal(await verifyBasicAuth(basic("hook", "s3cret-pass"), "hook", "s3cret-pass"), true);
+  for (const header of [null, "", "Basic", "Bearer abc", basic("hook", "wrong"), basic("other", "s3cret-pass"), basic("hook", "s3cret-pass-"), "Basic !!!notbase64", `Basic ${btoa("hook:s3cret-pass")} extra`]) {
+    assert.equal(await verifyBasicAuth(header, "hook", "s3cret-pass"), false, String(header));
+  }
+  assert.equal(await verifyBasicAuth(basic("", ""), "", ""), false, "unset credentials never authenticate");
+  assert.equal(await verifyBasicAuth(basic("hook", "pässword"), "hook", "pässword"), false, "non-Latin-1 input is rejected rather than crashing the check");
+});
+
+test("notify: webhook payloads are validated, deduplicated by a stable key and stripped of recipient data", () => {
+  const delivery = parseWebhook({ RecordType: "Delivery", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d", Recipient: "agent@example.test", DeliveredAt: "2026-10-26T01:00:00Z" });
+  assert.deepEqual(delivery, { recordType: "Delivery", messageId: "0a129aee-e1cd-480d-b08d-4f48548ff48d", eventKey: "Delivery:0a129aee-e1cd-480d-b08d-4f48548ff48d:", detail: {} });
+  const bounce = parseWebhook({ RecordType: "Bounce", ID: 692560173, Type: "HardBounce", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d", Email: "agent@example.test", Description: "x".repeat(900) });
+  assert.ok(bounce && bounce !== "ignored");
+  assert.equal(bounce.eventKey, "Bounce:0a129aee-e1cd-480d-b08d-4f48548ff48d:692560173");
+  assert.equal(bounce.detail.type, "HardBounce");
+  assert.equal(bounce.detail.description?.length, 300);
+  assert.ok(!JSON.stringify(bounce).includes("agent@example.test"));
+  assert.equal((parseWebhook({ RecordType: "SpamComplaint", ID: 1, MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d" }) as WebhookEvent).recordType, "SpamComplaint");
+  assert.equal(parseWebhook({ RecordType: "Open", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d" }), "ignored");
+  for (const bad of [null, [], "x", {}, { RecordType: 5 }, { RecordType: "Delivery" }, { RecordType: "Delivery", MessageID: "short" }, { RecordType: "Delivery", MessageID: "bad id with spaces ../" }]) assert.equal(parseWebhook(bad), null, JSON.stringify(bad));
+  const replay = parseWebhook({ RecordType: "Delivery", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d" }) as WebhookEvent;
+  assert.equal(replay.eventKey, delivery && delivery !== "ignored" ? delivery.eventKey : "", "a replay produces the same key");
 });

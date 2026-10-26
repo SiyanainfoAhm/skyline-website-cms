@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import DraftStatus from "@/pages/admin/components/DraftStatus";
+import { useDraft } from "@/pages/admin/lib/useDraft";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { useAuth } from "@/pages/admin/lib/authContext";
@@ -136,10 +138,12 @@ export default function FormBuilderPage() {
   const { push } = useToast();
 
   const original = useMemo(() => data.forms.find((f) => f.id === id), [data.forms, id]);
-  const [draft, setDraft] = useState<AdminForm | null>(original ?? null);
+  const draftApi = useDraft<AdminForm | null>("form", id ?? "new", original ?? null);
+  const draft = draftApi.value;
+  const setDraft = draftApi.setValue;
   const [tab, setTab] = useState("fields");
   const [activeField, setActiveField] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const dirty = draftApi.dirty;
 
   if (!original || !draft) {
     return (
@@ -156,7 +160,6 @@ export default function FormBuilderPage() {
 
   const set = <K extends keyof AdminForm>(key: K, value: AdminForm[K]) => {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
-    setDirty(true);
   };
 
   const setField = (fid: string, patch: Partial<AdminFormField>) => {
@@ -208,8 +211,7 @@ export default function FormBuilderPage() {
       snapshot: next,
     });
     logActivity(publish === undefined ? "Updated" : publish ? "Published" : "Saved draft", next.name, "Forms");
-    setDraft(next);
-    setDirty(false);
+    draftApi.markSaved(next);
     push(publish === undefined ? "Form saved" : publish ? "Form published" : "Draft saved");
     } catch (e) { push(e instanceof Error ? e.message : "Form save failed", "error"); }
   };
@@ -227,7 +229,7 @@ export default function FormBuilderPage() {
           <h1 className="font-heading text-xl font-bold text-foreground-950">{draft.name}</h1>
           <div className="mt-1.5 flex items-center gap-2">
             <StatusBadge status={draft.status} />
-            {dirty ? <span className="text-xs font-medium text-primary-600">Unsaved changes</span> : null}
+            <DraftStatus draft={draftApi} />
           </div>
         </div>
         <WorkflowActions
@@ -239,7 +241,6 @@ export default function FormBuilderPage() {
           onPublish={() => save(true)}
           onRestore={(snap) => {
             setDraft(snap as AdminForm);
-            setDirty(false);
           }}
         />
       </div>

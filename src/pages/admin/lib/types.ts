@@ -219,6 +219,10 @@ export interface AdminSettings {
   headingFont?: string;
   bodyFont?: string;
   themeConfigured?: boolean;
+  /** Optional secondary colour (cms_settings.accent_color); empty keeps the neutral default accent. */
+  accentColor?: string;
+  /** Loader animation: ring, bar or dots (cms_settings.loader_style). */
+  loaderStyle?: string;
   mapEmbedSrc?: string;
   name: string;
   shortName: string;

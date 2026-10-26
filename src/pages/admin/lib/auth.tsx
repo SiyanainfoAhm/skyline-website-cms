@@ -32,6 +32,8 @@ async function resolveSessionUser(authUserId: string | undefined, email: string 
   if (requestWebsiteDomain()) {
     try {
       await resolveTenantSite();
+      // Claim any pending invitation for this institution (needs a confirmed email); a failure must not block sign-in.
+      try { await supabase.rpc("tenant_accept_pending_invites"); } catch { /* the invitation stays pending */ }
       const { data, error } = await supabase.rpc("tenant_cms_identity");
       return error || !data ? null : data as SessionUser;
     } catch { return null; }

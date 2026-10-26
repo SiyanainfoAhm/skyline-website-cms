@@ -1,6 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { Button, Card, Field, MediaUrlInput, PageHeader, Select, TextInput, Toggle } from "@/pages/admin/components/ui";
+import ThemeSection from "@/pages/admin/components/ThemeSection";
+import DraftStatus from "@/pages/admin/components/DraftStatus";
+import { useDraft } from "@/pages/admin/lib/useDraft";
 import { useToast } from "@/pages/admin/components/toastContext";
 import type { AdminSettings } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
@@ -11,20 +14,15 @@ import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 export default function SettingsPage() {
   const { data, saveNow, logActivity, recordRevision } = useAdminData();
   const { push } = useToast();
-  const [draft, setDraft] = useState<AdminSettings>(data.settings);
+  const draftApi = useDraft<AdminSettings>("settings", "settings", data.settings);
+  const draft = draftApi.value;
+  const setDraft = draftApi.setValue;
   const [saving, setSaving] = useState(false);
   const { verifyAndChangePassword } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
-
-  // Re-sync the local draft whenever the store's settings identity changes
-  // (e.g. the async CMS load lands). Without this the form could edit a stale
-  // seed and then overwrite the database with it.
-  useEffect(() => {
-    setDraft(data.settings);
-  }, [data.settings]);
 
   const set = <K extends keyof AdminSettings>(key: K, value: AdminSettings[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -77,6 +75,7 @@ export default function SettingsPage() {
       // Awaits the actual Supabase write — the form is only reported as saved
       // when the database really accepted the change.
       await saveNow((d) => ({ ...d, settings: draft }));
+      draftApi.markSaved();
       recordRevision({ entity: "settings", entityId: "settings", title: "Website Settings", action: "Saved draft", status: "Draft", snapshot: draft });
       logActivity("Updated", "Website settings", "Settings");
       push("Website settings saved");
@@ -110,7 +109,8 @@ export default function SettingsPage() {
         description="The site identity used across header, footer, SEO and structured data. Set once — every page updates."
         breadcrumb="Global"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <DraftStatus draft={draftApi} />
             <HistoryButton entity="settings" entityId="settings" title="Website Settings" onRestore={(snap) => setDraft(snap as AdminSettings)} />
             <Button icon="ri-save-line" onClick={save} disabled={saving}>
               {saving ? "Saving…" : "Save changes"}
@@ -120,15 +120,7 @@ export default function SettingsPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <Card className="p-5">
-          <h2 className="mb-4 font-heading text-base font-semibold">Website theme</h2>
-          <Field label="Primary color"><TextInput type="color" value={draft.primaryColor ?? "#2563eb"} onChange={(e) => setDraft((d) => ({ ...d, primaryColor: e.target.value, themeConfigured: true }))} /></Field>
-          {(["headingFont", "bodyFont"] as const).map((key) => <Field key={key} label={key === "headingFont" ? "Heading font" : "Body font"}>
-            <Select aria-label={key === "headingFont" ? "Heading font" : "Body font"} value={draft[key] ?? "Arial"} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value, themeConfigured: true }))}>
-              {["Arial", "Georgia", "Verdana", "system-ui"].map((font) => <option key={font}>{font}</option>)}
-            </Select>
-          </Field>)}
-        </Card>
+        <ThemeSection value={draft} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
         <Card className="p-5">
           <h2 className="mb-1 font-heading text-base font-semibold text-foreground-950">Change password</h2>
           <p className="mb-4 text-sm text-foreground-500">Confirm your current password before choosing a new one.</p>

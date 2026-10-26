@@ -4,6 +4,10 @@ import { buildSeed } from "@/pages/admin/lib/seed";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { loadAdminData, persistAdminData, emptyAdminData } from "@/pages/admin/lib/db";
 import { useAuth } from "@/pages/admin/lib/authContext";
+import { cacheBrand } from "@/lib/brandCache";
+import { resolvedBrandColours } from "@/lib/tenantTheme";
+import { siteThemeFromSettings } from "@/pages/admin/lib/previewTheme";
+import { validateFooterLinks, validateNavigation, type LoaderStyle } from "@/config/cmsLimits";
 import type {
   ActivityItem,
   AdminCourse,
@@ -20,6 +24,16 @@ import type {
   RevisionEntity,
   SeoEntry,
 } from "@/pages/admin/lib/types";
+
+const brandFields = (settings: AdminData["settings"]) => JSON.stringify([settings.name, settings.shortName, settings.logo, settings.primaryColor, settings.accentColor, settings.loaderStyle, settings.themeConfigured]);
+
+/** Layout limits are enforced here as well as in the editors, so no path (stale tab, restored revision) can save a design-breaking menu or footer. */
+function layoutProblems(previous: AdminData, next: AdminData): string[] {
+  const problems: string[] = [];
+  if (JSON.stringify(previous.navigation) !== JSON.stringify(next.navigation)) problems.push(...validateNavigation(next.navigation));
+  if (JSON.stringify(previous.footer) !== JSON.stringify(next.footer)) problems.push(...validateFooterLinks([{ title: "Quick links", links: next.footer.quickLinks }, { title: "Student links", links: next.footer.studentLinks }]));
+  return problems;
+}
 
 function now() {
   return new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -41,13 +55,21 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       if (saveFailed.current) throw new Error("Reload the CMS to resolve the previous save failure.");
       const previous = syncedRef.current;
       if (!previous) throw new Error("CMS data has not finished loading.");
+      const problems = layoutProblems(previous, snapshot);
+      if (problems.length) throw new Error(problems[0]);
       try {
         await persistAdminData(previous, snapshot);
         syncedRef.current = snapshot;
+        // Keep the loader and the pre-React boot screen in step with the saved branding (not only on the first public load).
+        if (brandFields(previous.settings) !== brandFields(snapshot.settings)) {
+          const colours = resolvedBrandColours(siteThemeFromSettings(snapshot.settings));
+          cacheBrand({ name: snapshot.settings.shortName || snapshot.settings.name, logoUrl: snapshot.settings.logo, primary: colours.primary, accent: colours.accent, loaderStyle: (snapshot.settings.loaderStyle as LoaderStyle | undefined) ?? "ring" });
+        }
+        setError(null);
       } catch (e) {
+        // The form stays on screen (the editors keep their drafts); the layout shows a dismissible banner with a retry.
         saveFailed.current = true;
         setError(e instanceof Error ? e.message : "CMS save failed.");
-        setStatus("error");
         throw e;
       }
     });
@@ -62,7 +84,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async () => {
     await saveQueue.current.catch(() => {});
     saveFailed.current = false;
-    setStatus("loading");
+    // A refresh after the CMS is already showing must not unmount the open editor: only the first load shows the loading state.
+    if (!loadedRef.current) setStatus("loading");
     setError(null);
     try {
       const result = await loadAdminData();
@@ -89,9 +112,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   }, [load]);
 
   // Load once the user is authenticated. The CMS is data-driven from Supabase.
+  const userId = user?.id ?? null;
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
+    if (!userId) {
       loadedRef.current = false;
       syncedRef.current = null;
       // Do not leave a previous staff member's CMS payload resident after
@@ -101,7 +125,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     void load();
-  }, [user, authLoading, load]);
+  }, [userId, authLoading, load]); // keyed on the account, not the session object, so token refreshes do not refetch and clobber open editors
 
   // Persist changes back to Supabase (debounced), diffing against the last sync.
   useEffect(() => {

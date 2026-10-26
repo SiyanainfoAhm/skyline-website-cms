@@ -25,6 +25,7 @@ const SLIT_NAV: NavEntry[] = [
   { to: "/agency/agencies", label: "Agencies", icon: "ri-building-2-line" },
   { to: "/agency/users", label: "Users", icon: "ri-group-line" },
   { to: "/agency/all-applications", label: "All Applications", icon: "ri-file-list-3-line" },
+  { to: "/agency/registrations", label: "Registrations", icon: "ri-file-shield-2-line" },
   { to: "/agency/notifications", label: "Notifications", icon: "ri-notification-3-line" },
   { to: "/agency/audit-log", label: "Audit Log", icon: "ri-history-line" },
 ];
@@ -41,6 +42,7 @@ const CRUMB_LABELS: Record<string, string> = {
   users: "Users",
   "all-applications": "All Applications",
   "audit-log": "Audit Log",
+  registrations: "Registrations",
 };
 
 function buildCrumbs(pathname: string): { label: string; to?: string }[] {

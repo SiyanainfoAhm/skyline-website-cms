@@ -11,3 +11,8 @@ verify_jwt = false
 [functions.public-assistant-index]
 # Worker is authenticated with x-worker-secret, not a browser JWT.
 verify_jwt = false
+
+[functions.notification-delivery]
+# Server-to-server only. The worker route requires x-worker-secret (EF_NOTIFICATION_WORKER_SECRET); the /webhook route requires
+# HTTP Basic credentials (EF_POSTMARK_WEBHOOK_USER/PASSWORD). Both fail closed (401, or 503 when unconfigured). Postmark cannot send a JWT.
+verify_jwt = false

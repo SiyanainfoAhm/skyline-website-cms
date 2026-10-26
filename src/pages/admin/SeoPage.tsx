@@ -4,21 +4,29 @@ import { Button, Card, Field, Modal, PageHeader, TextArea, TextInput } from "@/p
 import { useToast } from "@/pages/admin/components/toastContext";
 import type { SeoEntry } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
+import DraftStatus from "@/pages/admin/components/DraftStatus";
+import DraftResume from "@/pages/admin/components/DraftResume";
+import { useSlotDraft } from "@/pages/admin/lib/useSlotDraft";
+
+const blankSeo = (): SeoEntry => ({ id: crypto.randomUUID(), page: "", path: "/", title: "", description: "", keywords: "" });
 
 export default function SeoPage() {
   const { data, saveNow, logActivity, recordRevision } = useAdminData();
   const { push } = useToast();
   const [editing, setEditing] = useState<SeoEntry | null>(null);
-  const [draft, setDraft] = useState<SeoEntry | null>(null);
+  const slot = useSlotDraft<SeoEntry>("seo", (id) => data.seo.find((e) => e.id === id) ?? null, blankSeo);
+  const draft = slot.draft;
+  const setDraft = slot.setDraft;
 
   const openEdit = (e: SeoEntry) => {
     setEditing(e);
-    setDraft({ ...e });
+    slot.openEdit(e.id, { ...e });
   };
   const close = () => {
-    setDraft(null);
+    slot.close();
     setEditing(null);
   };
+  const resumeDraft = (id: string) => { setEditing(id === "new" ? null : data.seo.find((e) => e.id === id) ?? null); slot.resume(id); };
 
   const save = async () => {
     if (!draft) return;
@@ -40,8 +48,9 @@ export default function SeoPage() {
         title="SEO / Page Settings"
         description="Search titles, descriptions and keywords for every public page."
         breadcrumb="Governance"
-        actions={<Button onClick={() => { setEditing(null); setDraft({ id: crypto.randomUUID(), page: "", path: "/", title: "", description: "", keywords: "" }); }}>Add page SEO</Button>}
+        actions={<Button onClick={() => { setEditing(null); slot.openNew(); }}>Add page SEO</Button>}
       />
+      <DraftResume items={slot.pending.map((d) => ({ id: d.id, label: d.id === "new" ? "New SEO entry (not saved yet)" : `SEO: ${data.seo.find((e) => e.id === d.id)?.page ?? d.id}` }))} onResume={resumeDraft} onDiscard={slot.dropPending} />
 
       <Card>
         <div className="overflow-x-auto">
@@ -110,6 +119,7 @@ export default function SeoPage() {
       >
         {draft ? (
           <div className="space-y-4">
+            <DraftStatus draft={slot} />
             <Field label="Page name">
               <TextInput value={draft.page} onChange={(e) => setDraft({ ...draft, page: e.target.value })} />
             </Field>

@@ -1,11 +1,11 @@
 // Phase 5 native extraction regression (REG-DOC / REG-JOBS) against a disposable
-// network:none lab. Usage: node scripts/lab/native-extraction.mjs --p04-complete <label>
+// network:none lab. Usage: node scripts/lab/native-extraction.mjs --p04-complete [--azure] [--notify] <label>
 // The lab profile flag is consumed by scripts/lab/native-lab.mjs. Requires the
 // native gateway (node scripts/lab/server.mjs --p04-complete) to be running.
 // Synthetic actors only; never reads .env or hosted credentials; writes its result
 // JSON to the OS temp dir (skyline-native-extraction), never into the repo.
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -104,9 +104,189 @@ await check('in-flight cancellation fences a late provider completion', async ()
   assert.equal((await sql(`select coalesce(metadata->'extraction'->'extracted'->>'first_name','') from enrollment_application_documents where id='${u.doc}';`)).trim(), '');
 });
 
+// Azure path through the real function and database. The fake Azure lives in native-edge-entry.ts; run with --azure.
+if (process.argv.includes('--azure')) {
+  const azureMode = (m) => writeFile('tmp/phase2-native/azure.json', JSON.stringify({ mode: m }));
+  const resetCalls = () => writeFile('tmp/phase2-native/azure-calls.log', '');
+  const calls = async () => (await readFile('tmp/phase2-native/azure-calls.log', 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  const count = async (prefix) => (await calls()).filter((l) => l.startsWith(prefix)).length;
+  const worker = (id) => edge('portal-document-extract-azure', { jobId: id, tenantId: f.tenant }, undefined, { 'x-worker-secret': 'native-worker-only' });
+  const operationOf = async (id) => (await sql(`select provider_engine||':'||operation_id from enrollment_document_extraction_operations where job_id='${id}';`)).trim();
+  const waitOperation = async (id) => { for (let i = 0; i < 80; i++) { const o = await operationOf(id); if (o) return o; await new Promise((r) => setTimeout(r, 250)); } throw Error('operation id was not stored'); };
+  const manualJob = async (category = 'Passport') => {
+    const u = await upload(category), id = randomUUID();
+    await sql(`insert into enrollment_document_extraction_jobs(id,document_id,application_id,tenant_id) values('${id}','${u.doc}','${f.app}','${f.tenant}');`);
+    return { u, id };
+  };
+
+  await check('Azure: enqueue, accepted + running + succeeded poll, candidates, provenance, receipt dropped, manual value protected', async () => {
+    await azureMode('success'); await resetCalls();
+    const u = await upload('Passport');
+    const queued = await edge('portal-document-extract-azure', { documentId: u.doc }, agent.token, headers);
+    assert.equal(queued.status, 200, JSON.stringify(queued));
+    await waitState(queued.data.jobId, 'succeeded');
+    const log = await calls();
+    assert.deepEqual([log[0], log.filter((l) => l.startsWith('GET')).length], ['POST', 2]);
+    const op = log.find((l) => l.startsWith('ACCEPTED')).split(' ')[1];
+    assert.equal((await sql(`select metadata->'extraction'->'extracted'->>'first_name' from enrollment_application_documents where id='${u.doc}';`)).trim(), 'Azure');
+    assert.equal((await sql(`select metadata->'extraction'->'source'->>'engine' from enrollment_application_documents where id='${u.doc}';`)).trim(), 'azure-document-intelligence');
+    assert.equal((await sql(`select provider_response_id from enrollment_document_extraction_jobs where id='${queued.data.jobId}';`)).trim(), op);
+    assert.equal(await operationOf(queued.data.jobId), '', 'receipt must be dropped on success');
+    assert.equal((await sql(`select data#>>'{values,first_name}' from enrollment_applications where id='${f.app}';`)).trim(), 'Manual protected');
+  });
+  await check('Azure: 429 queues a retry with no receipt; later success recovers', async () => {
+    const { id } = await manualJob();
+    await azureMode('rate_limit'); await resetCalls();
+    assert.equal((await worker(id)).data.processed, undefined);
+    assert.equal((await sql(`select state||':'||last_error_code from enrollment_document_extraction_jobs where id='${id}';`)).trim(), 'queued:rate_limit');
+    assert.equal(await operationOf(id), '');
+    await azureMode('success'); await sql(`update enrollment_document_extraction_jobs set next_attempt_at=now() where id='${id}';`);
+    assert.equal((await worker(id)).data.processed, true);
+    assert.equal(await stateOf(id), 'succeeded');
+  });
+  await check('Azure: a failed analysis clears the receipt so the retry resubmits instead of polling it', async () => {
+    const { id } = await manualJob();
+    await azureMode('failed'); await resetCalls();
+    await worker(id);
+    assert.equal((await sql(`select state||':'||last_error_code from enrollment_document_extraction_jobs where id='${id}';`)).trim(), 'queued:provider');
+    assert.equal(await operationOf(id), '');
+    await azureMode('success'); await sql(`update enrollment_document_extraction_jobs set next_attempt_at=now() where id='${id}';`);
+    assert.equal((await worker(id)).data.processed, true);
+    assert.equal(await count('POST'), 2);
+  });
+  await check('Azure: operation id stored on acceptance, reused by the worker that takes over after a crash, dropped on success; stale worker fenced', async () => {
+    const { u, id } = await manualJob();
+    await azureMode('hold'); await resetCalls();
+    const crashed = worker(id);
+    const stored = await waitOperation(id);
+    const op = (await calls()).find((l) => l.startsWith('ACCEPTED')).split(' ')[1];
+    assert.equal(stored, `azure-document-intelligence:${op}`);
+    await sql(`update enrollment_document_extraction_jobs set lease_expires_at=now()-interval '1 second' where id='${id}';`);
+    const takeover = worker(id);
+    for (let i = 0; i < 60 && (await sql(`select attempt_count from enrollment_document_extraction_jobs where id='${id}';`)).trim() !== '2'; i++) await new Promise((r) => setTimeout(r, 250));
+    await azureMode('success');
+    const [late, taken] = await Promise.all([crashed, takeover]);
+    assert.equal(taken.data.processed, true, JSON.stringify(taken));
+    assert.equal(late.data.stale, true, JSON.stringify(late));
+    assert.equal(await count('POST'), 1, 'the document must not be submitted a second time');
+    assert.equal(await stateOf(id), 'succeeded');
+    assert.equal(await operationOf(id), '');
+    assert.equal((await sql(`select count(*) from enrollment_document_extraction_attempts where job_id='${id}' and state='succeeded';`)).trim(), '1');
+    assert.equal((await sql(`select metadata->'extraction'->'extracted'->>'last_name' from enrollment_application_documents where id='${u.doc}';`)).trim(), 'Fixture');
+  });
+  await azureMode('success');
+}
+
+// Notification delivery through the real function and database (fake Postmark in native-edge-entry.ts); run with --notify.
+if (process.argv.includes('--notify')) {
+  const pmMode = (m) => writeFile('tmp/phase2-native/postmark.json', JSON.stringify({ mode: m }));
+  const resetPm = () => writeFile('tmp/phase2-native/postmark-calls.log', '');
+  const pmCalls = async () => (await readFile('tmp/phase2-native/postmark-calls.log', 'utf8').catch(() => '')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const run = (fn, secret = 'native-notify-worker') => edge(fn, {}, undefined, { 'x-worker-secret': secret });
+  const hook = (body, auth = 'Basic ' + Buffer.from('hook:native-hook-pass').toString('base64')) => fetch('http://127.0.0.1:55431/functions/v1/notification-delivery/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => ({})) }));
+  const field = async (id, column) => (await sql(`select coalesce(${column}::text,'') from notification_deliveries where id='${id}';`)).trim();
+  // Each call creates one real outbox event for the synthetic application; the database trigger creates the delivery for its assigned agent.
+  const newDelivery = async () => {
+    await sql(`update notification_deliveries set state='suppressed',state_reason='lab isolation' where state in ('pending','sending');`);
+    await sql(`insert into admission_event_outbox(application_id,tenant_id,event,payload) values('${f.app}','${f.tenant}','application_submitted','{}');`);
+    const id = (await sql(`select id from notification_deliveries where application_id='${f.app}' and state='pending' order by seq desc limit 1;`)).trim();
+    assert.ok(id, 'delivery was not created by the outbox trigger');
+    return id;
+  };
+
+  await check('Notify: an institution that has not been approved gets suppressed deliveries and sends nothing', async () => {
+    await pmMode('success'); await resetPm();
+    await sql(`insert into admission_event_outbox(application_id,tenant_id,event,payload) values('${f.app}','${f.tenant}','application_submitted','{}');`);
+    const id = (await sql(`select id from notification_deliveries where application_id='${f.app}' order by seq desc limit 1;`)).trim();
+    assert.ok(id, 'the outbox trigger did not create a delivery');
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'state_reason')), 'suppressed|legacy_scope_not_activated');
+    const r = await run('notification-delivery');
+    assert.equal(r.status, 200, JSON.stringify(r));
+    assert.equal(r.data.accepted, 0);
+    assert.equal((await pmCalls()).length, 0);
+    await sql(`insert into notification_activation(tenant_id,note) values('${f.tenant}','lab: owner review recorded') on conflict do nothing;`);
+  });
+  await check('Notify: disabled configuration sends nothing and claims nothing', async () => {
+    const id = await newDelivery(); await resetPm();
+    const r = await run('notification-delivery-disabled');
+    assert.equal(r.status, 503, JSON.stringify(r));
+    assert.equal(r.data.code, 'configuration_unavailable');
+    assert.equal(await field(id, 'state'), 'pending');
+    assert.equal((await pmCalls()).length, 0);
+  });
+  await check('Notify: the worker needs its secret', async () => {
+    const id = await newDelivery(); await resetPm();
+    assert.equal((await run('notification-delivery', 'wrong')).status, 401);
+    assert.equal((await edge('notification-delivery', {})).status, 401);
+    assert.equal(await field(id, 'state'), 'pending');
+    assert.equal((await pmCalls()).length, 0);
+  });
+  await check('Notify: an enabled worker sends one plain-text message and stores the provider message id', async () => {
+    const id = await newDelivery(); await pmMode('success'); await resetPm();
+    const r = await run('notification-delivery');
+    assert.equal(r.status, 200, JSON.stringify(r));
+    assert.equal(r.data.accepted, 1);
+    assert.equal(await field(id, 'state'), 'sent');
+    assert.match(await field(id, 'provider_message_id'), /^[0-9a-f-]{36}$/);
+    const calls = await pmCalls();
+    assert.deepEqual([calls.length, calls[0].token, calls[0].deliveryId, calls[0].textOnly], [1, true, id, true]);
+    assert.equal((await sql(`select count(*) from notification_delivery_attempts where delivery_id='${id}' and outcome='accepted';`)).trim(), '1');
+    assert.equal((await run('notification-delivery')).data.accepted, 0, 'nothing is sent twice');
+  });
+  await check('Notify: a rate-limited send is retried later, not immediately', async () => {
+    const id = await newDelivery(); await pmMode('rate_limit'); await resetPm();
+    assert.equal((await run('notification-delivery')).data.retried, 1);
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'pending|rate_limit');
+    assert.equal((await run('notification-delivery')).data.accepted, 0);
+    assert.equal((await pmCalls()).length, 1);
+    await pmMode('success'); await sql(`update notification_deliveries set next_attempt_at=now() where id='${id}';`);
+    assert.equal((await run('notification-delivery')).data.accepted, 1);
+    assert.equal(await field(id, 'attempt_count'), '2');
+  });
+  await check('Notify: an unknown outcome (connection dropped) is never resent', async () => {
+    const id = await newDelivery(); await pmMode('drop'); await resetPm();
+    assert.equal((await run('notification-delivery')).data.unknown, 1);
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'unknown|network');
+    await pmMode('success');
+    assert.equal((await run('notification-delivery')).data.accepted, 0);
+    assert.equal((await pmCalls()).length, 1);
+  });
+  await check('Notify: an inactive recipient fails the delivery without retry', async () => {
+    const id = await newDelivery(); await pmMode('inactive'); await resetPm();
+    assert.equal((await run('notification-delivery')).data.failed, 1);
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'failed|inactive_recipient');
+    await pmMode('success');
+  });
+  await check('Notify: callbacks need Basic credentials, are deduplicated, only move a delivery forward and ignore untracked types', async () => {
+    const id = await newDelivery(); await pmMode('success');
+    await run('notification-delivery');
+    const message = await field(id, 'provider_message_id');
+    const delivered = { RecordType: 'Delivery', MessageID: message, Recipient: 'x@example.test' };
+    assert.equal((await hook(delivered, null)).status, 401);
+    assert.equal((await hook(delivered, 'Basic ' + Buffer.from('hook:wrong').toString('base64'))).status, 401);
+    assert.equal(await field(id, 'state'), 'sent');
+    assert.deepEqual((await hook(delivered)).data, { ok: true, result: 'applied' });
+    assert.equal(await field(id, 'state'), 'delivered');
+    assert.deepEqual((await hook(delivered)).data, { ok: true, result: 'duplicate' });
+    assert.deepEqual((await hook({ RecordType: 'Bounce', ID: 5, Type: 'HardBounce', MessageID: message })).data, { ok: true, result: 'applied' });
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'bounced|HardBounce');
+    await hook({ RecordType: 'Delivery', MessageID: message, Tag: 'late' });
+    assert.equal(await field(id, 'state'), 'bounced');
+    assert.equal((await hook({ RecordType: 'Open', MessageID: message })).data.result, 'ignored');
+    assert.equal((await hook({ RecordType: 'Delivery', MessageID: 'x' })).status, 400);
+    assert.equal((await hook({ RecordType: 'Delivery', MessageID: randomUUID() })).data.result, 'unmatched');
+    assert.equal((await sql(`select count(*) from notification_provider_events where provider_message_id='${message}';`)).trim(), '2', 'a repeated callback is stored once');
+  });
+  await pmMode('success');
+}
+
 const outDir = join(tmpdir(), 'skyline-native-extraction');
 await mkdir(outDir, { recursive: true });
 const out = { label, run, identity, passed: results.filter((r) => r.result === 'PASS').length, failed: results.filter((r) => r.result === 'FAIL').length, provider: 'deterministic native fixture gateway; no live provider', results };
 await writeFile(join(outDir, `native-extraction-${label}.json`), JSON.stringify(out, null, 2) + '\n');
 console.log(`native extraction ${label}: ${out.passed} PASS / ${out.failed} FAIL`);
 process.exitCode = out.failed ? 1 : 0;
+const notifyResults = results.filter((r) => r.name.startsWith('Notify:'));
+if (notifyResults.length) console.log(`native extraction ${label} (Notify path): ${notifyResults.filter((r) => r.result === 'PASS').length} PASS / ${notifyResults.filter((r) => r.result === 'FAIL').length} FAIL`);
+const azureResults = results.filter((r) => r.name.startsWith('Azure:'));
+if (azureResults.length) console.log(`native extraction ${label} (OpenAI path): ${out.passed - azureResults.filter((r) => r.result === 'PASS').length - notifyResults.filter((r) => r.result === 'PASS').length} PASS / ${out.failed - azureResults.filter((r) => r.result === 'FAIL').length - notifyResults.filter((r) => r.result === 'FAIL').length} FAIL; (Azure path): ${azureResults.filter((r) => r.result === 'PASS').length} PASS / ${azureResults.filter((r) => r.result === 'FAIL').length} FAIL`);

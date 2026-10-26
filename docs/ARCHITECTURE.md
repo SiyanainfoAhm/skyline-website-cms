@@ -1,7 +1,7 @@
 # Architecture
 
 ## Stack
-React 19 + Vite + TypeScript SPA (not Next.js; no Node server). Supabase: Postgres + RLS, Auth, Storage (public `cms-media`, private `enrollment-documents`), six Deno Edge Functions, durable SQL queues with pg_cron/pg_net dispatch. Domain logic stays runtime-neutral (Vite + Deno). Frontend hosting for https://slit.edu.au is UNVERIFIED; dev at http://localhost:3001 (3000 is TenderFlow).
+React 19 + Vite + TypeScript SPA (not Next.js; no Node server). Supabase: Postgres + RLS, Auth, Storage (public `cms-media`, private `enrollment-documents`), seven Deno Edge Functions, durable SQL queues with pg_cron/pg_net dispatch. Domain logic stays runtime-neutral (Vite + Deno). Frontend hosting for https://slit.edu.au is UNVERIFIED; dev at http://localhost:3001 (3000 is TenderFlow).
 
 ```
 Browser SPA -> Supabase Auth / PostgREST (RLS) / Storage / Edge Functions
