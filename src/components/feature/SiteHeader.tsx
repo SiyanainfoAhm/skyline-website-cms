@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "re
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { NavItem } from "@/data/site";
 import { usePublicSite } from "@/hooks/publicSiteContext";
+import { useSignedIn } from "@/hooks/useSignedIn";
+import { headerAccountLink } from "@/lib/loginRouting";
 
 function Logo({ src, alt }: { src: string; alt: string }) {
   return <img src={src} alt={alt} className="h-11 w-auto object-contain md:h-12" />;
@@ -45,6 +47,9 @@ export function SiteHeaderView({ navigation, settings, preview = false }: { navi
   const [query, setQuery] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
+  // Preview mode never reads the session; the public header swaps Sign In for Dashboard once signed in (both go through /login).
+  const signedIn = useSignedIn();
+  const account = headerAccountLink(signedIn && !preview);
 
   const courseMenu = navigation.find((item) => item.columns);
   const courseColumns = courseMenu?.columns ?? [];
@@ -211,17 +216,10 @@ export function SiteHeaderView({ navigation, settings, preview = false }: { navi
               <i className="ri-search-line text-lg" aria-hidden="true" />
             </button>
             <Link
-              to="/agency/login"
-              className="hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm font-semibold text-primary-700 transition-colors hover:border-primary-300 hover:bg-primary-100 md:inline-flex"
-            >
-              <i className="ri-user-3-line text-base" aria-hidden="true" />
-              Agency Portal
-            </Link>
-            <Link
-              to="/admin/login"
+              to={account.to}
               className="hidden whitespace-nowrap text-sm font-medium text-foreground-700 transition-colors hover:text-primary-600 md:block"
             >
-              Sign In
+              {account.label}
             </Link>
             <Link
               to="/enroll-now"
@@ -373,23 +371,16 @@ export function SiteHeaderView({ navigation, settings, preview = false }: { navi
             </ul>
             <div className="mt-5 flex flex-col gap-3">
               <Link
-                to="/agency/login"
-                className="flex items-center justify-center gap-2 rounded-md border border-primary-300 bg-primary-50 px-5 py-3 text-center text-sm font-semibold text-primary-700"
-              >
-                <i className="ri-user-3-line text-base" aria-hidden="true" />
-                Agency Portal
-              </Link>
-              <Link
                 to="/enroll-now"
                 className="rounded-md bg-primary-500 px-5 py-3 text-center text-sm font-semibold text-background-50"
               >
                 Enroll Now
               </Link>
               <Link
-                to="/admin/login"
+                to={account.to}
                 className="rounded-md border border-background-300 px-5 py-3 text-center text-sm font-semibold text-foreground-800"
               >
-                Sign In
+                {account.label}
               </Link>
             </div>
           </nav>

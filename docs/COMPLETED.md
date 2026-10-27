@@ -80,3 +80,15 @@ CMS follow-up 1 (drafts everywhere): Pages, SEO, Documents, Users, Assistant Kno
 CMS follow-up 2 (leave warning): the app now runs on a data router (createBrowserRouter) so useBlocker guards link clicks, browser Back/Forward and navigate() calls while any editor is dirty; beforeunload still covers closing the tab.
 CMS follow-up 3 (header preview): SiteHeaderView is the one header renderer (public and preview); Header & Navigation shows it live from unsaved edits with a window-width selector so the "More" overflow can be seen.
 CMS follow-up 4 (footer logo): the public footer uses the Website Settings logo (tenants never fall back); the legacy slit.edu.au images only apply when no logo is configured, and the editor preview follows the same rule.
+
+Agency invitations (migration 86): agency admins invite/manage agents in their own agency only via portal-admin-users + DB functions; org admin creates an agency with its first admin atomically; invitations are accepted at first sign-in; single /agency/login resolves role from the database. Local only, unapplied.
+Notification sender from DB (migration 87): per-organization sender (name from tenants.name, legacy it@slit.edu.au) with verified-domain list, worker authenticated by service-role key, webhook disabled; only EF_NOTIFICATION_EMAIL_ENABLED and EF_POSTMARK_SERVER_TOKEN remain. Local only, unapplied.
+Notification scheduler (migration 88): pg_cron job calls notification-delivery every minute with the service-role key from Vault; skips overlap and no-work runs. Local only, unapplied.
+Single sign-in (/login): CMS, org admin, agency admin and agent share one page that routes by database-resolved access (chooser when several); /admin/login and /agency/login redirect to it; "Back to site" link; header shows Sign In/Dashboard, Agency Portal button removed. No migration.
+User dialogs: team/users pages use accessible Add/Edit and Deactivate dialogs with inline validation (userValidation.ts, Dialog.tsx, UserDialog.tsx); no API or migration changes.
+Users list shows roles (PostgREST one-object embed fix); account input rules hardened in cms-admin-users and portal-admin-users (migration 89). Local only, unapplied.
+Notification worker cron job inactive until activated (migration 90, 88 untouched as it is on hosted). Local only, unapplied.
+P08-04 status model (migration 91, local only): new default graph, legacy statuses forward-only, agents read-only after submission, "CoE / VoE issued" label; parity tests updated deliberately.
+P08-05 notification recipients (migration 92, local only): per-event internal/agent/agency-admin/student recipients, non-user deliveries, new offer_accepted and coe_voe_issued events, admin UI.
+P08-06 submission PDF (migration 93, local only; notification-delivery needs redeploy): in-memory PDF of the submitted version attached to the submitted email, or a sign-in link per institution.
+P08-07 CoE/VoE issue flow (migration 94, local only; notification-delivery needs redeploy): upload + Approve and issue emails the PDF; verification from offer_accepted; invalid_recipient deliveries are visible.

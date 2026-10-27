@@ -147,7 +147,7 @@ export interface StatBucket {
   total: number;
   drafts: number;
   submitted: number;
-  inReview: number;
+  offerAccepted: number;
   statuses?: Record<string, number>;
   actionRequired: number;
   enrolled: number;
@@ -157,7 +157,7 @@ export interface DashboardStats {
   total: number;
   drafts: number;
   submitted: number;
-  inReview: number;
+  offerAccepted: number;
   actionRequired: number;
   enrolled: number;
   byAgency: StatBucket[];
@@ -167,14 +167,14 @@ export interface DashboardStats {
 }
 
 function emptyBucket(id: string, name: string): StatBucket {
-  return { id, name, total: 0, drafts: 0, submitted: 0, inReview: 0, actionRequired: 0, enrolled: 0 };
+  return { id, name, total: 0, drafts: 0, submitted: 0, offerAccepted: 0, actionRequired: 0, enrolled: 0 };
 }
 
 function addToBucket(bucket: StatBucket, status: ApplicationStatus): void {
   bucket.total += 1;
   if (status === "draft") bucket.drafts += 1;
   else if (status === "submitted") bucket.submitted += 1;
-  else if (status === "under_review") bucket.inReview += 1;
+  else if (status === "offer_accepted") bucket.offerAccepted += 1;
   else if (status === "action_required") bucket.actionRequired += 1;
   else if (status === "enrolled") bucket.enrolled += 1;
 }
@@ -185,7 +185,7 @@ export function summarizeApplications(rows: ApplicationListRow[]): DashboardStat
     total: 0,
     drafts: 0,
     submitted: 0,
-    inReview: 0,
+    offerAccepted: 0,
     actionRequired: 0,
     enrolled: 0,
     byAgency: [],
@@ -200,7 +200,7 @@ export function summarizeApplications(rows: ApplicationListRow[]): DashboardStat
     stats.total += 1;
     if (row.status === "draft") stats.drafts += 1;
     else if (row.status === "submitted") stats.submitted += 1;
-    else if (row.status === "under_review") stats.inReview += 1;
+    else if (row.status === "offer_accepted") stats.offerAccepted += 1;
     else if (row.status === "action_required") stats.actionRequired += 1;
     else if (row.status === "enrolled") stats.enrolled += 1;
 
@@ -225,7 +225,7 @@ export function summarizeApplications(rows: ApplicationListRow[]): DashboardStat
 export async function getDashboardStats(): Promise<DashboardStats> {
   const [{ data, error }, recent] = await Promise.all([supabase.rpc("portal_dashboard"), queryApplications({limit:6})]);
   if (error) throw new Error(error.message);
-  const counts = (statuses: Record<string, number>) => ({ drafts: statuses.draft ?? 0, submitted: statuses.submitted ?? 0, inReview: statuses.under_review ?? 0, actionRequired: statuses.action_required ?? 0, enrolled: statuses.enrolled ?? 0 });
+  const counts = (statuses: Record<string, number>) => ({ drafts: statuses.draft ?? 0, submitted: statuses.submitted ?? 0, offerAccepted: statuses.offer_accepted ?? 0, actionRequired: statuses.action_required ?? 0, enrolled: statuses.enrolled ?? 0 });
   const buckets = (rows: Array<{ id: string; name: string; total: number; statuses: Record<string, number> }>) => rows.map(row => ({ ...row, id: row.id ?? "unassigned", ...counts(row.statuses) }));
   return { total: data.total, ...counts(data.statuses), statuses: data.statuses, byAgent: buckets(data.byAgent), byAgency: buckets(data.byAgency), recent: recent.rows };
 }

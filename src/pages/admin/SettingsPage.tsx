@@ -8,6 +8,8 @@ import { useToast } from "@/pages/admin/components/toastContext";
 import type { AdminSettings } from "@/pages/admin/lib/types";
 import { HistoryButton } from "@/pages/admin/components/workflow";
 import { SOCIAL_PLATFORMS, isKnownPlatform, socialIconFor } from "@/lib/socialPlatforms";
+import SenderSettings from "@/pages/admin/components/SenderSettings";
+import EventRecipients from "@/pages/admin/components/EventRecipients";
 import { useAuth } from "@/pages/admin/lib/authContext";
 import { MIN_PASSWORD_LENGTH, passwordProblem } from "@/lib/passwords";
 
@@ -304,6 +306,8 @@ export default function SettingsPage() {
             ) : null}
           </div>
         </Card>
+
+        <div className="space-y-5 xl:col-span-2"><SenderSettings tenantId={null} /><EventRecipients tenantId={null} /></div>
       </div>
 
       <div className="mt-5 flex justify-end">

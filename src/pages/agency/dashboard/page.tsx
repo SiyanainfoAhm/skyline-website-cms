@@ -14,7 +14,7 @@ import ApplicationsTable from "@/pages/agency/components/ApplicationsTable";
 import { PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
 
 interface CardDef {
-  key: keyof Pick<DashboardStats, "total" | "drafts" | "submitted" | "inReview" | "actionRequired" | "enrolled">;
+  key: keyof Pick<DashboardStats, "total" | "drafts" | "submitted" | "offerAccepted" | "actionRequired" | "enrolled">;
   label: string;
   icon: string;
   tone: string;
@@ -24,7 +24,7 @@ const CARDS: CardDef[] = [
   { key: "total", label: "Total applications", icon: "ri-file-list-3-line", tone: "bg-primary-100 text-primary-700" },
   { key: "drafts", label: "Drafts", icon: "ri-file-edit-line", tone: "bg-background-200 text-foreground-700" },
   { key: "submitted", label: "Submitted", icon: "ri-send-plane-line", tone: "bg-secondary-100 text-secondary-900" },
-  { key: "inReview", label: "Under review", icon: "ri-search-eye-line", tone: "bg-secondary-100 text-secondary-900" },
+  { key: "offerAccepted", label: "Offer accepted", icon: "ri-checkbox-circle-line", tone: "bg-accent-100 text-accent-900" },
   { key: "actionRequired", label: "Action required", icon: "ri-alert-line", tone: "bg-primary-100 text-primary-800" },
   { key: "enrolled", label: "Enrolled", icon: "ri-graduation-cap-line", tone: "bg-accent-500 text-background-50" },
 ];
@@ -204,7 +204,7 @@ export default function PortalDashboardPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-foreground-900">{bucket.name}</p>
                         <p className="text-xs text-foreground-500">
-                          {bucket.total} total &middot; {bucket.drafts} draft &middot; {bucket.submitted} submitted &middot; {bucket.inReview} under review
+                          {bucket.total} total &middot; {bucket.drafts} draft &middot; {bucket.submitted} submitted &middot; {bucket.offerAccepted} offer accepted
                           {bucket.actionRequired ? ` \u00b7 ${bucket.actionRequired} action` : ""}
                         </p>
                       </div>

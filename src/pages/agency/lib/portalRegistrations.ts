@@ -75,3 +75,24 @@ export async function correctCoeNumber(registrationId: string, newCoe: string, r
   const { error } = await supabase.rpc("portal_registration_correct_coe", { p_registration: registrationId, p_new_coe: newCoe, p_reason: reason });
   if (error) fail(error);
 }
+
+export interface CoeDocumentInfo { id: string; kind: "coe" | "voe"; fileName: string; sizeBytes: number; sha256: string; uploadedAt: string; issuedAt: string | null }
+
+export async function getCoeDocument(applicationId: string): Promise<CoeDocumentInfo | null> {
+  const { data, error } = await supabase.rpc("portal_coe_document_list", { p_application: applicationId });
+  if (error) fail(error);
+  return data && typeof data === "object" ? (data as CoeDocumentInfo) : null;
+}
+export async function uploadCoeDocument(registrationId: string, kind: "coe" | "voe", fileName: string, contentBase64: string): Promise<void> {
+  const { error } = await supabase.rpc("portal_coe_document_upload", { p_registration: registrationId, p_kind: kind, p_file_name: fileName, p_content: contentBase64 });
+  if (error) fail(error);
+}
+export async function issueCoeVoe(applicationId: string, note: string): Promise<void> {
+  const { error } = await supabase.rpc("portal_coe_voe_issue", { p_application: applicationId, p_note: note });
+  if (error) fail(error);
+}
+export async function readCoeDocumentContent(applicationId: string): Promise<{ kind: string; fileName: string; contentBase64: string } | null> {
+  const { data, error } = await supabase.rpc("portal_coe_document_content", { p_application: applicationId });
+  if (error) fail(error);
+  return data && typeof data === "object" ? (data as { kind: string; fileName: string; contentBase64: string }) : null;
+}

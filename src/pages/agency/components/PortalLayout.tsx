@@ -89,12 +89,12 @@ export default function PortalLayout() {
 
   const displayName = profile?.fullName?.trim() || authUser?.name || "User";
   const isSlit = role === "slit_admin";
-  const nav = isSlit ? SLIT_NAV : role === "agency_admin" && selectedScope?.tenantId ? [...AGENCY_NAV, { to: "/agency/users", label: "Institution agents", icon: "ri-group-line" }] : AGENCY_NAV;
+  const nav = isSlit ? SLIT_NAV : role === "agency_admin" ? [...AGENCY_NAV, { to: "/agency/users", label: selectedScope?.tenantId ? "Institution agents" : "Team", icon: "ri-group-line" }] : AGENCY_NAV;
   const crumbs = buildCrumbs(location.pathname);
   const workspaceName = isSlit ? selectedScope?.tenantId ? selectedScope.name : "SLIT Administration" : agency?.name || "Agency";
 
   const handleSignOut = async () => {
-    try { await signOut(); navigate("/agency/login"); }
+    try { await signOut(); navigate("/login"); }
     catch { /* The active editor displays its save error and retains values. */ }
   };
 

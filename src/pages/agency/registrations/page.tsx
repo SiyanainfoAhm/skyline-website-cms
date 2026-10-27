@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/pages/agency/lib/portalData";
+import CoeVoePanel from "@/pages/agency/components/CoeVoePanel";
 import { PageHeading, PortalEmpty, PortalError, PortalLoading, PortalModal, StatusBadge } from "@/pages/agency/components/PortalUI";
 import {
   addEvidence, correctCoeNumber, createRegistration, exportRegistrations, getRegistration, listExceptions, listWorkbench, reviewException, transitionRegistration,
@@ -94,7 +95,7 @@ export default function RegistrationWorkbenchPage() {
       {warnings > 0 ? (
         <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-900">
           <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" />
-          <span>{warnings} application{warnings === 1 ? "" : "s"} read{warnings === 1 ? "s" : ""} coe_issued or enrolled without a verified registration. This is a warning only; nothing is blocked.</span>
+          <span>{warnings} application{warnings === 1 ? "" : "s"} read{warnings === 1 ? "s" : ""} &ldquo;CoE / VoE issued&rdquo; or enrolled without a verified registration. This is a warning only; nothing is blocked.</span>
         </div>
       ) : null}
       <div role="tablist" aria-label="Workbench views" className="mt-6 flex gap-2">
@@ -217,6 +218,7 @@ export default function RegistrationWorkbenchPage() {
                     <button type="button" className={primary} disabled={busy || blockers.length > 0} onClick={() => void run(open, () => transitionRegistration(reg.id, "verified", coe, ""), "Registration verified.")}>Confirm verified registration</button>
                   </section>
                 ) : null}
+                {reg.state === "verified" ? <CoeVoePanel registrationId={reg.id} applicationId={open.applicationId} applicationStatus={open.status} registrationState={reg.state} onIssued={() => void refresh(open)} /> : null}
                 {actions.includes("cancel") ? (
                   <section aria-label="Cancel registration" className="space-y-2">
                     {confirm === "cancel" ? (

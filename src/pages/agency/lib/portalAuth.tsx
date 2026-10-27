@@ -14,6 +14,8 @@ import { supabase } from "@/pages/admin/lib/supabase";
 import { countPortalMetric } from "@/pages/agency/lib/devMetrics";
 import { passwordRecoveryUrl } from "@/lib/siteUrl";
 import { useNavigate } from "react-router-dom";
+import { markSessionSeen } from "@/lib/loginRouting";
+import { portalAccessMessage } from "@/pages/agency/lib/applicationAccess";
 import { currentPortalScope, setPortalScope, flushPortalBeforeSwitch, type PortalScope } from "@/lib/portalScope";
 
 function basePathPrefix(): string {
@@ -98,6 +100,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       setIdentityError("");
       const task = (async () => { try {
         countPortalMetric("identity.fetch");
+        // Accept a pending invitation for this verified email and learn why access may be missing (database-resolved).
+        let accessState = "active";
+        try {
+          const { data: access } = await supabase.rpc("portal_resolve_access");
+          accessState = String((access as { state?: string } | null)?.state ?? "active");
+        } catch { /* older database without migration 86: fall back to the identity check */ }
         const { data: options, error: optionsError } = await supabase.rpc("portal_scope_options");
         if (optionsError) throw new Error(optionsError.message);
         const available: PortalScope[] = (options.choices ?? []).map((item: { tenantId: string; name: string; domain: string }) => ({ key: item.tenantId, tenantId: item.tenantId, name: item.name, domain: item.domain, userId: u.id }));
@@ -108,6 +116,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         try { stored = sessionStorage.getItem("skyline-portal-scope:" + u.id); } catch { /* storage unavailable */ }
         const wanted = requestedKey ?? stored ?? available[0]?.key;
         const selected = available.find((option) => option.key === wanted);
+        if (!selected && available.length === 0 && !["active", "org_admin"].includes(accessState)) throw new Error(portalAccessMessage(accessState));
         if (!selected) {
           setPortalScope({ key: "denied", tenantId: null, name: "Unavailable", domain: "unavailable.invalid", userId: u.id });
           setRole(null); setProfile(null); setAgency(null); setMembership(null); setSelectedScope(null);
@@ -117,7 +126,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         const { data, error } = await supabase.rpc("portal_identity");
         if (error) throw new Error(error.message);
         const identity = (data ?? {}) as { role?: PortalRole | null; profile_id?: string | null; agency_id?: string | null };
-        if (!identity.role) throw new Error("Access to this institution is not granted.");
+        if (!identity.role) throw new Error(accessState === "active" || accessState === "org_admin" ? "Access to this institution is not granted." : portalAccessMessage(accessState));
         const [p, a, m] = await Promise.all([
           identity.profile_id ? supabase.from("portal_profiles").select("id,full_name,email,phone,job_title,status").eq("id", identity.profile_id).maybeSingle() : Promise.resolve({data:null,error:null}),
           identity.agency_id ? supabase.from("agencies").select("*").eq("id", identity.agency_id).maybeSingle() : Promise.resolve({data:null,error:null}),
@@ -201,6 +210,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await flushPortalBeforeSwitch();
     await supabase.auth.signOut();
+    markSessionSeen(false);
     setAuthUser(null);
     clearIdentity();
   }, [clearIdentity]);

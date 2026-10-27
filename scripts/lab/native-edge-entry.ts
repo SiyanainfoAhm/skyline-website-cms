@@ -16,7 +16,7 @@ async function fakePostmark(target: URL, init?: RequestInit): Promise<Response> 
  if (target.pathname !== '/email' || (init?.method ?? 'GET') !== 'POST') return new Response('{}', { status: 404 });
  const control = JSON.parse(await Deno.readTextFile('tmp/phase2-native/postmark.json'));
  const body = JSON.parse(String(init?.body ?? '{}'));
- await Deno.writeTextFile('tmp/phase2-native/postmark-calls.log', JSON.stringify({ token: new Headers(init?.headers).get('x-postmark-server-token') === PM_TOKEN, deliveryId: body.Metadata?.deliveryId, textOnly: body.HtmlBody === undefined }) + '\n', { append: true });
+ await Deno.writeTextFile('tmp/phase2-native/postmark-calls.log', JSON.stringify({ token: new Headers(init?.headers).get('x-postmark-server-token') === PM_TOKEN, deliveryId: body.Metadata?.deliveryId, textOnly: body.HtmlBody === undefined, attachments: (body.Attachments ?? []).map((a: { Name: string; ContentType: string; Content: string }) => ({ name: a.Name, type: a.ContentType, pdf: atob(a.Content).startsWith('%PDF-1.4'), bytes: atob(a.Content).length })), link: String(body.TextBody ?? '').includes('/agency/applications/') }) + '\n', { append: true });
  if (new Headers(init?.headers).get('x-postmark-server-token') !== PM_TOKEN) return Response.json({ ErrorCode: 10, Message: 'Bad token' }, { status: 401 });
  if (control.mode === 'rate_limit') return new Response('{}', { status: 429 });
  if (control.mode === 'drop') throw new Error('socket closed');

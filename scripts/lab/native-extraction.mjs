@@ -9,7 +9,7 @@ import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {request,sql,service,password,verify} from './native-lab.mjs';
+import {request,sql,service,anon,password,verify} from './native-lab.mjs';
 
 const label = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'run';
 const identity = await verify();
@@ -182,8 +182,10 @@ if (process.argv.includes('--notify')) {
   const pmMode = (m) => writeFile('tmp/phase2-native/postmark.json', JSON.stringify({ mode: m }));
   const resetPm = () => writeFile('tmp/phase2-native/postmark-calls.log', '');
   const pmCalls = async () => (await readFile('tmp/phase2-native/postmark-calls.log', 'utf8').catch(() => '')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  const run = (fn, secret = 'native-notify-worker') => edge(fn, {}, undefined, { 'x-worker-secret': secret });
-  const hook = (body, auth = 'Basic ' + Buffer.from('hook:native-hook-pass').toString('base64')) => fetch('http://127.0.0.1:55431/functions/v1/notification-delivery/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => ({})) }));
+  const run = (fn, bearer = service) => edge(fn, {}, bearer);
+  const hook = (auth) => fetch('http://127.0.0.1:55431/functions/v1/notification-delivery/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) }, body: '{}' });
+  // The sender comes from the database per organization (migration 87): this lab tenant's verified domain and address.
+  await sql(`insert into notification_sender_domains(tenant_id,domain,note) values('${f.tenant}','lab.example.test','lab') on conflict do nothing; insert into notification_sender_settings(tenant_id,from_email) values('${f.tenant}','it@lab.example.test') on conflict ((coalesce(tenant_id,'00000000-0000-0000-0000-000000000000'::uuid))) do nothing;`);
   const field = async (id, column) => (await sql(`select coalesce(${column}::text,'') from notification_deliveries where id='${id}';`)).trim();
   // Each call creates one real outbox event for the synthetic application; the database trigger creates the delivery for its assigned agent.
   const newDelivery = async () => {
@@ -214,9 +216,10 @@ if (process.argv.includes('--notify')) {
     assert.equal(await field(id, 'state'), 'pending');
     assert.equal((await pmCalls()).length, 0);
   });
-  await check('Notify: the worker needs its secret', async () => {
+  await check('Notify: the worker accepts only the service-role key', async () => {
     const id = await newDelivery(); await resetPm();
-    assert.equal((await run('notification-delivery', 'wrong')).status, 401);
+    assert.equal((await run('notification-delivery', anon)).status, 403);
+    assert.equal((await run('notification-delivery', 'wrong')).status, 403);
     assert.equal((await edge('notification-delivery', {})).status, 401);
     assert.equal(await field(id, 'state'), 'pending');
     assert.equal((await pmCalls()).length, 0);
@@ -257,25 +260,78 @@ if (process.argv.includes('--notify')) {
     assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'failed|inactive_recipient');
     await pmMode('success');
   });
-  await check('Notify: callbacks need Basic credentials, are deduplicated, only move a delivery forward and ignore untracked types', async () => {
+  await check('Notify: an internal recipient without a portal account is emailed once, next to the agent', async () => {
+    // Per-event recipients come from the tenant's published notifications configuration (migration 92).
+    await sql(`begin;set local session_replication_role='replica';insert into tenant_config_versions(tenant_id,kind,state,config,version,published_at) values('${f.tenant}','notifications','published','{"events":{"application_submitted":{"recipients":["ops@lab.example.test"]}}}'::jsonb,900,now());commit;`, true);
+    try {
+      const id = await newDelivery(); await pmMode('success'); await resetPm();
+      const outbox = await field(id, 'outbox_id');
+      const internal = (await sql(`select count(*) from notification_deliveries where outbox_id='${outbox}' and recipient_user is null and recipient_email='ops@lab.example.test' and state='pending';`)).trim();
+      assert.equal(internal, '1');
+      const r = await run('notification-delivery');
+      assert.equal(r.status, 200, JSON.stringify(r));
+      assert.equal((await sql(`select count(*) from notification_deliveries where outbox_id='${outbox}' and state='sent';`)).trim(), (await sql(`select count(*) from notification_deliveries where outbox_id='${outbox}';`)).trim());
+      assert.equal((await pmCalls()).length, Number((await sql(`select count(*) from notification_deliveries where outbox_id='${outbox}';`)).trim()));
+      assert.ok(Number((await sql(`select count(*) from notification_deliveries where outbox_id='${outbox}';`)).trim()) >= 2);
+    } finally {
+      await sql(`begin;set local session_replication_role='replica';delete from tenant_config_versions where tenant_id='${f.tenant}' and kind='notifications' and version=900;commit;`, true);
+    }
+  });
+  await check('Notify: the submitted email carries the PDF, link mode sends only a link, and no form content is stored', async () => {
+    await sql(`insert into enrollment_application_versions(application_id,version,snapshot,created_by_name) values('${f.app}',77,'{"values":{"first_name":"Labcase"},"courses":[]}'::jsonb,'lab');`);
+    const outbox = async () => {
+      await sql(`update notification_deliveries set state='suppressed',state_reason='lab isolation' where state in ('pending','sending');`);
+      await sql(`insert into admission_event_outbox(application_id,tenant_id,event,payload) values('${f.app}','${f.tenant}','application_submitted','{"version":77}');`);
+      await pmMode('success'); await resetPm();
+      const r = await run('notification-delivery');
+      assert.equal(r.status, 200, JSON.stringify(r));
+      return pmCalls();
+    };
+    const attached = await outbox();
+    assert.ok(attached.length >= 1);
+    for (const call of attached) { assert.equal(call.attachments.length, 1); assert.ok(call.attachments[0].pdf && call.attachments[0].bytes > 200); assert.match(call.attachments[0].name, /^application-.*\.pdf$/); assert.equal(call.link, false); }
+    assert.equal((await sql(`select count(*) from notification_deliveries where subject||body like '%Labcase%';`)).trim(), '0');
+    await sql(`insert into notification_attachment_settings(tenant_id,submission_pdf) values('${f.tenant}','link');`, true);
+    try {
+      const linked = await outbox();
+      assert.ok(linked.length >= 1);
+      for (const call of linked) { assert.equal(call.attachments.length, 0); assert.equal(call.link, true); }
+    } finally {
+      await sql(`delete from notification_attachment_settings where tenant_id='${f.tenant}';`, true);
+    }
+  });
+  await check('Notify: the issued CoE PDF is attached to the coe_voe_issued email for the agent and the student', async () => {
+    // Seeds an issued document the way portal_coe_voe_issue leaves it (the issue command itself is covered by pgTAP).
+    await sql(`begin;set local session_replication_role='replica';update enrollment_applications set student_email='lab-student@example.test' where id='${f.app}';
+      with r as (insert into enrollment_registrations(application_id,tenant_id,state,coe_number,created_by,lodged_at,lodged_by,verified_at,verified_by) values('${f.app}','${f.tenant}','verified','E0000000099',gen_random_uuid(),now(),gen_random_uuid(),now(),gen_random_uuid()) returning id)
+      insert into enrollment_coe_documents(application_id,tenant_id,registration_id,kind,file_name,size_bytes,sha256,content,uploaded_by,issued_at,issued_by)
+      select '${f.app}','${f.tenant}',r.id,'coe','coe.pdf',15,encode(sha256(convert_to(E'%PDF-1.4\n%%EOF\n','LATIN1')),'hex'),convert_to(E'%PDF-1.4\n%%EOF\n','LATIN1'),gen_random_uuid(),now(),gen_random_uuid() from r;commit;`, true);
+    await sql(`update notification_deliveries set state='suppressed',state_reason='lab isolation' where state in ('pending','sending');`);
+    await sql(`insert into admission_event_outbox(application_id,tenant_id,event,payload) values('${f.app}','${f.tenant}','coe_voe_issued','{"from":"offer_accepted","to":"coe_issued"}');`);
+    await pmMode('success'); await resetPm();
+    const r = await run('notification-delivery');
+    assert.equal(r.status, 200, JSON.stringify(r));
+    const calls = await pmCalls();
+    assert.ok(calls.length >= 2, 'agent and student are both emailed');
+    for (const call of calls) { assert.equal(call.attachments.length, 1); assert.ok(call.attachments[0].pdf); assert.match(call.attachments[0].name, /^CoE-.*.pdf$/); }
+    assert.equal((await sql(`select count(*) from notification_deliveries where recipient_email='lab-student@example.test' and event='coe_voe_issued' and state='sent';`)).trim(), '1');
+  });
+  await check('Notify: the Postmark callback endpoint is disabled and changes nothing', async () => {
     const id = await newDelivery(); await pmMode('success');
     await run('notification-delivery');
-    const message = await field(id, 'provider_message_id');
-    const delivered = { RecordType: 'Delivery', MessageID: message, Recipient: 'x@example.test' };
-    assert.equal((await hook(delivered, null)).status, 401);
-    assert.equal((await hook(delivered, 'Basic ' + Buffer.from('hook:wrong').toString('base64'))).status, 401);
-    assert.equal(await field(id, 'state'), 'sent');
-    assert.deepEqual((await hook(delivered)).data, { ok: true, result: 'applied' });
-    assert.equal(await field(id, 'state'), 'delivered');
-    assert.deepEqual((await hook(delivered)).data, { ok: true, result: 'duplicate' });
-    assert.deepEqual((await hook({ RecordType: 'Bounce', ID: 5, Type: 'HardBounce', MessageID: message })).data, { ok: true, result: 'applied' });
-    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'bounced|HardBounce');
-    await hook({ RecordType: 'Delivery', MessageID: message, Tag: 'late' });
-    assert.equal(await field(id, 'state'), 'bounced');
-    assert.equal((await hook({ RecordType: 'Open', MessageID: message })).data.result, 'ignored');
-    assert.equal((await hook({ RecordType: 'Delivery', MessageID: 'x' })).status, 400);
-    assert.equal((await hook({ RecordType: 'Delivery', MessageID: randomUUID() })).data.result, 'unmatched');
-    assert.equal((await sql(`select count(*) from notification_provider_events where provider_message_id='${message}';`)).trim(), '2', 'a repeated callback is stored once');
+    const before = await field(id, 'state');
+    for (const auth of [null, 'Basic ' + Buffer.from('hook:anything').toString('base64'), 'Bearer ' + service]) assert.equal((await hook(auth)).status, 410);
+    assert.equal(await field(id, 'state'), before);
+  });
+  await check('Notify: a tenant without a database sender fails safely and sends nothing (no platform fallback)', async () => {
+    const id = await newDelivery(); await resetPm(); await pmMode('success');
+    await sql(`update notification_sender_domains set revoked_at=now() where tenant_id='${f.tenant}' and revoked_at is null;`);
+    const r = await run('notification-delivery');
+    assert.equal(r.status, 200, JSON.stringify(r));
+    assert.equal(r.data.accepted, 0);
+    assert.equal((await pmCalls()).length, 0);
+    assert.equal((await field(id, 'state')) + '|' + (await field(id, 'last_error_code')), 'failed|sender_unconfigured');
+    await sql(`update notification_sender_domains set revoked_at=null where tenant_id='${f.tenant}' and domain='lab.example.test';`);
   });
   await pmMode('success');
 }

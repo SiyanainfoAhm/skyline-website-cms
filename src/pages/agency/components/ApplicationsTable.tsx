@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
 import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
+import { SELECTABLE_STATUSES } from "@/pages/agency/lib/applicationAccess";
 import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/agency/components/PortalUI";
 
 type SortKey = "reference" | "student" | "agency" | "agent" | "status" | "completion" | "created" | "updated";
@@ -203,7 +204,7 @@ export default function ApplicationsTable({
               aria-label="Filter by status"
             >
               <option value="">All statuses</option>
-              {Object.entries(STATUS_META).map(([value, meta]) => (
+              {SELECTABLE_STATUSES.map((value) => [value, STATUS_META[value]] as const).map(([value, meta]) => (
                 <option key={value} value={value}>
                   {meta.label}
                 </option>

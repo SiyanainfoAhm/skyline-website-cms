@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase } from "@/pages/admin/lib/supabase";
 import type { AdminUser, Role } from "@/pages/admin/lib/types";
 import { passwordRecoveryUrl } from "@/lib/siteUrl";
+import { markSessionSeen } from "@/lib/loginRouting";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { resolveTenantSite } from "@/lib/tenantSite";
 
@@ -119,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await supabase.auth.signOut();
+    markSessionSeen(false);
     setUser(null);
     setUsers([]);
   }, []);

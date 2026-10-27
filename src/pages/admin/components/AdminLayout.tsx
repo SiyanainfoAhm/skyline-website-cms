@@ -5,6 +5,7 @@ import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { AdminLoading, AdminError } from "@/pages/admin/components/ui";
 import { DraftProvider } from "@/pages/admin/lib/draft";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
+import { hadSession, loginUrl } from "@/lib/loginRouting";
 
 interface NavEntry {
   to: string;
@@ -65,7 +66,7 @@ export default function AdminLayout() {
     );
   }
 
-  if (!user) return <Navigate to="/admin/login" replace state={{ from: location.pathname }} />;
+  if (!user) return <Navigate to={loginUrl(location.pathname + location.search, hadSession())} replace />;
 
   // Force a password rotation before any CMS content is reachable.
   if (user.mustChangePassword && location.pathname !== "/admin/set-password") {

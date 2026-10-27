@@ -26,6 +26,7 @@ import {
   type DocumentRow,
 } from "@/pages/agency/lib/portalApplications";
 import { documentCategoryForField, extractionStatus } from "@/pages/agency/lib/documentAttachments";
+import { canSubmitApplicationStatus } from "@/pages/agency/lib/applicationAccess";
 import ApplicationReview, { type ConsentState } from "@/pages/agency/components/ApplicationReview";
 import ApplicationAttachmentField from "@/pages/agency/components/ApplicationAttachmentField";
 import { PortalError } from "@/pages/agency/components/PortalUI";
@@ -706,6 +707,7 @@ export default function ApplicationWorkspace({
             submitting={submitting}
             submitError={submitError}
             readOnly={readOnly}
+            canSubmit={canSubmitApplicationStatus(application.status)}
             onSubmit={() => void handleSubmit()}
           />
         ) : null}

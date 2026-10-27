@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_META, formatDate } from "@/pages/agency/lib/portalData";
-import { isEditableApplicationStatus } from "@/pages/agency/lib/applicationAccess";
+import { isEditableApplicationStatus, nextStatusOptions } from "@/pages/agency/lib/applicationAccess";
 import {
   assignApplicationAgent,
   deleteApplicationDocument,
@@ -337,10 +337,10 @@ export default function ApplicationDetailPage() {
                     onChange={(event) => void handleStatus(event.target.value)}
                     className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
                   >
-                    <option value="">Change status to\u2026</option>
-                    {Object.entries(STATUS_META).map(([value, meta]) => (
-                      <option key={value} value={value} disabled={value === application.status}>
-                        {meta.label}
+                    <option value="">{nextStatusOptions(application.status).length ? "Change status to\u2026" : "No further status changes"}</option>
+                    {nextStatusOptions(application.status).map((value) => (
+                      <option key={value} value={value}>
+                        {STATUS_META[value as keyof typeof STATUS_META]?.label ?? value}
                       </option>
                     ))}
                   </select>
@@ -351,6 +351,14 @@ export default function ApplicationDetailPage() {
                     placeholder="Optional note for the applicant"
                     className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
                   />
+                </section>
+              ) : null}
+
+              {!isSlit ? (
+                <section className="rounded-card border border-background-200 bg-background-50 p-5">
+                  <h2 className="font-heading text-base font-semibold text-foreground-950">Admissions status</h2>
+                  <p className="mt-2 text-sm text-foreground-800">{STATUS_META[application.status as keyof typeof STATUS_META]?.label ?? application.status}</p>
+                  <p className="mt-1 text-xs text-foreground-500">Read-only. Status changes are made by SLIT administration.</p>
                 </section>
               ) : null}
 

@@ -17,8 +17,10 @@ import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 
 import PortalProviders from "@/pages/agency/components/PortalProviders";
+import PortalLanding from "@/pages/agency/components/PortalLanding";
 import RequirePortal from "@/pages/agency/components/RequirePortal";
-import PortalLoginPage from "@/pages/agency/login/page";
+import LoginPage from "@/pages/login/page";
+import LoginRedirect from "@/pages/login/LoginRedirect";
 import PortalDashboardPage from "@/pages/agency/dashboard/page";
 import PortalApplicationsPage from "@/pages/agency/applications/page";
 import NewApplicationPage from "@/pages/agency/applications/new/page";
@@ -36,7 +38,6 @@ import RegistrationWorkbenchPage from "@/pages/agency/registrations/page";
 import AdminProviders from "@/pages/admin/components/AdminProviders";
 import AdminLayout from "@/pages/admin/components/AdminLayout";
 import RequireAdmin from "@/pages/admin/components/RequireAdmin";
-import AdminLoginPage from "@/pages/admin/LoginPage";
 import AdminSetPasswordPage from "@/pages/admin/SetPasswordPage";
 import DashboardPage from "@/pages/admin/DashboardPage";
 import AdminCoursesPage from "@/pages/admin/CoursesPage";
@@ -78,6 +79,10 @@ const routes: RouteObject[] = [
     ],
   },
   {
+    path: "/login",
+    element: <LoginPage />,
+  },
+  {
     path: "/forgot-password",
     element: <ForgotPasswordPage />,
   },
@@ -89,11 +94,11 @@ const routes: RouteObject[] = [
     path: "/agency",
     element: <PortalProviders />,
     children: [
-      { path: "login", element: <PortalLoginPage /> },
+      { path: "login", element: <LoginRedirect /> },
       {
         element: <RequirePortal />,
         children: [
-          { index: true, element: <Navigate to="/agency/dashboard" replace /> },
+          { index: true, element: <PortalLanding /> },
           { path: "dashboard", element: <PortalDashboardPage /> },
           { path: "applications", element: <PortalApplicationsPage /> },
           { path: "applications/new", element: <NewApplicationPage /> },
@@ -115,7 +120,7 @@ const routes: RouteObject[] = [
     path: "/admin",
     element: <AdminProviders />,
     children: [
-      { path: "login", element: <AdminLoginPage /> },
+      { path: "login", element: <LoginRedirect /> },
       { path: "set-password", element: <AdminSetPasswordPage /> },
       {
         element: <AdminLayout />,

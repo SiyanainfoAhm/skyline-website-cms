@@ -9,6 +9,7 @@
 // Caller must be a signed-in, Active Admin (checked against cms_users).
 // =====================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { cleanEmail, cleanName } from "../_shared/user-input.ts";
 import { backendConfiguration } from "../_shared/config.ts";
 
 const corsHeaders = {
@@ -114,11 +115,16 @@ Deno.serve(async (req) => {
 
     switch (action) {
       case "invite": {
-        const email = String(parsed.email ?? "").trim().toLowerCase();
-        const name = String(parsed.name ?? "").trim() || email.split("@")[0];
-        const role = String(parsed.role ?? "Editor");
+        const emailCheck = cleanEmail(parsed.email);
+        if (!emailCheck.ok) return json({ error: emailCheck.error }, 400);
+        const nameCheck = cleanName(parsed.name);
+        if (!nameCheck.ok) return json({ error: nameCheck.error }, 400);
+        const email = emailCheck.value;
+        const name = nameCheck.value;
+        // Unknown roles are rejected rather than silently becoming Editor.
+        const role = String(parsed.role ?? "");
+        if (role !== "Admin" && role !== "Editor") return json({ error: "Role must be Admin or Editor." }, 400);
         const redirectTo = typeof parsed.redirectTo === "string" ? parsed.redirectTo : undefined;
-        if (!email) return json({ error: "Email is required." }, 400);
 
         let authUserId = "";
         let inviteLink: string | null = null;

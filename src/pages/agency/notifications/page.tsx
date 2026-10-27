@@ -83,7 +83,7 @@ export default function PortalNotificationsPage() {
         <legend className="px-1 text-sm font-semibold text-foreground-900">Email me about</legend>
         {prefs ? (
           <div className="space-y-2">
-            {([["application_submitted", "Applications that are submitted"], ["application_status_changed", "Status changes on my applications"]] as [NotificationEvent, string][]).map(([event, label]) => (
+            {([["application_submitted", "Applications that are submitted"], ["application_status_changed", "Status changes on my applications"], ["offer_accepted", "Offers accepted on my applications"], ["coe_voe_issued", "CoE / VoE issued on my applications"]] as [NotificationEvent, string][]).map(([event, label]) => (
               <label key={event} className="flex cursor-pointer items-center gap-2 text-sm text-foreground-800">
                 <input type="checkbox" checked={prefs[event]} onChange={(e) => void togglePref(event, e.target.checked)} className="h-4 w-4" />
                 {label}

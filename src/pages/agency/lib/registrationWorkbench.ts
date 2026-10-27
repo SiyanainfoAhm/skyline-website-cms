@@ -35,7 +35,7 @@ export interface ChecklistItem { key: string; label: string; done: boolean }
 export function registrationChecklist(input: ChecklistInput): ChecklistItem[] {
   const progressed = input.state === "lodged" || input.state === "verified";
   return [
-    { key: "status", label: "Application reads coe_issued (the internal status; this is not a registration)", done: input.applicationStatus === "coe_issued" || input.applicationStatus === "enrolled" },
+    { key: "status", label: "The offer is accepted or later (the application status; this is not a registration)", done: ["offer_accepted", "coe_issued", "enrolled"].includes(input.applicationStatus) },
     { key: "lodged", label: "Registered in the external system by hand and marked as lodged", done: progressed },
     { key: "evidence", label: "Evidence recorded (confirmation page, CoE document or correspondence)", done: input.evidenceCount > 0 },
     { key: "coe", label: "CoE number entered", done: Boolean(input.coeNumber) },
@@ -47,7 +47,7 @@ export function registrationChecklist(input: ChecklistInput): ChecklistItem[] {
 export function verifyBlockers(input: ChecklistInput & { coeInput: string }): string[] {
   const blockers: string[] = [];
   if (input.state !== "lodged") blockers.push("Mark the registration as lodged first.");
-  if (input.applicationStatus !== "coe_issued" && input.applicationStatus !== "enrolled") blockers.push("The application must read coe_issued before registration can be verified.");
+  if (!["offer_accepted", "coe_issued", "enrolled"].includes(input.applicationStatus)) blockers.push("The offer must be accepted before registration can be verified.");
   if (input.evidenceCount < 1) blockers.push("Record at least one piece of evidence.");
   const coe = normaliseCoeNumber(input.coeInput);
   if (!coe.ok && coe.error) blockers.push(coe.error);

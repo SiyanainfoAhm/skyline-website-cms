@@ -8,7 +8,7 @@ import { createAzureProvider } from "../supabase/functions/_shared/document-extr
 import { createDocumentExtractionProvider } from "../supabase/functions/_shared/document-extraction/select.ts";
 import { MAX_ATTEMPTS, runLeasedExtraction, settleFailure, type JobPort } from "../supabase/functions/_shared/document-extraction/run.ts";
 import type { DocumentExtractionProvider } from "../supabase/functions/_shared/document-extraction/contract.ts";
-import { createMockEmailProvider, createPostmarkProvider, dispatchBatch, parseWebhook, selectEmailProvider, verifyBasicAuth, type ClaimedDelivery, type DeliveryPort, type EmailMessage, type SendOutcome, type WebhookEvent } from "../supabase/functions/_shared/notification/delivery.ts";
+import { authorizeWorker, createMockEmailProvider, createPostmarkProvider, dispatchBatch, formatFrom, parseWebhook, selectEmailProvider, verifyBasicAuth, type ClaimedDelivery, type DeliveryPort, type EmailMessage, type SendOutcome, type WebhookEvent } from "../supabase/functions/_shared/notification/delivery.ts";
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (() => { throw new Error("Network is forbidden in Azure adapter tests"); }) as typeof fetch;
@@ -504,7 +504,7 @@ test("notify: Postmark request is a plain-text transactional send with the serve
   assert.equal(call.method, "POST");
   assert.equal(call.headers["X-Postmark-Server-Token"], PM_TOKEN);
   assert.equal(call.headers["Content-Type"], "application/json");
-  assert.equal(call.body.From, '"Skyline Admissions" <admissions@example.test>', "quotes in the display name are removed");
+  assert.equal(call.body.From, '"Skyline \\"Admissions\\"" <admissions@example.test>', "quotes in the display name are escaped, not interpreted");
   assert.deepEqual([call.body.To, call.body.TextBody, call.body.HtmlBody, call.body.MessageStream, call.body.TrackOpens, call.body.TrackLinks], ["agent@example.test", "Plain text only.", undefined, "outbound", false, "None"]);
   assert.deepEqual(call.body.Metadata, { deliveryId: "d-1" });
 });
@@ -555,30 +555,30 @@ const claimed = (id: string, attempt = 1, sender: ClaimedDelivery["sender"] = { 
 test("notify: the dispatcher records each outcome kind exactly as the lifecycle expects", async () => {
   const { port, recorded } = fakePort([claimed("a"), claimed("b"), claimed("c", 3), claimed("d"), claimed("e")]);
   const provider = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }, { kind: "retry", code: "rate_limit" }, { kind: "retry", code: "rate_limit" }, { kind: "unknown", code: "timeout" }, { kind: "failed", code: "inactive_recipient" }]);
-  const summary = await dispatchBatch(port, provider, null, 10);
+  const summary = await dispatchBatch(port, provider, 10);
   assert.deepEqual(summary, { accepted: 1, retried: 1, failed: 2, unknown: 1, stale: 0 });
   assert.deepEqual(recorded.map((r) => `${r.id}:${r.outcome}:${r.retry}`), ["a:accepted:false", "b:failed:true", "c:failed:true", "d:unknown:false", "e:failed:false"]);
   assert.equal(recorded[1].delay, 60);
   assert.equal(recorded[3].code, "timeout");
 });
 
-test("notify: the dispatcher is bounded, uses the fallback sender and never calls the provider without one", async () => {
+test("notify: the dispatcher is bounded, sends only with the database-resolved sender and never falls back to a platform sender", async () => {
   const bounded = fakePort([claimed("a"), claimed("b"), claimed("c")]);
   const mock = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]);
-  assert.equal((await dispatchBatch(bounded.port, mock, null, 2)).accepted, 2);
-  const fallback = fakePort([claimed("f", 1, null)]);
+  assert.equal((await dispatchBatch(bounded.port, mock, 2)).accepted, 2);
+  const own = fakePort([claimed("f", 1, { name: "Org A", email: "it@a.example.test", replyTo: "help@a.example.test" })]);
   const used = createMockEmailProvider([{ kind: "accepted", messageId: "pm-7654321" }]);
-  await dispatchBatch(fallback.port, used, { name: "Skyline", email: "platform@example.test" }, 5);
-  assert.equal(used.sent[0].from.email, "platform@example.test");
+  await dispatchBatch(own.port, used, 5);
+  assert.deepEqual([used.sent[0].from.email, used.sent[0].replyTo], ["it@a.example.test", "help@a.example.test"]);
   const none = fakePort([claimed("g", 1, null)]);
   const unused = createMockEmailProvider([{ kind: "accepted", messageId: "pm-0000000" }]);
-  const summary = await dispatchBatch(none.port, unused, null, 5);
+  const summary = await dispatchBatch(none.port, unused, 5);
   assert.deepEqual([unused.sent.length, summary.failed, none.recorded[0].code], [0, 1, "sender_unconfigured"]);
 });
 
 test("notify: a delivery whose lease was lost is counted stale and not reported as sent", async () => {
   const { port, stale } = fakePort([claimed("a")]); stale("a");
-  const summary = await dispatchBatch(port, createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]), null, 5);
+  const summary = await dispatchBatch(port, createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]), 5);
   assert.deepEqual([summary.accepted, summary.stale], [0, 1]);
 });
 
@@ -607,4 +607,160 @@ test("notify: webhook payloads are validated, deduplicated by a stable key and s
   for (const bad of [null, [], "x", {}, { RecordType: 5 }, { RecordType: "Delivery" }, { RecordType: "Delivery", MessageID: "short" }, { RecordType: "Delivery", MessageID: "bad id with spaces ../" }]) assert.equal(parseWebhook(bad), null, JSON.stringify(bad));
   const replay = parseWebhook({ RecordType: "Delivery", MessageID: "0a129aee-e1cd-480d-b08d-4f48548ff48d" }) as WebhookEvent;
   assert.equal(replay.eventKey, delivery && delivery !== "ignored" ? delivery.eventKey : "", "a replay produces the same key");
+});
+
+test("notify: the display From is built as \"Name\" <address> with quotes, backslashes, brackets and control characters neutralised", () => {
+  assert.equal(formatFrom("Skyline Institute of Technology", "it@slit.edu.au"), '"Skyline Institute of Technology" <it@slit.edu.au>');
+  assert.equal(formatFrom('Acme "Best" <Uni>\\', "a@b.test"), '"Acme \\"Best\\" Uni\\\\" <a@b.test>');
+  assert.equal(formatFrom("Line\r\nBreak", "a@b.test"), '"Line Break" <a@b.test>');
+});
+
+test("notify: Postmark sender rejection is a definitive, non-retried failure and the From/Reply-To are sent as built", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const reject = (code: number) => (init: RequestInit) => { bodies.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ ErrorCode: code, Message: "x" }), { status: 422 }); };
+  for (const code of [400, 401]) {
+    const outcome = await createPostmarkProvider({ serverToken: PM_TOKEN, fetch: (async (_u: string, init: RequestInit) => reject(code)(init)) as unknown as typeof fetch }).send({ ...pmMessage, replyTo: "help@a.example.test" });
+    assert.deepEqual(outcome, { kind: "failed", code: "sender_rejected" });
+  }
+  assert.equal(bodies[0].ReplyTo, "help@a.example.test");
+  assert.match(String(bodies[0].From), /^".*" <.+>$/);
+});
+
+test("notify: the worker accepts only the service-role key (401 without a token, 403 for anon and user tokens)", async () => {
+  const service = "service.role.key-value";
+  assert.equal(await authorizeWorker(`Bearer ${service}`, service), 200);
+  assert.equal(await authorizeWorker(null, service), 401);
+  assert.equal(await authorizeWorker("", service), 401);
+  assert.equal(await authorizeWorker("Basic abc", service), 401);
+  for (const token of ["anon.key.value", "user.jwt.value", service + "x", service.slice(1)]) assert.equal(await authorizeWorker(`Bearer ${token}`, service), 403, token);
+  assert.equal(await authorizeWorker(`Bearer ${service}`, ""), 403, "an unconfigured service key never authorizes");
+});
+
+// ---- P08-06: submission PDF attached to the application_submitted email ----
+import { composeBody, type SubmissionInfo } from "../supabase/functions/_shared/notification/delivery.ts";
+import { MAX_ATTACHMENT_BYTES, MAX_PDF_PAGES, attachmentFileName, buildPdf, buildSubmissionPdf, submissionPdfLines } from "../supabase/functions/_shared/notification/submission-pdf.ts";
+
+const pdfText = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+const snapshotOf = (extra: Record<string, unknown> = {}) => ({
+  values: { first_name: "Ada", family_name: "Lovelace", passport_copy: "files/a.pdf", english_upload: "x", nationality: "Australia", interests: ["Maths", "Code"] },
+  courses: [{ title: "Certificate IV in Cyber Security", code: "22334VIC" }],
+  wizard: { confirmed: ["first_name"] }, provenance: { first_name: "manual" },
+  submission: { actor: "8f2c1d3e-0000-4000-8000-000000000001", consent: { method: "electronic", declarationVersion: "1.0", signedDocumentRef: "private/path.pdf" } },
+  ...extra,
+});
+const info = (patch: Partial<SubmissionInfo> = {}): SubmissionInfo => ({ mode: "attach", link: "https://slit.edu.au/agency/applications/app-1", reference: "SK-2026-0001", version: 1, institution: "Skyline Institute", submittedAt: "2026-10-27T01:02:03Z", snapshot: snapshotOf(), ...patch });
+const submitted = (id = "s1"): ClaimedDelivery => ({ ...claimed(id), event: "application_submitted", body: "Application SK-2026-0001 has been submitted." });
+
+test("pdf: the file is structurally valid (header, xref offsets, trailer, page count) and text is escaped and ASCII-safe", () => {
+  const bytes = buildPdf([{ text: "Smith (Jr) \\ back", style: "title" }, { text: "Zoë 山 café" }], "Tëst");
+  const text = pdfText(bytes);
+  assert.ok(text.startsWith("%PDF-1.4\n") && text.endsWith("%%EOF\n"));
+  const xrefAt = Number(/startxref\n(\d+)\n/.exec(text)?.[1]);
+  assert.ok(text.slice(xrefAt).startsWith("xref\n0 "));
+  const offsets = [...text.slice(xrefAt).matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+  offsets.forEach((offset, i) => assert.ok(text.slice(offset).startsWith(`${i + 1} 0 obj`), `object ${i + 1}`));
+  assert.equal(Number(/\/Count (\d+)/.exec(text)?.[1]), 1);
+  assert.ok(text.includes("Smith \\(Jr\\) \\\\ back"));
+  assert.ok(text.includes("Zoe ? cafe"));
+  assert.ok(/^[\n\x20-\x7e]*$/.test(text), "pure ASCII output");
+});
+
+test("pdf: long content paginates, is capped, stays under the attachment limit and says it was truncated", () => {
+  const lines = Array.from({ length: 8000 }, (_, i) => ({ text: `Line ${i} ${"word ".repeat(30)}` }));
+  const bytes = buildPdf(lines, "Long");
+  const text = pdfText(bytes);
+  const pages = Number(/\/Count (\d+)/.exec(text)?.[1]);
+  assert.ok(pages > 1 && pages <= MAX_PDF_PAGES, String(pages));
+  assert.ok(text.includes("Truncated: open the application in the portal"));
+  assert.ok(bytes.length < MAX_ATTACHMENT_BYTES);
+});
+
+test("pdf: only entered values are printed; uploads, wizard / provenance internals, actor ids and storage paths are left out", () => {
+  const text = pdfText(buildSubmissionPdf({ reference: "SK-2026-0001", institution: "Skyline Institute", version: 2, submittedAt: "2026-10-27T01:02:03Z", snapshot: snapshotOf() }));
+  for (const wanted of ["Application SK-2026-0001", "version 2, 2026-10-27", "First name: Ada", "Family name: Lovelace", "Interests: Maths, Code", "Certificate IV in Cyber Security \\(22334VIC\\)", "electronic"]) assert.ok(text.includes(wanted), wanted);
+  for (const unwanted of ["files/a.pdf", "Passport copy", "English upload", "manual", "8f2c1d3e", "private/path.pdf", "Wizard", "Provenance"]) assert.ok(!text.includes(unwanted), unwanted);
+  assert.ok(submissionPdfLines({ reference: "R", institution: "I", version: 1, submittedAt: null, snapshot: null }).some((l) => /No form values/.test(l.text)));
+  assert.equal(attachmentFileName("SK 2026/0001 «"), "application-SK20260001.pdf");
+  assert.equal(attachmentFileName(""), "application-submitted.pdf");
+});
+
+test("pdf: attach mode adds one PDF and says so; link mode sends only the sign-in link; other events are untouched", async () => {
+  const attach = await composeBody({ ...fakePort([]).port, submission: async () => info() }, submitted());
+  assert.equal(attach.attachments?.length, 1);
+  assert.equal(attach.attachments?.[0].name, "application-SK-2026-0001.pdf");
+  assert.equal(attach.attachments?.[0].contentType, "application/pdf");
+  assert.ok(atob(attach.attachments![0].contentBase64).startsWith("%PDF-1.4"));
+  assert.match(attach.textBody, /attached as a PDF/);
+  assert.ok(!attach.textBody.includes("Ada"));
+  const link = await composeBody({ ...fakePort([]).port, submission: async () => info({ mode: "link", snapshot: null }) }, submitted());
+  assert.equal(link.attachments, undefined);
+  assert.match(link.textBody, /sign-in required\): https:\/\/slit\.edu\.au\/agency\/applications\/app-1$/);
+  let asked = 0;
+  const other = await composeBody({ ...fakePort([]).port, submission: async () => { asked++; return info(); } }, { ...submitted(), event: "offer_accepted" });
+  assert.deepEqual([other.attachments, other.textBody, asked], [undefined, "Application SK-2026-0001 has been submitted.", 0]);
+});
+
+test("pdf: a failing lookup or a PDF that cannot be built never blocks the email and falls back to the link or the plain body", async () => {
+  const lookupFails = await composeBody({ ...fakePort([]).port, submission: async () => { throw new Error("rpc"); } }, submitted());
+  assert.deepEqual([lookupFails.attachments, lookupFails.textBody], [undefined, "Application SK-2026-0001 has been submitted."]);
+  const none = await composeBody({ ...fakePort([]).port, submission: async () => null }, submitted());
+  assert.equal(none.attachments, undefined);
+  const broken = { get values(): never { throw new Error("cannot render"); } };
+  const fallback = await composeBody({ ...fakePort([]).port, submission: async () => info({ snapshot: broken }) }, submitted());
+  assert.equal(fallback.attachments, undefined);
+  assert.match(fallback.textBody, /sign-in required\): https:\/\//);
+  const missing = await composeBody({ ...fakePort([]).port, submission: async () => info({ snapshot: null }) }, submitted());
+  assert.equal(missing.attachments, undefined);
+});
+
+test("pdf: the dispatcher sends the attachment, and what it records never contains form content", async () => {
+  const { port, recorded } = fakePort([submitted("s1")]);
+  const provider = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]);
+  const summary = await dispatchBatch({ ...port, submission: async () => info() }, provider, 5);
+  assert.equal(summary.accepted, 1);
+  assert.equal(provider.sent[0].attachments?.length, 1);
+  assert.ok(!JSON.stringify(recorded).includes("Ada") && !JSON.stringify(recorded).includes("%PDF"));
+});
+
+test("pdf: the Postmark adapter sends Attachments only when there are some", async () => {
+  const withFile = pmHarness(() => new Response(JSON.stringify({ ErrorCode: 0, MessageID: "11111111-2222-3333-4444-555555555555" }), { status: 200 }));
+  await withFile.provider.send({ ...pmMessage, attachments: [{ name: "application-SK-1.pdf", contentType: "application/pdf", contentBase64: btoa("%PDF-1.4") }] });
+  assert.deepEqual(withFile.calls[0].body.Attachments, [{ Name: "application-SK-1.pdf", Content: btoa("%PDF-1.4"), ContentType: "application/pdf" }]);
+  const without = pmHarness(() => new Response(JSON.stringify({ ErrorCode: 0, MessageID: "11111111-2222-3333-4444-555555555555" }), { status: 200 }));
+  await without.provider.send(pmMessage);
+  assert.ok(!("Attachments" in without.calls[0].body));
+});
+
+// ---- P08-07: the issued CoE / VoE travels with the coe_voe_issued email ----
+import { AttachmentUnavailableError, type CoeDocumentInfo } from "../supabase/functions/_shared/notification/delivery.ts";
+
+const coeDoc = (patch: Partial<CoeDocumentInfo> = {}): CoeDocumentInfo => ({ kind: "coe", sizeBytes: 15, contentBase64: btoa("%PDF-1.4\n%%EOF\n"), reference: "SK-2026-0001", ...patch });
+const issuedDelivery = (id = "c1"): ClaimedDelivery => ({ ...claimed(id), event: "coe_voe_issued", body: "The CoE / VoE for application SK-2026-0001 has been issued." });
+
+test("coe/voe email: the issued PDF is attached, named by type and reference, and the body says so", async () => {
+  const composed = await composeBody({ ...fakePort([]).port, coeDocument: async () => coeDoc() }, issuedDelivery());
+  assert.equal(composed.attachments?.length, 1);
+  assert.deepEqual([composed.attachments?.[0].name, composed.attachments?.[0].contentType], ["CoE-SK-2026-0001.pdf", "application/pdf"]);
+  assert.match(composed.textBody, /The CoE is attached as a PDF\./);
+  const voe = await composeBody({ ...fakePort([]).port, coeDocument: async () => coeDoc({ kind: "voe" }) }, issuedDelivery());
+  assert.equal(voe.attachments?.[0].name, "VoE-SK-2026-0001.pdf");
+});
+
+test("coe/voe email: a plain status change (no document issued) sends the plain notice; other events never ask for a document", async () => {
+  const none = await composeBody({ ...fakePort([]).port, coeDocument: async () => null }, issuedDelivery());
+  assert.deepEqual([none.attachments, none.textBody], [undefined, "The CoE / VoE for application SK-2026-0001 has been issued."]);
+  let asked = 0;
+  await composeBody({ ...fakePort([]).port, coeDocument: async () => { asked++; return coeDoc(); } }, { ...issuedDelivery(), event: "offer_accepted" });
+  assert.equal(asked, 0);
+});
+
+test("coe/voe email: if the document cannot be read the delivery is retried later and nothing is sent without it", async () => {
+  await assert.rejects(composeBody({ ...fakePort([]).port, coeDocument: async () => { throw new Error("rpc"); } }, issuedDelivery()), AttachmentUnavailableError);
+  await assert.rejects(composeBody({ ...fakePort([]).port, coeDocument: async () => coeDoc({ sizeBytes: 0 }) }, issuedDelivery()), AttachmentUnavailableError);
+  const { port, recorded } = fakePort([issuedDelivery("c1"), issuedDelivery("c2")]);
+  const provider = createMockEmailProvider([{ kind: "accepted", messageId: "pm-1234567" }]);
+  const summary = await dispatchBatch({ ...port, coeDocument: async (d) => { if (d.id === "c1") throw new Error("down"); return coeDoc(); } }, provider, 5);
+  assert.deepEqual([summary.retried, summary.accepted, provider.sent.length], [1, 1, 1]);
+  assert.deepEqual(recorded.map((r) => `${r.id}:${r.code}:${r.retry}`), ["c1:attachment_unavailable:true", "c2:null:false"]);
+  assert.equal(provider.sent[0].attachments?.length, 1);
 });

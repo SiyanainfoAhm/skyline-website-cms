@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/pages/admin/lib/supabase";
 import { useToast } from "@/pages/admin/components/toastContext";
+import SenderSettings from "@/pages/admin/components/SenderSettings";
+import EventRecipients from "@/pages/admin/components/EventRecipients";
 import { AdminError, AdminLoading, Badge, Button, Card, EmptyState, Field, Modal, TextInput } from "@/pages/admin/components/ui";
 
 interface Delivery { id: string; event: string; recipient: string; state?: string; attempts: number; errorCode: string | null; at: string }
@@ -14,7 +16,7 @@ interface Overview {
 }
 
 const STATE_TONE: Record<string, "success" | "warn" | "muted" | "primary"> = { sent: "success", delivered: "success", pending: "primary", sending: "primary", suppressed: "muted", failed: "warn", bounced: "warn", complained: "warn", unknown: "warn" };
-const EVENT_LABEL: Record<string, string> = { application_submitted: "Application submitted", application_status_changed: "Status changed" };
+const EVENT_LABEL: Record<string, string> = { application_submitted: "Application submitted", application_status_changed: "Status changed", offer_accepted: "Offer accepted", coe_voe_issued: "CoE / VoE issued" };
 
 function reason(error: { code?: string; message?: string }): string {
   if (error.code === "42501") return "You do not have permission to do that.";
@@ -54,7 +56,7 @@ export default function DeliveriesPanel({ tenantId }: { tenantId: string }) {
   if (failed) return <AdminError message="Delivery information is unavailable for this account." onRetry={() => void load()} />;
   if (!data) return <AdminLoading label="Loading deliveries…" />;
 
-  const senderMode = !data.sender.configured ? "Platform sender" : data.sender.allowed ? "Institution sender" : "Platform sender (the configured address is not approved)";
+  const senderMode = !data.sender.configured ? "set below (organization name and address)" : data.sender.allowed ? "Institution sender" : "not approved, so emails fail safely until it is";
 
   return (
     <div className="space-y-5">
@@ -78,6 +80,10 @@ export default function DeliveriesPanel({ tenantId }: { tenantId: string }) {
         )}
         {data.sender.approved.length > 0 && <p className="mt-3 text-xs text-background-600">Approved senders: {data.sender.approved.join(", ")}</p>}
       </Card>
+
+      <SenderSettings tenantId={tenantId} />
+
+      <EventRecipients tenantId={tenantId} />
 
       <Card className="p-5">
         <h3 className="mb-3 text-sm font-semibold">Last 30 days</h3>

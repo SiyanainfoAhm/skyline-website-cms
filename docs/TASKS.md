@@ -15,12 +15,13 @@ Phase order (ADR-012, 2026-10-26): 5 Azure, 6 RTO administration, 7 Postmark, 8 
 | 6 RTO and company administration | 4 | 4 | 0 | PENDING |
 | 7 Postmark email and notifications | 3 | 3 | 0 | PENDING |
 | 8 PRISMS registration (manual) | 3 | 3 | 0 | PENDING |
+| 8b Admissions workflow revision | 5 | 4 | 1 | PENDING |
 | 9 Multi-tenant RAG chatbot | 5 | 0 | 5 | PENDING |
 | 10 Stripe subscriptions and billing | 3 | 0 | 3 | PENDING |
 | 11 Performance, security, observability, deploy | 4 | 0 | 4 | PENDING |
-| **Total** | **50** | **37** | **13** | |
+| **Total** | **55** | **41** | **14** | |
 
-**Next eligible: P09-01.** P05-04 live run needs explicit owner approval and a hosted release.
+**Next eligible: P09-01** (Phase 8b is complete except P08-08, BLOCKED on PRISMS API access). P05-04 live run needs explicit owner approval and a hosted release.
 
 ## Phases 1-4 (DONE)
 
@@ -114,9 +115,38 @@ Phase order (ADR-012, 2026-10-26): 5 Azure, 6 RTO administration, 7 Postmark, 8 
   - Acceptance: every correction attributable; status/history consistent; no unsupported API assumptions.
   - Tests: REG-REGISTER/AGENCY correction, cancellation, mismatch, retention.
 
+## Phase 8b - Admissions workflow revision
+
+Owner decisions (2026-10-27), recorded for P08-04 to P08-07:
+- Stored status values do NOT change. `coe_issued` stays; only its label becomes "CoE / VoE issued". "Offer issued" and "Under review" are removed from every selectable list, filter and the default transition graph; existing rows in those statuses stay valid and can only move forward.
+- New default graph: draft -> submitted; submitted <-> action_required; submitted / action_required -> offer_accepted; offer_accepted -> coe_issued -> enrolled; rejected and withdrawn reachable by admins. After submission agents and agency admins have NO status transitions (enforced server-side by RPC/RLS, shown read-only in the UI); during action_required they can only add documents or edit allowed fields.
+- The default-equals-hardcoded parity tests are updated deliberately, not left to drift.
+
+- P08-04 Revise status model, labels and permissions. status: DONE (local, 2026-10-27; migration 91 local only, unapplied). New default graph, legacy under_review/offer_issued rows forward-only, agents/agency admins have no status transition after submission (portal_submit_v2 drafts only; status RPC reviewer-only; direct writes blocked), "CoE / VoE issued" label in UI and email text, removed statuses out of filters/pickers/dashboard. 25 new pgTAP + 4 unit cases, parity test deliberately updated (8 statuses, 64 pairs); all 12 SQL suites green (phase4 123, phase2 red 425), native lab 19/0 + Notify 9/0. Browser flows not run. Priority P0. Deps: P08-03, P06-02.
+  - Scope: additive migration replacing the default workflow graph (new transitions above; legacy `under_review` / `offer_issued` rows only move forward); `portal_legacy_transition_allowed` and the pinned-workflow defaults follow the new graph; agents and agency admins lose every status transition after submission (RPC and RLS enforce it; during `action_required` they may only add documents / edit allowed fields); label "CoE / VoE issued" for `coe_issued` and the removal of the two statuses from selectable lists, filters, badges and inbox/notification text everywhere in the UI; read-only status display for agent roles.
+  - Acceptance: only the new graph is selectable and enforceable; no stored status value changes; existing rows in removed statuses stay readable and can move forward; an agent or agency admin calling the status RPC after submission is refused server-side; labels consistent across portal, registrations workbench, filters and email text.
+  - Tests: pgTAP for every allowed and refused transition per role (incl. legacy-status rows, direct REST writes); default-graph parity tests updated deliberately; offline label/filter tests; native lab regression.
+- P08-05 Notification recipients and events (admin-managed). status: DONE (local, 2026-10-27; migration 92 local only, unapplied). Events application_submitted, application_status_changed, offer_accepted, coe_voe_issued (status RPC names the event after the target status); per-event internal recipients (max 10) and agent / agency admin / student toggles in the tenant `notifications` config (versioned, audited) or, for the legacy scope, `notification_legacy_event_settings`; deliveries support non-user recipients (activation, opt-out and sender rules unchanged); admin UI in Email deliveries and Website Settings. 37 new pgTAP + 4 unit cases, all 12 SQL suites green (phase4 160), native lab 20/0 + Notify 10/0. Browser flows not run. Deps: P08-04, P07-03.
+  - Scope: per-event settings in the existing `notifications` config for application_submitted (admin recipients), offer_accepted (agent) and coe_voe_issued (student + agent): internal recipient emails list and toggles for agent / agency admins / student; deliveries must support non-user recipient emails (suppression, opt-out and the migration 84 activation rules unchanged for them); address validation, audit of changes, admin UI in the Email deliveries area.
+  - Acceptance: each event resolves exactly its configured recipients; internal and student recipients are delivered without a portal account; invalid or duplicate addresses rejected on save; every change attributable; activation gate and sender rules still apply.
+  - Tests: pgTAP recipients per event and toggle combination, non-user recipients, validation and audit; offline config tests; native lab Notify run.
+- P08-06 Submission PDF. status: DONE (local, 2026-10-27; migration 93 local only, unapplied; notification-delivery function changed, undeployed). The worker builds a dependency-free PDF of the immutable submitted version at send time (in memory only; 2 MB / 40-page cap, falls back to a sign-in link) and attaches it to application_submitted; per-institution option attach (default) vs secure link; Postmark Attachments in the adapter, mock and lab; snapshot released only to the service role for a claimed delivery; delivery rows and logs keep only the reference. 16 new pgTAP + 7 unit cases, all 12 SQL suites green (phase4 176), native lab 21/0 + Notify 11/0. Browser flows not run. Deps: P08-05.
+  - Scope: server-side PDF of the immutable submitted form version attached to the application_submitted email; per-institution option attach vs secure link; attachment size cap; Postmark attachment support in the adapter, mock and lab Notify run; no PII in logs or delivery rows beyond the application reference.
+  - Acceptance: the PDF matches the submitted snapshot and never a later edit; over-cap or failed generation degrades to the secure link or a safe failure without blocking submission; no document content or student PII in logs or delivery rows.
+  - Tests: snapshot-fidelity and size-cap unit tests; adapter/mock attachment payload tests; lab Notify run with attachment; log/row PII checks.
+- P08-07 CoE/VoE issue flow (manual until the PRISMS API). status: DONE (local, 2026-10-27; migration 94 local only, unapplied; notification-delivery function changed, undeployed). Registration verification now possible from offer_accepted; reviewers upload the CoE/VoE PDF (type, 3 MB cap, %PDF- and %%EOF validated, private table with no browser grants, issued documents immutable); "Approve and issue" (verified registration + uploaded PDF + offer accepted) sets coe_issued through the status command in one transaction and the coe_voe_issued email carries the PDF to the P08-05 recipients (retried, never sent without it); missing/malformed student or user addresses create visible suppressed deliveries (invalid_recipient) listed for administrators. 39 new pgTAP + 7 unit cases (P08-05/06 paths included), parity/registration tests updated deliberately; all 12 SQL suites green (phase4 215, phase2 red 425), native lab 22/0 + Notify 12/0. Browser flows not run. Deps: P08-06, P08-02.
+  - Scope: admin uploads the CoE or VoE PDF (type selection, size limit, PDF-only validation, private storage); requires a verified registration; relax registration verification to allow `offer_accepted` and later; "Approve and issue" sets `coe_issued` and emails student + agent with the document; audit and tests.
+  - Scope (add): a missing or malformed student/recipient email must create a visible suppressed delivery (reason invalid_recipient) shown to administrators, never a silent skip; also apply this to the P08-05 event paths.
+  - Acceptance: only an authorized admin can issue; issue is refused without a verified registration or a valid PDF; verification possible from `offer_accepted`; recipients per P08-05 receive the document; every step audited; private storage and access rules unchanged.
+  - Tests: pgTAP issue preconditions and permissions, registration-verification range, storage policy; offline PDF validation; native lab Notify run for the issue email.
+- P08-08 Automate CoE/VoE retrieval via the PRISMS API once the provider has API access. status: BLOCKED (external: no provider API access yet; no unsupported API assumptions). Deps: P08-07.
+  - Scope: replace the manual CoE/VoE upload step with retrieval through the PRISMS API when access exists; keep the manual path as the fallback.
+  - Acceptance: defined only after the provider documents and grants API access.
+  - Tests: to be defined with the API contract.
+
 ## Phase 9 - Multi-tenant RAG chatbot
 
-- P09-01 Scope RAG knowledge and cache to verified tenant. status: TODO. Priority P0. Deps: P02-10, P03-05.
+- P09-01 Scope RAG knowledge and cache to verified tenant. status: TODO. Priority P0. Deps: P02-10, P03-05, P08-07.
   - Scope: bind structured/FAQ/vector/cache/index operations and budgets to the authorized public tenant (public-assistant, public-assistant-index).
   - Acceptance: tenant B cannot retrieve A sources or cached answers; private student documents never enter the public index.
   - Tests: REG-RAG/SEC two-host, spoofed tenant, private bucket, unpublished.
@@ -156,6 +186,7 @@ Phase order (ADR-012, 2026-10-26): 5 Azure, 6 RTO administration, 7 Postmark, 8 
 
 - P11-01 Core performance. status: TODO. Deps: P09-05, P06-03.
   - Scope: pagination/index plans, bundle/lazy loading, bounded worker throughput and memory.
+  - Scope (add): measure database and backup-checkpoint growth from PDF bytes stored in tables; if volume warrants, move generated/uploaded PDFs to the private storage bucket with storage policies and tests.
   - Acceptance: measured p95/throughput/cost with stated dataset and hardware; no capacity claimed from compilation.
   - Tests: REG-PERF plus affected regressions.
 - P11-02 Security, accessibility, failure review. status: TODO. Priority P0. Deps: P07-03, P08-03, P10-03, P11-01.
