@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { menuTree, menuActive, menuIcon, type AdminMenuItem } from '../src/pages/admin/lib/adminMenu.ts';
 import { canManagePortalUsers, isEditableApplicationStatus, portalAccessMessage, portalLanding } from "../src/pages/agency/lib/applicationAccess.ts";
 import { availableActions, csvCell, EXPORT_COLUMNS, exportCsv, EXCEPTION_TEXT, normaliseCoeNumber, registrationChecklist, registrationWarning, validateCorrection, verifyBlockers } from "../src/pages/agency/lib/registrationWorkbench.ts";
+
+test('admin menu: order, nesting and active deep links follow backend rows', () => {
+  const row = (id: string, parent_id: string | null, route: string | null, sort_order = 0): AdminMenuItem =>
+    ({ id, parent_id, route, sort_order, label: id, icon_key: 'pages', is_enabled: true, open_in_new_tab: false });
+  const tree = menuTree([row('site', null, null, 20), row('pages', 'site', '/admin/pages'), row('home', null, '/admin', 0)]);
+  assert.deepEqual(tree.map(n => n.id), ['home', 'site']);
+  assert.equal(menuActive(tree[1], '/admin/pages/a-page'), true);
+  assert.equal(menuActive(tree[0], '/admin/pages'), false);
+  assert.equal(menuActive(tree[1], '/admin/pages-lookalike'), false);
+});
+test('admin menu: denied parents, disabled rows, cycles and unsafe routes fail closed', () => {
+  const row = (id: string, parent_id: string | null, route: string | null): AdminMenuItem =>
+    ({ id, parent_id, route, sort_order: 0, label: id, icon_key: 'pages', is_enabled: true, open_in_new_tab: false });
+  assert.deepEqual(menuTree([
+    row('orphan', 'denied', '/admin/users'), row('a', 'b', null), row('b', 'a', null),
+    row('script', null, 'javascript:alert(1)'), row('remote', null, '//example.test'),
+    row('unknown', null, '/admin/not-implemented'), row('empty', null, null),
+    { ...row('disabled', null, '/admin/pages'), is_enabled: false },
+  ]), []);
+  assert.equal(menuIcon('pages'), 'ri-file-text-line');
+  assert.equal(menuIcon('evil onclick=alert(1)'), 'ri-folder-line');
+  assert.equal(menuIcon('__proto__'), 'ri-folder-line');
+});
 
 test("only database-editable portal statuses enable draft UI", () => {
   assert.equal(isEditableApplicationStatus("draft"), true);
