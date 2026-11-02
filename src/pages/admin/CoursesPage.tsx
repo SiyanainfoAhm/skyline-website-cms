@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
@@ -202,8 +203,8 @@ export default function CoursesPage() {
             description="Try clearing the search or selecting a different category."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
+          <div className="">
+            <ResponsiveTable>
               <thead>
                 <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                   <th className="px-4 py-3 font-medium">Order</th>
@@ -302,7 +303,7 @@ export default function CoursesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
       </Card>

@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/pages/admin/lib/supabase";
@@ -103,8 +104,8 @@ export default function NotificationLogTable({ applicationId }: { applicationId?
         ) : !loading && rows.length === 0 ? (
           <EmptyState icon="ri-mail-line" title="No notifications" description="Nothing matches these filters. Notifications appear here when an application is submitted or changes status." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-sm" aria-busy={loading}>
+          <div className="">
+            <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr className="border-b border-background-200 text-xs uppercase text-foreground-500">
                   <th className="p-3">Time</th><th className="p-3">Event</th>{applicationId ? null : <th className="p-3">Application</th>}
@@ -126,7 +127,7 @@ export default function NotificationLogTable({ applicationId }: { applicationId?
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
         {total > PAGE_SIZE ? (
@@ -142,3 +143,4 @@ export default function NotificationLogTable({ applicationId }: { applicationId?
     </div>
   );
 }
+

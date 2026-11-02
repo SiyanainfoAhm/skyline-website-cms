@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, PageHeader, Select, TextInput } from "@/pages/admin/components/ui";
@@ -65,8 +66,8 @@ export default function AgenciesPage() {
             description={filtered ? "Try a different search or status." : "No agencies yet. Add your first agency."}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm" aria-busy={loading}>
+          <div className="">
+            <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr className="border-b border-background-200 text-xs uppercase text-foreground-500">
                   <th className="p-4">Agency</th>
@@ -91,7 +92,7 @@ export default function AgenciesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
         {!error ? (
@@ -107,3 +108,4 @@ export default function AgenciesPage() {
     </div>
   );
 }
+

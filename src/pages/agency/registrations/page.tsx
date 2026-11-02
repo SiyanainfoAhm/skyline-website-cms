@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/pages/agency/lib/portalData";
 import CoeVoePanel from "@/pages/agency/components/CoeVoePanel";
@@ -130,8 +131,8 @@ export default function RegistrationWorkbenchPage() {
         {loading ? <PortalLoading label="Loading registrations…" /> : error ? <PortalError message={error} onRetry={() => void load()} /> : rows.length === 0 ? (
           <PortalEmpty icon="ri-file-shield-2-line" title="Nothing to register" message="Applications appear here once the offer has been accepted." />
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-background-200">
-            <table className="min-w-full text-left text-sm">
+          <div className="rounded-lg border border-background-200">
+            <ResponsiveTable>
               <caption className="sr-only">Applications ready for manual registration</caption>
               <thead className="bg-background-100 text-xs uppercase text-foreground-600">
                 <tr><th scope="col" className="px-3 py-2"><span className="sr-only">Select</span></th><th scope="col" className="px-3 py-2">Reference</th><th scope="col" className="px-3 py-2">Student</th><th scope="col" className="px-3 py-2">Application</th><th scope="col" className="px-3 py-2">Registration</th><th scope="col" className="px-3 py-2"><span className="sr-only">Open</span></th></tr>
@@ -151,7 +152,7 @@ export default function RegistrationWorkbenchPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
       </div>
@@ -255,3 +256,4 @@ export default function RegistrationWorkbenchPage() {
     </div>
   );
 }
+

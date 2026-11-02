@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useState } from "react";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { Button, Card, Field, Modal, PageHeader, TextArea, TextInput } from "@/pages/admin/components/ui";
@@ -53,8 +54,8 @@ export default function SeoPage() {
       <DraftResume items={slot.pending.map((d) => ({ id: d.id, label: d.id === "new" ? "New SEO entry (not saved yet)" : `SEO: ${data.seo.find((e) => e.id === d.id)?.page ?? d.id}` }))} onResume={resumeDraft} onDiscard={slot.dropPending} />
 
       <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left text-sm">
+        <div className="">
+          <ResponsiveTable>
             <thead>
               <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                 <th className="px-4 py-3 font-medium">Page</th>
@@ -97,7 +98,7 @@ export default function SeoPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ResponsiveTable>
         </div>
       </Card>
 
@@ -148,3 +149,4 @@ export default function SeoPage() {
     </div>
   );
 }
+

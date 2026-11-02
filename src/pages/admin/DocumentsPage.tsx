@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useRef, useState } from "react";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Select, StatusBadge, TextArea, TextInput, Toggle } from "@/pages/admin/components/ui";
@@ -199,8 +200,8 @@ export default function DocumentsPage() {
                 <h2 className="font-heading text-base font-bold text-foreground-950">{section.name}</h2>
                 <Badge tone="secondary">{section.items.length} documents</Badge>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-left text-sm">
+              <div className="">
+                <ResponsiveTable>
                   <thead>
                     <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                       <th className="px-4 py-3 font-medium">#</th>
@@ -290,7 +291,7 @@ export default function DocumentsPage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </ResponsiveTable>
               </div>
             </Card>
           ))}
@@ -368,3 +369,4 @@ export default function DocumentsPage() {
     </div>
   );
 }
+

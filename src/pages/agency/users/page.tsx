@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from 'react-router-dom';
 import { supabase } from "@/pages/admin/lib/supabase";
@@ -194,8 +195,8 @@ function LegacyUsersPage() {
       {invitations.length > 0 ? (
         <div className="mt-6 overflow-hidden rounded-card border border-background-200 bg-background-50">
           <h2 className="border-b border-background-200 px-4 py-3 font-heading text-base font-semibold text-foreground-950">Pending invitations</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
+          <div className="">
+            <ResponsiveTable>
               <tbody>
                 {invitations.map((inv) => {
                   const mine = isSlit || inv.invitedBy === authUserId;
@@ -228,7 +229,7 @@ function LegacyUsersPage() {
                   );
                 })}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         </div>
       ) : null}
@@ -242,8 +243,8 @@ function LegacyUsersPage() {
           <PortalEmpty icon="ri-group-line" title="No portal users yet" message="Choose Add user to invite your first user." />
         ) : (
           <div className="overflow-hidden rounded-card border border-background-200 bg-background-50">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-sm">
+            <div className="">
+              <ResponsiveTable>
                 <thead>
                   <tr className="border-b border-background-200 bg-background-100 text-left text-xs font-semibold uppercase tracking-wide text-foreground-500">
                     <th className="px-4 py-3">Name</th>
@@ -297,7 +298,7 @@ function LegacyUsersPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           </div>
         )}
@@ -338,3 +339,4 @@ function LegacyUsersPage() {
     </div>
   );
 }
+

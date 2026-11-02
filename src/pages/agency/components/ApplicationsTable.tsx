@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { Link } from "react-router-dom";
@@ -294,8 +295,8 @@ export default function ApplicationsTable({
       ) : (
         <>
           <div className="rounded-card border border-background-200 bg-background-50">
-            <table className="block w-full md:table table-fixed border-collapse text-left text-sm [&_td]:min-w-0 [&_td]:break-words [&_td]:[overflow-wrap:anywhere] [&_td]:whitespace-normal [&_th]:whitespace-normal [&_th]:px-2 [&_td]:px-2 [&_td_span]:whitespace-normal max-md:[&_td]:block max-md:[&_td]:py-2 max-md:[&_td]:before:mb-1 max-md:[&_td]:before:block max-md:[&_td]:before:text-[10px] max-md:[&_td]:before:font-semibold max-md:[&_td]:before:uppercase max-md:[&_td]:before:text-foreground-500 max-md:[&_td]:before:content-[attr(data-label)]">
-              <thead className="max-md:sr-only bg-background-100 text-xs uppercase tracking-wide text-foreground-700">
+            <ResponsiveTable>
+              <thead className="bg-background-100 text-xs uppercase tracking-wide text-foreground-700">
                 <tr>
                   <th className="w-[24%] px-2 py-2.5"><div className="flex flex-wrap gap-x-2 gap-y-1">{sortButton("Student", "student")}{sortButton("Reference", "reference")}</div></th>
                   <th className="px-2 py-2.5 font-semibold">Course / Intake</th>
@@ -306,11 +307,11 @@ export default function ApplicationsTable({
                   <th className="whitespace-nowrap px-3 py-2.5 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
-              <tbody className="block md:table-row-group">
+              <tbody>
                 {paged.map((row) => {
                   const meta = statusMeta(row.status);
                   return (
-                    <tr key={row.id} className="grid grid-cols-2 md:table-row border-t border-background-200 transition-colors hover:bg-background-100/60">
+                    <tr key={row.id} className="border-t border-background-200 transition-colors hover:bg-background-100/60">
                       <td data-label="Student / Reference" className="px-2 py-3">
                         <span className="font-mono text-xs font-semibold text-foreground-900">
                           {row.reference || "\u2014"}
@@ -379,7 +380,7 @@ export default function ApplicationsTable({
                   );
                 })}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
