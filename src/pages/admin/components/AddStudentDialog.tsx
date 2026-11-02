@@ -227,7 +227,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
                 <button type="button" className="font-semibold text-primary-700 hover:text-primary-800" onClick={() => openNewAgent("")}>Add its first agent</button>
               </div>
             ) : (
-              <SearchPick label="Portal team member" addNoun="team member" placeholder={`Search team members at ${business.name}`} resetKey={business.id} autoFocus searchWhenEmpty
+              <SearchPick label="Portal team member" addNoun="team member" placeholder={`Search team members at ${business.name}`} resetKey={business.id} autoFocus searchWhenEmpty openOnMount
                 search={searchAgents}
                 onPick={(o) => setAgent({ kind: "existing", row: (o as PickOption & { raw: DirectoryAgent }).raw })}
                 onAddNew={openNewAgent} />

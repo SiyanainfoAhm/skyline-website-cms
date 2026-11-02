@@ -24,6 +24,7 @@ export default function SearchPick({
   autoFocus,
   resetKey,
   searchWhenEmpty = false,
+  openOnMount = false,
 }: {
   label: string;
   placeholder: string;
@@ -38,10 +39,12 @@ export default function SearchPick({
   resetKey?: string;
   /** Load options on focus when an empty query is meaningful, such as a scoped team list. */
   searchWhenEmpty?: boolean;
+  /** Show the dropdown immediately when the picker is mounted. */
+  openOnMount?: boolean;
 }) {
   const id = useId();
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(openOnMount);
   const [options, setOptions] = useState<PickOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
