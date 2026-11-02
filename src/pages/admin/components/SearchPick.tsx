@@ -48,10 +48,18 @@ export default function SearchPick({
   useEffect(() => {
     if (!open) return;
     let live = true;
+    const query = q.trim();
+    if (!query) {
+      setOptions([]);
+      setLoading(false);
+      setFailed(false);
+      setActive(0);
+      return () => { live = false; };
+    }
     setLoading(true);
     setFailed(false);
     const timer = window.setTimeout(() => {
-      search(q.trim())
+      search(query)
         .then((rows) => { if (live) { setOptions(rows); setActive(0); } })
         .catch(() => { if (live) { setOptions([]); setFailed(true); } })
         .finally(() => { if (live) setLoading(false); });
