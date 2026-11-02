@@ -234,11 +234,90 @@ test("driving licence maps a structured Australian address and keeps unstructure
     Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Street", city: "Sydney", state: "NSW", postalCode: "2000", countryRegion: "AUS" } }),
   } };
   const outcome = ok(await harness([accepted(), succeeded([doc])]).provider.extract(req("Driving Licence")));
-  assert.deepEqual(outcome.fields, { first_name: "Asha", last_name: "Testperson", dob: "1999-04-05", address_type: "Australian Address", au_street: "1 Example Street", au_suburb: "Sydney", au_state: "NSW", au_zip: "2000" });
+  assert.deepEqual(outcome.fields, { first_name: "Asha", last_name: "Testperson", dob: "1999-04-05", address_type: "Australian Address", au_street: "1 Example Street", au_suburb: "Sydney", au_state: "NSW", au_zip: "2000", au_country: "Australia" });
   const plain = { docType: "idDocument.driverLicense", fields: { Address: field({ type: "string", valueString: "1 Example St Sydney NSW" }) } };
   const text = ok(await harness([accepted(), succeeded([plain])]).provider.extract(req("Driving Licence")));
   assert.deepEqual(text.fields, {});
   assert.ok(text.warnings.some((w) => /address/i.test(w)));
+});
+
+// Realistic Australian licence as prebuilt-idDocument returns it: no printed country, licence number in DocumentNumber,
+// the separate card number in DocumentDiscriminator, class in VehicleClassifications, state also in Region.
+const auLicence = (fields: Record<string, unknown> = {}) => ({ docType: "idDocument.driverLicense", fields: {
+  FirstName: field({ type: "string", valueString: "Asha" }, 1, 0.96), LastName: field({ type: "string", valueString: "Testperson" }, 1, 0.95),
+  DateOfBirth: field({ type: "date", valueDate: "1999-04-05" }), DateOfIssue: field({ type: "date", valueDate: "2023-06-01" }), DateOfExpiration: field({ type: "date", valueDate: "2028-06-01" }),
+  DocumentNumber: field({ type: "string", valueString: "12345678" }), DocumentDiscriminator: field({ type: "string", valueString: "4012345678" }),
+  VehicleClassifications: field({ type: "string", valueString: "C" }), Region: field({ type: "string", valueString: "NSW" }), Sex: field({ type: "string", valueString: "F" }),
+  Address: field({ type: "address", valueAddress: { houseNumber: "12", road: "Example Street", city: "Parramatta", state: "NSW", postalCode: "2150" } }, 1, 0.9),
+  ...fields,
+} });
+const licenceFields = async (doc: unknown) => ok(await harness([accepted(), succeeded([doc])]).provider.extract(req("Driving Licence")));
+
+test("driving licence (Australian): address without a printed country is mapped; licence/card number, class and expiry have no application field and are not invented", async () => {
+  const outcome = await licenceFields(auLicence());
+  assert.deepEqual(outcome.fields, { first_name: "Asha", last_name: "Testperson", dob: "1999-04-05", gender: "Female", address_type: "Australian Address", au_street: "12 Example Street", au_suburb: "Parramatta", au_state: "NSW", au_zip: "2150", au_country: "Australia" });
+  assert.equal(outcome.categoryMismatch, false);
+  assert.equal(outcome.confidence?.au_street, 0.9);
+  const envelope = buildExtractionEnvelope(createAzureProvider({ endpoint: ENDPOINT, apiKey: KEY, modelMap: {} }), outcome, "t");
+  assert.deepEqual(Object.keys(envelope.extracted).filter((k) => /licen|card|class|expiry|discriminator|number/i.test(k)), []);
+  assert.ok(!JSON.stringify(outcome.fields).includes("12345678") && !JSON.stringify(outcome.fields).includes("4012345678"));
+});
+
+test("driving licence: explicit AUS/Australia, document-level country, unit numbers and state names are handled; foreign addresses map to the overseas fields", async () => {
+  const withCountry = await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { streetAddress: "3/12 Example Street", city: "Parramatta", state: "New South Wales", postalCode: "2150", countryRegion: "Australia" } }) }));
+  assert.deepEqual([withCountry.fields.au_street, withCountry.fields.au_state], ["3/12 Example Street", "NSW"]);
+  const unit = await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { unit: "3", houseNumber: "12", road: "Example Street", suburb: "Parramatta", postalCode: "2150" } }) }));
+  assert.deepEqual([unit.fields.au_street, unit.fields.au_suburb, unit.fields.au_state], ["3/12 Example Street", "Parramatta", "NSW"]);
+  const docCountry = await licenceFields(auLicence({ CountryRegion: field({ type: "countryRegion", valueCountryRegion: "AUS" }), Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Street", city: "Perth", state: "WA", postalCode: "6000" } }) }));
+  assert.equal(docCountry.fields.address_type, "Australian Address");
+  const usa = await licenceFields(auLicence({ Region: field({ type: "string", valueString: "WA" }), Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Street", city: "Seattle", state: "WA", postalCode: "98101" } }) }));
+  assert.equal(usa.fields.address_type, "Overseas Address");
+  assert.equal(usa.fields.ov_street, "1 Example Street");
+  const foreign = await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Road", city: "London", postalCode: "N1 1AA", countryRegion: "GBR" } }) }));
+  assert.deepEqual([foreign.fields.address_type, foreign.fields.ov_street, foreign.fields.ov_suburb, foreign.fields.ov_zip, foreign.fields.ov_country], ["Overseas Address", "1 Example Road", "London", "N1 1AA", "GBR"]);
+  assert.equal(foreign.fields.first_name, "Asha");
+});
+
+const envelopeOf = (outcome: ExtractionSuccess) => buildExtractionEnvelope(createAzureProvider({ endpoint: ENDPOINT, apiKey: KEY, modelMap: {} }), outcome, "t");
+
+test("driving licence: Florida address without a printed country keeps street, city, state, ZIP and infers United States", async () => {
+  const fl = await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { houseNumber: "123", road: "CALLIEL WAY", city: "SAINT JOHNS", state: "FL", postalCode: "32259-2338" } }) }));
+  const envelope = envelopeOf(fl);
+  assert.deepEqual([envelope.extracted.address_type, envelope.extracted.ov_street, envelope.extracted.ov_suburb, envelope.extracted.ov_state, envelope.extracted.ov_zip, envelope.extracted.ov_country], ["Overseas Address", "123 CALLIEL WAY", "SAINT JOHNS", "FL", "32259-2338", "United States"]);
+  assert.equal(Object.keys(envelope.extracted).some((k) => k.startsWith("au_")), false);
+});
+
+test("driving licence: US address with a printed country keeps it; an Australian address with no country is unchanged", async () => {
+  const us = envelopeOf(await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { streetAddress: "1 Main St", city: "Austin", state: "TX", postalCode: "73301", countryRegion: "USA" } }) })));
+  assert.deepEqual([us.extracted.address_type, us.extracted.ov_country, us.extracted.ov_state], ["Overseas Address", "USA", "TX"]);
+  const au = envelopeOf(await licenceFields(auLicence()));
+  assert.deepEqual([au.extracted.address_type, au.extracted.au_state, au.extracted.au_country, au.extracted.ov_street], ["Australian Address", "NSW", "Australia", undefined]);
+});
+
+test("driving licence: an address whose country cannot be determined still fills the overseas fields and warns", async () => {
+  const unknown = envelopeOf(await licenceFields(auLicence({ Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Road", city: "Leeds", state: "West Yorkshire", postalCode: "LS1 1AA" } }) })));
+  assert.deepEqual([unknown.extracted.address_type, unknown.extracted.ov_street, unknown.extracted.ov_suburb, unknown.extracted.ov_state, unknown.extracted.ov_zip, unknown.extracted.ov_country], ["Overseas Address", "1 Example Road", "Leeds", "West Yorkshire", "LS1 1AA", undefined]);
+  assert.ok(unknown.source.warnings?.some((w) => /country could not be determined/i.test(w)));
+});
+
+test("driving licence: missing, empty or malformed fields never fail the whole result", async () => {
+  const sparse = await licenceFields({ docType: "idDocument.driverLicense", fields: { FirstName: { type: "string" }, LastName: null, DateOfBirth: { type: "date", content: "05/04/1999" }, Address: field({ type: "address" }), Sex: field({ type: "string", valueString: "X" }) } });
+  assert.deepEqual(sparse.fields, {});
+  assert.ok(sparse.warnings.some((w) => /address/i.test(w)) && sparse.warnings.some((w) => /sex/i.test(w)));
+  const noFields = await licenceFields({ docType: "idDocument.driverLicense" });
+  assert.deepEqual([noFields.ok, noFields.fields, noFields.categoryMismatch], [true, {}, false]);
+  const noState = await licenceFields(auLicence({ Region: undefined, Address: field({ type: "address", valueAddress: { streetAddress: "1 Example Street", city: "Perth", postalCode: "6000", countryRegion: "AUS" } }) }));
+  assert.deepEqual([noState.fields.au_street, noState.fields.au_state], ["1 Example Street", undefined]);
+});
+
+test("driving licence: the declared category must match the detected document type", async () => {
+  const asPassport = await licenceFields(passportDoc());
+  assert.equal(asPassport.categoryMismatch, true);
+  assert.deepEqual(asPassport.fields, {});
+  const card = await licenceFields({ ...auLicence(), docType: "idDocument.nationalIdentityCard" });
+  assert.deepEqual([card.categoryMismatch, card.fields, card.detectedType], [true, {}, "idDocument.nationalIdentityCard"]);
+  const passportRequest = ok(await harness([accepted(), succeeded([auLicence()])]).provider.extract(req("Passport")));
+  assert.deepEqual([passportRequest.categoryMismatch, passportRequest.fields], [true, {}]);
 });
 
 test("custom models map only fields named with the application's identifiers", async () => {
@@ -298,6 +377,65 @@ test("provider selection: default stays OpenAI, Azure needs its own complete val
     assert.deepEqual(result.unavailable?.variables, ["EF_DOCUMENT_EXTRACTION_PROVIDER"], value);
   }
   assert.ok(!JSON.stringify(badEndpoint).includes("example.com") && !JSON.stringify(missing).includes(KEY));
+});
+
+// ---- P05-05: per-category provider routing ----
+const ROUTE_BASE = { OPENAI_API_KEY: "k", OPENAI_DOCUMENT_MODEL: "m", EF_AZURE_DOCUMENT_ENDPOINT: ENDPOINT, EF_AZURE_DOCUMENT_API_KEY: KEY, EF_AZURE_DOCUMENT_MODEL: "prebuilt-idDocument" };
+const CATEGORIES = ["Passport", "Driving Licence", "Visa", "English Test", "Academic"] as const;
+
+test("routing: blank routes leave selection unchanged", () => {
+  for (const routes of [undefined, "", "   "]) {
+    for (const category of [undefined, ...CATEGORIES]) {
+      assert.equal(createDocumentExtractionProvider({ ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_ROUTES: routes }, { category }).provider?.id, "openai-responses", `${routes} ${category}`);
+      assert.equal(createDocumentExtractionProvider({ ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_PROVIDER: "azure", EF_DOCUMENT_EXTRACTION_ROUTES: routes }, { category }).provider?.id, "azure-document-intelligence", `${routes} ${category}`);
+    }
+  }
+});
+
+test("routing: passport and licence to Azure, every other category stays on the default OpenAI", () => {
+  const config = { ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_ROUTES: "passport=azure, driving_licence=azure" };
+  for (const category of CATEGORIES) {
+    const expected = category === "Passport" || category === "Driving Licence" ? "azure-document-intelligence" : "openai-responses";
+    assert.equal(createDocumentExtractionProvider(config, { category }).provider?.id, expected, category);
+  }
+  assert.equal(createDocumentExtractionProvider(config).unavailable, null);
+  // An explicit openai route beats an Azure default.
+  const flipped = { ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_PROVIDER: "azure", EF_DOCUMENT_EXTRACTION_ROUTES: "visa=openai" };
+  assert.equal(createDocumentExtractionProvider(flipped, { category: "Visa" }).provider?.id, "openai-responses");
+  assert.equal(createDocumentExtractionProvider(flipped, { category: "Passport" }).provider?.id, "azure-document-intelligence");
+  // A provider nothing can reach is not required: all categories routed to Azure need no OpenAI settings.
+  const noOpenAi = { EF_AZURE_DOCUMENT_ENDPOINT: ENDPOINT, EF_AZURE_DOCUMENT_API_KEY: KEY, EF_AZURE_DOCUMENT_MODEL: "prebuilt-idDocument", EF_DOCUMENT_EXTRACTION_ROUTES: "passport=azure,driving_licence=azure" };
+  assert.equal(createDocumentExtractionProvider(noOpenAi, { category: "Passport" }).provider?.id, "azure-document-intelligence");
+  const missingFallback = createDocumentExtractionProvider(noOpenAi);
+  assert.deepEqual([missingFallback.provider, missingFallback.unavailable?.code, missingFallback.unavailable?.variables], [null, "configuration_unavailable", ["OPENAI_API_KEY", "OPENAI_DOCUMENT_MODEL"]]);
+});
+
+test("routing: an invalid route string fails closed, naming only the variable", () => {
+  for (const routes of ["passport", "passport=gemini", "Passport=azure", "passport=Azure", "bogus=azure", "passport=azure,", ",passport=azure", "passport=azure,passport=openai", "passport=azure=x", "=azure"]) {
+    for (const category of [undefined, "Passport" as const, "Visa" as const]) {
+      const result = createDocumentExtractionProvider({ ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_ROUTES: routes }, { category });
+      assert.deepEqual([result.provider, result.unavailable?.code, result.unavailable?.variables], [null, "configuration_invalid", ["EF_DOCUMENT_EXTRACTION_ROUTES"]], `${routes} ${category}`);
+      assert.ok(!JSON.stringify(result).includes(KEY) && !("categories" in result.unavailable!));
+    }
+  }
+});
+
+test("routing: Azure routed to a category it has no model for fails as configuration_invalid naming the category, no fallback", () => {
+  const config = { ...ROUTE_BASE, EF_DOCUMENT_EXTRACTION_ROUTES: "passport=azure,visa=azure,english_test=azure" };
+  const visa = createDocumentExtractionProvider(config, { category: "Visa" });
+  assert.deepEqual([visa.provider, visa.unavailable?.code, visa.unavailable?.categories], [null, "configuration_invalid", ["Visa"]]);
+  assert.deepEqual(visa.unavailable?.variables, ["EF_DOCUMENT_EXTRACTION_ROUTES", "EF_AZURE_DOCUMENT_MODEL_MAP"]);
+  // Availability check without a category reports every unsupported routed category.
+  const all = createDocumentExtractionProvider(config);
+  assert.deepEqual([all.provider, all.unavailable?.code, all.unavailable?.categories], [null, "configuration_invalid", ["Visa", "English Test"]]);
+  // Supported routed and unrouted categories are unaffected.
+  assert.equal(createDocumentExtractionProvider(config, { category: "Passport" }).provider?.id, "azure-document-intelligence");
+  assert.equal(createDocumentExtractionProvider(config, { category: "Academic" }).provider?.id, "openai-responses");
+  // Mapping the categories makes the same routes valid.
+  const mapped = { ...config, EF_AZURE_DOCUMENT_MODEL_MAP: JSON.stringify({ Visa: "visa-v1", "English Test": "english-test-v1" }) };
+  assert.equal(createDocumentExtractionProvider(mapped, { category: "Visa" }).provider?.id, "azure-document-intelligence");
+  assert.equal(createDocumentExtractionProvider(mapped).unavailable, null);
+  assert.ok(!JSON.stringify(visa).includes(KEY) && !JSON.stringify(all).includes(ENDPOINT));
 });
 
 // ---- P05-03: leased-job orchestration against an in-memory queue that mirrors the SQL fences ----
@@ -626,14 +764,26 @@ test("notify: Postmark sender rejection is a definitive, non-retried failure and
   assert.match(String(bodies[0].From), /^".*" <.+>$/);
 });
 
-test("notify: the worker accepts only the service-role key (401 without a token, 403 for anon and user tokens)", async () => {
-  const service = "service.role.key-value";
-  assert.equal(await authorizeWorker(`Bearer ${service}`, service), 200);
-  assert.equal(await authorizeWorker(null, service), 401);
-  assert.equal(await authorizeWorker("", service), 401);
-  assert.equal(await authorizeWorker("Basic abc", service), 401);
-  for (const token of ["anon.key.value", "user.jwt.value", service + "x", service.slice(1)]) assert.equal(await authorizeWorker(`Bearer ${token}`, service), 403, token);
-  assert.equal(await authorizeWorker(`Bearer ${service}`, ""), 403, "an unconfigured service key never authorizes");
+const b64url = (value: unknown) => btoa(JSON.stringify(value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fakeJwt = (claims: Record<string, unknown>) => `${b64url({ alg: "HS256", typ: "JWT" })}.${b64url(claims)}.signature`;
+
+test("notify: the worker accepts only a service_role token of this project (401 without a token, 403 for anything else)", async () => {
+  const hosted = "https://abcdefghijklmnopqrst.supabase.co";
+  const bearer = (claims: Record<string, unknown>) => `Bearer ${fakeJwt(claims)}`;
+  assert.equal(await authorizeWorker(bearer({ role: "service_role", ref: "abcdefghijklmnopqrst" }), hosted), 200, "service_role with the matching ref");
+  assert.equal(await authorizeWorker(bearer({ role: "anon", ref: "abcdefghijklmnopqrst" }), hosted), 403, "anon role");
+  assert.equal(await authorizeWorker(bearer({ role: "authenticated", ref: "abcdefghijklmnopqrst", sub: "u" }), hosted), 403, "signed-in user");
+  assert.equal(await authorizeWorker(bearer({ role: "service_role", ref: "zzzzzzzzzzzzzzzzzzzz" }), hosted), 403, "service_role of another project");
+  assert.equal(await authorizeWorker(bearer({ role: "service_role" }), hosted), 403, "service_role without a ref on a hosted project");
+  assert.equal(await authorizeWorker(null, hosted), 401, "missing header");
+  assert.equal(await authorizeWorker("", hosted), 401, "empty header");
+  assert.equal(await authorizeWorker("Basic abc", hosted), 401, "not a bearer token");
+  assert.equal(await authorizeWorker("Bearer ", hosted), 401, "empty bearer token");
+  for (const token of ["notajwt", "a.b", "a.b.c.d", "..", "a..c", `a.${btoa("not json")}.c`, `a.${b64url(["service_role"])}.c`, `a.${b64url("service_role")}.c`]) {
+    assert.equal(await authorizeWorker(`Bearer ${token}`, hosted), 403, `malformed: ${token.slice(0, 12)}`);
+  }
+  assert.equal(await authorizeWorker(bearer({ role: "service_role" }), "http://127.0.0.1:54321"), 200, "a local stack has no project ref to match; the role alone decides");
+  assert.equal(await authorizeWorker(bearer({ role: "anon" }), "http://127.0.0.1:54321"), 403, "anon is refused locally too");
 });
 
 // ---- P08-06: submission PDF attached to the application_submitted email ----
@@ -763,4 +913,22 @@ test("coe/voe email: if the document cannot be read the delivery is retried late
   assert.deepEqual([summary.retried, summary.accepted, provider.sent.length], [1, 1, 1]);
   assert.deepEqual(recorded.map((r) => `${r.id}:${r.code}:${r.retry}`), ["c1:attachment_unavailable:true", "c2:null:false"]);
   assert.equal(provider.sent[0].attachments?.length, 1);
+});
+
+test("pdf: qualifications list is printed once, single fields only fill in when the list lacks them", () => {
+  const lines = (snapshot: unknown) => submissionPdfLines({ reference: "R", institution: "I", version: 1, submittedAt: null, snapshot }).map((l) => l.text);
+  const both = lines({
+    values: { first_name: "Ada", academic_institution: "Uni A", academic_qualification: "BSc", academic_year: "2020" },
+    academicQualifications: [
+      { institution: "uni a", qualification: "bsc", year: "2020", documentIds: ["d1"] },
+      { institution: "Uni B", qualification: "MSc", year: "2022", documentIds: ["d2"] },
+      { institution: "Manual Inst", qualification: "Cert" },
+    ],
+  });
+  assert.deepEqual(both.filter((t) => /^\d\. /.test(t)), ["1. bsc, uni a, 2020", "2. MSc, Uni B, 2022", "3. Cert, Manual Inst"]);
+  assert.ok(!both.some((t) => t.startsWith("Academic institution")));
+  const fallback = lines({ values: { academic_institution: "Uni C", academic_qualification: "Diploma", academic_year: "2019" }, academicQualifications: [] });
+  assert.deepEqual(fallback.filter((t) => /^\d\. /.test(t)), ["1. Diploma, Uni C, 2019"]);
+  const extra = lines({ values: { academic_institution: "Typed", academic_qualification: "Own" }, academicQualifications: [{ institution: "Uni B", qualification: "MSc", documentIds: ["d2"] }] });
+  assert.equal(extra.filter((t) => /^\d\. /.test(t)).length, 2);
 });

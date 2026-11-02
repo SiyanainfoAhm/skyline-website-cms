@@ -25,7 +25,7 @@ export const menuIcon = (key: string) => Object.hasOwn(icons, key) ? icons[key] 
 // changing labels, order, enabled state and hierarchy does not.
 const routes = new Set([
   '/', '/admin', '/admin/courses', '/admin/pages', '/admin/navigation', '/admin/footer',
-  '/admin/settings', '/admin/documents', '/admin/knowledge', '/admin/knowledge/documents',
+  '/admin/settings', '/admin/documents', '/admin/knowledge', '/admin/applications', '/admin/agencies', '/admin/notifications',
   '/admin/forms', '/admin/contact', '/admin/seo', '/admin/users', '/admin/institution', '/admin/activity',
   '/agency/all-applications', '/agency/registrations', '/agency/agencies', '/agency/users',
   '/agency/notifications', '/agency/audit-log',

@@ -8,7 +8,7 @@ select is(has_table_privilege('authenticated','public.admin_menu_items','insert'
 select is(has_table_privilege('authenticated','public.admin_menu_items','update'),false,'browser cannot update menu');
 select is(has_table_privilege('authenticated','public.admin_menu_items','delete'),false,'browser cannot delete menu');
 select is((select relrowsecurity from pg_class where oid='public.admin_menu_items'::regclass),true,'menu has RLS');
-select is((select count(*)::int from public.admin_menu_items),33,'desired menu seeded');
+select is((select count(*)::int from public.admin_menu_items),32,'desired menu seeded');
 select is((select count(*)::int from public.admin_menu_items where not is_enabled),2,'unimplemented modules disabled');
 select throws_ok($$delete from public.admin_menu_items where id='dashboard'$$,'23514',null,'system menu cannot be deleted');
 select throws_ok($$update public.admin_menu_items set route='/admin/users' where id='dashboard'$$,'23514',null,'system destination protected');

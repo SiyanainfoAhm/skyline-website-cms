@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { menuTree, menuActive, menuIcon, type AdminMenuItem } from '../src/pages/admin/lib/adminMenu.ts';
+import { menuTree, menuActive, menuIcon, type AdminMenuItem } from "../src/pages/admin/lib/adminMenu.ts";
 import { canManagePortalUsers, isEditableApplicationStatus, portalAccessMessage, portalLanding } from "../src/pages/agency/lib/applicationAccess.ts";
 import { availableActions, csvCell, EXPORT_COLUMNS, exportCsv, EXCEPTION_TEXT, normaliseCoeNumber, registrationChecklist, registrationWarning, validateCorrection, verifyBlockers } from "../src/pages/agency/lib/registrationWorkbench.ts";
 
@@ -414,7 +414,7 @@ test("recipients: addresses are split, trimmed, lower-cased and validated; dupli
   assert.equal(parseRecipients("").error, null);
   assert.match(parseRecipients("not-an-email").error ?? "", /not a valid email/i);
   assert.match(parseRecipients("a@b.test, A@B.test").error ?? "", /listed twice/i);
-  assert.match(parseRecipients(Array.from({ length: 11 }, (_, i) => `r${i}@example.test`).join("\n")).error ?? "", /at most 10/i);
+  assert.match(parseRecipients(Array.from({ length: 21 }, (_, i) => `r${i}@example.test`).join("\n")).error ?? "", /at most 20/i);
   assert.match(parseRecipients(`${"x".repeat(250)}@b.test`).error ?? "", /not a valid/i);
 });
 
