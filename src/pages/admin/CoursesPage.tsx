@@ -1,5 +1,5 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { useToast } from "@/pages/admin/components/toastContext";
@@ -9,7 +9,9 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  Modal,
   PageHeader,
+  SectionTabs,
   Select,
   StatusBadge,
   TextInput,
@@ -19,13 +21,15 @@ import { HOME_COURSE_LIMIT } from "@/config/cmsLimits";
 import CarouselSettings from "@/pages/admin/components/CarouselSettings";
 import type { AdminCourse } from "@/pages/admin/lib/types";
 import { courseCategories } from "@/pages/admin/lib/seed";
+import { ActivateCourseModal, CatalogueBrowser, CourseCatalogueAutocomplete } from "@/pages/admin/components/CourseCatalogue";
+import type { CatalogueCourse } from "@/pages/admin/lib/courseCatalogue";
 
 type SortKey = "order" | "name" | "updated";
 
 const FEATURED_LIMIT = HOME_COURSE_LIMIT;
 
 export default function CoursesPage() {
-  const { data, update, logActivity } = useAdminData();
+  const { data, update, saveNow, reload, logActivity } = useAdminData();
   const { push } = useToast();
   const navigate = useNavigate();
 
@@ -35,6 +39,33 @@ export default function CoursesPage() {
   const [featuredOnly, setFeaturedOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("order");
   const [pendingDelete, setPendingDelete] = useState<AdminCourse | null>(null);
+  const [view, setView] = useState<"skyline" | "catalogue">("skyline");
+  const [selecting, setSelecting] = useState(false);
+  const [activating, setActivating] = useState<CatalogueCourse | null>(null);
+  const [openWhenLoaded, setOpenWhenLoaded] = useState<string | null>(null);
+
+  // After the server creates or links a course, open its editor once the reloaded store contains it.
+  useEffect(() => {
+    if (openWhenLoaded && data.courses.some((c) => c.slug === openWhenLoaded)) {
+      navigate(`/admin/courses/${openWhenLoaded}`);
+      setOpenWhenLoaded(null);
+    }
+  }, [openWhenLoaded, data.courses, navigate]);
+
+  // Commit pending CMS edits first: the server-side change bumps the CMS version.
+  const persistPending = () => saveNow((d) => d);
+
+  const afterActivation = (r: { slug: string | null; created: boolean; active: boolean }) => {
+    reload();
+    push(r.created ? "Course activated and added to Skyline as a draft" : r.active ? "Skyline course settings saved" : "Course deactivated at Skyline");
+    if (r.created && r.slug) setOpenWhenLoaded(r.slug);
+  };
+
+  const manage = (cmsCourseId: string) => {
+    const course = data.courses.find((c) => c.id === cmsCourseId);
+    if (course) navigate(`/admin/courses/${course.slug}`);
+    else push("That Skyline course is not available in this workspace.", "error");
+  };
 
   const featuredCount = data.courses.filter((c) => c.featured).length;
   const categories = ["All", ...courseCategories];
@@ -108,41 +139,6 @@ export default function CoursesPage() {
     setPendingDelete(null);
   };
 
-  const addCourse = () => {
-    const id = `course-${Date.now()}`;
-    const slug = `new-course-${Date.now()}`;
-    const created: AdminCourse = {
-      id,
-      slug,
-      code: "",
-      cricos: "",
-      name: "New Course",
-      category: courseCategories[0],
-      trainingPackage: "",
-      duration: "52 Weeks",
-      mode: "Face-to-Face",
-      shortDescription: "",
-      fullDescription: "",
-      entryRequirements: "Over 18 years of age",
-      career: "",
-      fees: "",
-      image: "",
-      attachments: [],
-      links: [],
-      sections: [],
-      units: [],
-      status: "Draft",
-      displayOrder: data.courses.length + 1,
-      featured: false,
-      updatedAt: "2026-10-12 09:14",
-      updatedBy: "IT Administrator",
-    };
-    update((d) => ({ ...d, courses: [...d.courses, created] }));
-    logActivity("Created", created.name, "Courses");
-    push("New draft course created");
-    navigate(`/admin/courses/${slug}`);
-  };
-
   return (
     <div>
       <PageHeader
@@ -150,12 +146,25 @@ export default function CoursesPage() {
         description="Manage every course, its content, media, ordering and homepage visibility."
         breadcrumb="Content"
         actions={
-          <Button icon="ri-add-line" onClick={addCourse}>
+          <Button icon="ri-add-line" onClick={() => setSelecting(true)}>
             Add Course
           </Button>
         }
       />
 
+      <SectionTabs
+        tabs={[
+          { id: "skyline", label: "Skyline Courses", icon: "ri-book-open-line" },
+          { id: "catalogue", label: "Australian Course Catalogue", icon: "ri-government-line" },
+        ]}
+        active={view}
+        onChange={(id) => setView(id as "skyline" | "catalogue")}
+      />
+
+      {view === "catalogue" ? (
+        <CatalogueBrowser beforeChange={persistPending} onActivated={afterActivation} onManage={manage} />
+      ) : (
+      <>
       <CarouselSettings />
 
       {/* Filters */}
@@ -316,6 +325,35 @@ export default function CoursesPage() {
         </strong>{" "}
         featured on the homepage.
       </p>
+      </>
+      )}
+
+      <Modal open={selecting} title="Add Course" onClose={() => setSelecting(false)} width="max-w-2xl">
+        <div className="space-y-3">
+          <p className="text-sm text-foreground-700">
+            Select Australian Course. Courses come from the national register (training.gov.au); the national code,
+            name, AQF level and training package are filled in automatically.
+          </p>
+          <CourseCatalogueAutocomplete
+            autoFocus
+            onSelect={(c) => {
+              setSelecting(false);
+              if (c.is_active && c.cms_course_id) manage(c.cms_course_id);
+              else setActivating(c);
+            }}
+          />
+        </div>
+      </Modal>
+
+      <ActivateCourseModal
+        course={activating}
+        onClose={() => setActivating(null)}
+        beforeChange={persistPending}
+        onDone={(r) => {
+          setActivating(null);
+          afterActivation(r);
+        }}
+      />
 
       <ConfirmDialog
         open={!!pendingDelete}
