@@ -1,7 +1,7 @@
 # Completed log (newest first)
 
-## 2026-11-02 - Backend admin sidebar (release prepared)
-Owner approved push/deploy and selected SkylineVictoria. Shared admin_menu_items migration (32 seeds) + authorized renderer preserve current Applications/Agencies/Notification Log routes and mobile drawer. Production release pending hosting access and recovery-manifest reconciliation; no unrelated migrations or Edge functions included.
+## 2026-11-02 - Backend admin sidebar (production release)
+Owner approved push/deploy and selected SkylineVictoria. Shared admin_menu_items migration (32 seeds) + authorized renderer preserve current Applications/Agencies/Notification Log routes and mobile drawer. Production deployed 2026-11-02 at skyline-website-cms.vercel.app/admin (commit aff3f2e); menu migration applied and live schema/authorization smoke checks PASS. No unrelated migrations or Edge functions included. External recovery-manifest automation is not available on this machine and remains unverified.
 
 ## 2026-10-26 - Repo cleanup
 docs/ cut to TASKS, COMPLETED, SUPABASE, ARCHITECTURE; evidence trees, phase docs and one-off scripts deleted (zip backup outside repo). Kept: product tests, native lab chain, backup-task scripts. Not committed.
