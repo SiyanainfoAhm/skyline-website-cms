@@ -1,39 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/pages/admin/lib/authContext";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
 import { AdminLoading, AdminError } from "@/pages/admin/components/ui";
 import { DraftProvider } from "@/pages/admin/lib/draft";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
+import AdminMenu from "@/pages/admin/components/AdminMenu";
 import { hadSession, loginUrl } from "@/lib/loginRouting";
-
-interface NavEntry {
-  to: string;
-  label: string;
-  icon: string;
-  end?: boolean;
-  adminOnly?: boolean;
-}
-
-const NAV: NavEntry[] = [
-  { to: "/admin", label: "Dashboard", icon: "ri-dashboard-3-line", end: true },
-  { to: "/admin/applications", label: "Applications", icon: "ri-file-list-3-line", adminOnly: true },
-  { to: "/admin/agencies", label: "Agencies", icon: "ri-building-2-line", adminOnly: true },
-  { to: "/admin/courses", label: "Courses", icon: "ri-book-2-line" },
-  { to: "/admin/pages", label: "Pages", icon: "ri-file-text-line" },
-  { to: "/admin/navigation", label: "Header & Navigation", icon: "ri-menu-line" },
-  { to: "/admin/footer", label: "Footer", icon: "ri-layout-bottom-line" },
-  { to: "/admin/settings", label: "Website Settings", icon: "ri-settings-3-line" },
-  { to: "/admin/notifications", label: "Notification log", icon: "ri-mail-check-line", adminOnly: true },
-  { to: "/admin/documents", label: "Documents & Policies", icon: "ri-file-pdf-2-line" },
-  { to: "/admin/knowledge", label: "Assistant Knowledge", icon: "ri-question-answer-line", adminOnly: true },
-  { to: "/admin/forms", label: "Forms", icon: "ri-survey-line" },
-  { to: "/admin/contact", label: "Contact Information", icon: "ri-contacts-line" },
-  { to: "/admin/seo", label: "SEO / Page Settings", icon: "ri-search-eye-line" },
-  { to: "/admin/users", label: "Users & Permissions", icon: "ri-user-settings-line", adminOnly: true },
-  { to: "/admin/institution", label: "Institution", icon: "ri-building-line", adminOnly: true },
-  { to: "/admin/activity", label: "Activity Log", icon: "ri-history-line" },
-];
 
 function initials(name: string) {
   return name
@@ -76,8 +49,6 @@ export default function AdminLayout() {
   }
 
   const tenant = requestWebsiteDomain();
-  const items = NAV.filter((n) => !(n.adminOnly && user.role !== "Admin") && !(!tenant && n.to === "/admin/institution") && !(tenant && (n.to === "/admin/users" || n.to.startsWith("/admin/knowledge"))));
-
   const sidebar = (
     <nav className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 border-b border-background-200 px-5 py-4">
@@ -89,35 +60,7 @@ export default function AdminLayout() {
           <p className="text-[11px] text-foreground-500">Website Admin</p>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-3 py-3">
-        {items.map((n) => (
-          <NavLink
-            key={n.to}
-            to={n.to}
-            end={n.end}
-            onClick={() => setMenuOpen(false)}
-            className={({ isActive }) =>
-              `mb-0.5 flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium transition-colors ${
-                isActive
-                  ? "bg-primary-500 text-background-50"
-                  : "text-foreground-700 hover:bg-background-100"
-              }`
-            }
-          >
-            <i className={`${n.icon} text-lg`} aria-hidden="true" />
-            <span className="truncate">{n.label}</span>
-          </NavLink>
-        ))}
-      </div>
-      <div className="border-t border-background-200 px-3 py-3">
-        <Link
-          to="/"
-          className="flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-foreground-700 transition-colors hover:bg-background-100"
-        >
-          <i className="ri-external-link-line text-lg" aria-hidden="true" />
-          View public website
-        </Link>
-      </div>
+      <AdminMenu close={() => setMenuOpen(false)} />
     </nav>
   );
 

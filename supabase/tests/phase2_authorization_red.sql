@@ -1,7 +1,29 @@
 -- Security assertions (REG-AUTH/SEC), originally red until P02-03/04, now green; includes the P06-01 tenant administration matrix.
 -- Synthetic SQL actor simulation; every write is rolled back.
 begin;
-select plan(425);
+select plan(450);
+-- Backend-driven admin navigation: grants, protection and fail-closed reads.
+select is(has_table_privilege('anon','public.admin_menu_items','select'),false,'menu is not public');
+select is(has_table_privilege('authenticated','public.admin_menu_items','insert'),false,'browser cannot insert menu');
+select is(has_table_privilege('authenticated','public.admin_menu_items','update'),false,'browser cannot update menu');
+select is(has_table_privilege('authenticated','public.admin_menu_items','delete'),false,'browser cannot delete menu');
+select is((select relrowsecurity from pg_class where oid='public.admin_menu_items'::regclass),true,'menu has RLS');
+select is((select count(*)::int from public.admin_menu_items),32,'desired menu seeded');
+select is((select count(*)::int from public.admin_menu_items where not is_enabled),2,'unimplemented modules disabled');
+select throws_ok($$delete from public.admin_menu_items where id='dashboard'$$,'23514',null,'system menu cannot be deleted');
+select throws_ok($$update public.admin_menu_items set route='/admin/users' where id='dashboard'$$,'23514',null,'system destination protected');
+select throws_ok($$update public.admin_menu_items set permission_key='cms.read' where id='users'$$,'23514',null,'system permission protected');
+select throws_ok($$update public.admin_menu_items set is_system=false where id='dashboard'$$,'23514',null,'system flag protected');
+select lives_ok($$update public.admin_menu_items set sort_order=0 where id='dashboard'$$,'ordering remains dynamic');
+select throws_ok($$insert into public.admin_menu_items(id,label,route,permission_key) values('bad_url','Bad','//evil.test','cms.read')$$,'23514',null,'external routes rejected');
+select throws_ok($$insert into public.admin_menu_items(id,parent_id,label,permission_key) values('bad_parent','missing','Bad','cms.read')$$,'23503',null,'missing parent rejected');
+insert into public.admin_menu_items(id,parent_id,label,permission_key) values ('test_root',null,'Test','cms.read'),('test_child','test_root','Child','cms.read');
+select throws_ok($$update public.admin_menu_items set parent_id='test_child' where id='test_root'$$,'23514',null,'hierarchy cycles rejected');
+delete from public.admin_menu_items where id='test_child';
+delete from public.admin_menu_items where id='test_root';
+set local role authenticated;
+select is((select count(*)::int from public.admin_menu_items),0,'missing identity gets no menu');
+reset role;
 insert into public.agencies(id,name,code) values
  ('12000000-0000-0000-0000-000000000001','Security A','P2-SEC-A'),
  ('12000000-0000-0000-0000-000000000002','Security B','P2-SEC-B');
@@ -58,6 +80,23 @@ insert into public.tenant_memberships(tenant_id,auth_user_id,role) values
 insert into public.platform_admins(auth_user_id) values ('a0000000-0000-0000-0000-000000000003');
 insert into public.tenant_domains(hostname,tenant_id,verified_at,verification_evidence) values
  ('a.p06.example.test','1a000000-0000-0000-0000-000000000001',now(),'DNS proof'),('b.p06.example.test','1a000000-0000-0000-0000-000000000002',now(),'DNS proof');
+set local role authenticated;
+set local request.headers='{"x-tenant-domain":"a.p06.example.test"}';
+set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000001';
+select is((select count(*)::int from public.admin_menu_items where id='institution'),1,'tenant administrator sees institution');
+select is((select count(*)::int from public.admin_menu_items where id='users'),0,'tenant never sees legacy users');
+select is((select count(*)::int from public.admin_menu_items where id='applications'),1,'reviewer sees admissions');
+set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000004';
+select is((select count(*)::int from public.admin_menu_items where id='institution'),0,'editor cannot see administration');
+select is((select count(*)::int from public.admin_menu_items where id='pages'),1,'editor sees website pages');
+select is((select count(*)::int from public.admin_menu_items where id='applications'),0,'editor cannot see admissions');
+select is((select count(*)::int from public.admin_menu_items where not is_enabled),0,'disabled entries never leave backend');
+set local request.headers='{"x-tenant-domain":"b.p06.example.test"}';
+select is((select count(*)::int from public.admin_menu_items),0,'foreign tenant membership cannot read menu');
+set local request.headers='{"x-tenant-domain":"unknown.example.test"}';
+select is((select count(*)::int from public.admin_menu_items),0,'unknown tenant fails closed');
+reset role;
+set local request.headers='{}';
 set local role authenticated;
 set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000001';
 select is(public.tenant_admin_overview('1a000000-0000-0000-0000-000000000001')->'tenant'->>'name','Institution A','tenant admin reads own institution overview');
