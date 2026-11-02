@@ -16,7 +16,7 @@ export interface AgencyFormState {
 }
 
 export const EMPTY_AGENCY_FORM: AgencyFormState = {
-  name: "", code: "", registrationNumber: "", businessEmail: "", phone: "", address: "", country: "Australia", primaryContact: "", status: "Active",
+  name: "", code: "", registrationNumber: "", businessEmail: "", phone: "", address: "", country: "Australia", primaryContact: "", status: "Inactive",
 };
 
 export function agencyToForm(agency: PortalAgency): AgencyFormState {
@@ -27,12 +27,9 @@ export function agencyToForm(agency: PortalAgency): AgencyFormState {
   };
 }
 
-/**
- * Registry contact numbers may contain alternatives; never invent missing email/ABN. An imported business is listed as Inactive,
- * but a SLIT administrator adding it is the approval, so the new agency starts Active (they can still choose Inactive).
- */
+/** Registry contact numbers may contain alternatives; never invent missing email/ABN. Every new business starts Inactive until a SLIT administrator activates it. */
 export function directoryAgencyToForm(agency: DirectoryAgency): AgencyFormState {
-  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()), status: "Active" };
+  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()), status: "Inactive" };
 }
 
 /** A starting code from the name (initials plus a number); the administrator can change it. */

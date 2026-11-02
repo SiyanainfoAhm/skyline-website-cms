@@ -96,7 +96,7 @@ export default function AgencyNewPage() {
 
   return (
     <form onSubmit={submit} noValidate>
-      <PageHeader breadcrumb="Businesses > Add business" title="Add business" description="Search first. If the business is in the OMARA register, open it in Businesses and activate it there. Otherwise enter its details; a business you add here starts active." />
+      <PageHeader breadcrumb="Businesses > Add business" title="Add business" description="Search first. If the business is in the OMARA register, open it in Businesses and activate it there. Otherwise enter its details. A business you add starts inactive; activate it, or one of its agents, when it is ready to use the portal." />
       {lookupLoading ? <p role="status" className="mb-4 text-sm">Loading agency details…</p> : null}
       {selected ? <p role="status" className="mb-4 text-sm text-foreground-600">{selected.existingAgencyId ? 'This agency is already added. Open its existing record to edit details or manage its team.' : 'This business is in the OMARA register. Open it in Businesses and activate it there, so its registered agents stay linked.'}</p> : null}
       <Card className="p-5">

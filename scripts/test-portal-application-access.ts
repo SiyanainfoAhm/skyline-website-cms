@@ -6,7 +6,7 @@ import test from "node:test";
 import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
 import type { DirectoryAgency } from '../src/pages/agency/lib/portalData.ts';
 
-test('agency directory fills real business fields, starts the added agency active and does not invent missing contact details', () => {
+test('agency directory fills real business fields, starts the added business inactive and does not invent missing contact details', () => {
   const agency: DirectoryAgency = { ...EMPTY_AGENCY_FORM, id: 'directory:sample', name: 'Sample Business', code: 'OMARA-ABC12345',
     phone: '+61412345678 / +61400000000', primaryContact: 'Registered Contact', status: 'Inactive', businessEmail: '',
     address: '1 Sample Street', country: 'Australia', registrationNumber: '', isPermanent: false, createdAt: '',
@@ -15,7 +15,7 @@ test('agency directory fills real business fields, starts the added agency activ
   assert.equal(form.name, agency.name);
   assert.equal(form.address, agency.address);
   assert.equal(form.primaryContact, agency.primaryContact);
-  assert.equal(form.status, 'Active', 'imported businesses are listed inactive; adding one in the CMS is the approval');
+  assert.equal(form.status, 'Inactive', 'every new business starts inactive until a SLIT administrator activates it');
   assert.equal(form.businessEmail, '');
   assert.equal(form.registrationNumber, '', 'a person MARN is not an agency ABN');
   assert.equal(validateAgencyForm(form).phone, '+61412345678');
@@ -549,4 +549,18 @@ test("business, agent and student screens fit the page: no horizontal scrolling 
     assert.doesNotMatch(source, /overflow-x-auto|min-w-\[\d/, `${file} must not scroll sideways`);
     if (/<thead>/.test(source)) assert.match(source, /ResponsiveTable/, `${file} uses the shared responsive table`);
   }
+});
+
+// ---- Agents: activation starts from the agent's own business, or the one OMARA lists ----
+import { toActivate } from "../src/pages/admin/lib/agentActivation.ts";
+
+test("agents: the Activate dialog starts from the agent's business and knows whether they already have a login", () => {
+  const base = { key: "o1", agentId: null, omaraId: "o1", profileId: null, name: "Anna Lee", email: "", phone: "", role: null, status: "Inactive" as const,
+    marn: "1100001", registered: true, place: "Melbourne VIC", businessId: "b1", businessName: "Bright Futures", businessStatus: "Inactive" as const, students: 0, statusCounts: {} };
+  const start = toActivate(base);
+  assert.deepEqual(start.business, { id: "b1", name: "Bright Futures", status: "Inactive" });
+  assert.equal(start.hasLogin, false);
+  assert.equal(start.omaraId, "o1");
+  assert.equal(toActivate({ ...base, businessId: null }).business, null, "an agent OMARA lists without a business starts with no business chosen");
+  assert.equal(toActivate({ ...base, profileId: "p1", role: "agency_admin" }).hasLogin, true);
 });

@@ -5,10 +5,13 @@ import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/component
 import { AgencyStatusBadge, ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, SearchBox } from "@/pages/admin/components/ListControls";
 import StudentsTable from "@/pages/admin/components/StudentsTable";
+import ActivateAgentDialog from "@/pages/admin/components/ActivateAgentDialog";
+import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
+import type { AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { useToast } from "@/pages/admin/components/toastContext";
 import { AgentsTab, ApplicationsTab, DetailsTab } from "@/pages/admin/AgencyDetailPage";
 import {
-  getBusiness, linkAgencyToBusiness, listBusinessAgents, listBusinesses, setBusinessStatus,
+  deactivateAgent, getBusiness, linkAgencyToBusiness, listBusinessAgents, listBusinesses, setBusinessStatus,
   type BusinessDetail, type BusinessRow, type BusinessStatus, type OmaraAgentRow,
 } from "@/pages/admin/lib/businessData";
 import { formatDate, getAgency, type AgencySummary } from "@/pages/agency/lib/portalData";
@@ -138,7 +141,7 @@ export default function BusinessDetailPage() {
       </nav>
 
       {tab === "details" ? <DetailsSection business={business} onSaved={load} /> : null}
-      {tab === "omara" ? <OmaraAgentsSection businessId={business.id} /> : null}
+      {tab === "omara" ? <OmaraAgentsSection business={{ id: business.id, name: business.name, status: business.status }} onChanged={load} /> : null}
       {tab === "team" ? (agency
         ? <AgentsTab key={agency.id} agencyId={agency.id} agencyName={agency.name} onChanged={load} />
         : <NoWorkspace onActivate={() => void change("Active")} busy={busy} />) : null}
@@ -226,41 +229,62 @@ function Item({ label, value, fallback = "Not listed" }: { label: string; value:
   );
 }
 
-function OmaraAgentsSection({ businessId }: { businessId: string }) {
+function OmaraAgentsSection({ business, onChanged }: { business: { id: string; name: string; status: BusinessStatus }; onChanged: () => Promise<void> }) {
+  const { push } = useToast();
   const [rows, setRows] = useState<OmaraAgentRow[] | null>(null);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [activating, setActivating] = useState<AgentToActivate | null>(null);
+  const [confirm, setConfirm] = useState<OmaraAgentRow | null>(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
     setError("");
-    listBusinessAgents(businessId).then((r) => { if (active) setRows(r); }).catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load agents."); });
+    listBusinessAgents(business.id).then((r) => { if (active) setRows(r); }).catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load agents."); });
     return () => { active = false; };
-  }, [businessId, reload]);
+  }, [business.id, reload]);
+  const refresh = () => { setReload((n) => n + 1); void onChanged(); };
+  const deactivate = async (row: OmaraAgentRow) => {
+    if (!row.agentId) return;
+    setBusy(true);
+    try {
+      await deactivateAgent(row.agentId);
+      push(`${row.name} deactivated.`);
+      refresh();
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not deactivate this agent.", "error");
+    } finally {
+      setBusy(false);
+      setConfirm(null);
+    }
+  };
   return (
     <Card>
-      <p className="border-b border-background-200 px-4 py-3 text-sm text-foreground-600">Registered migration agents the OMARA register lists for this business. Link an agent’s portal login to their MARN from the agent’s page.</p>
+      <p className="border-b border-background-200 px-4 py-3 text-sm text-foreground-600">Registered migration agents the OMARA register lists for this business. Activate an agent to approve them for {business.name} and send their sign-in invitation.</p>
       {error ? <ListMessage icon="ri-error-warning-line" title="Agents did not load" text={error} action={<Button size="sm" variant="outline" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         : rows === null ? <p className="p-6 text-sm text-foreground-500">Loading agents…</p>
-        : rows.length === 0 ? <ListMessage icon="ri-team-line" title="No OMARA agents" text="The OMARA register lists no agents for this business." /> : (
+        : rows.length === 0 ? <ListMessage icon="ri-team-line" title="No OMARA agents" text="The OMARA register lists no agents for this business. Add agents from the Agents page." /> : (
           <ResponsiveTable>
             <thead>
               <tr>
                 <th className="w-[24%]">Agent</th>
-                <th className="w-[12%]">MARN</th>
-                <th className="w-[14%]">OMARA</th>
-                <th className="w-[20%]">Portal login</th>
-                <th className="w-[9%]">Students</th>
-                <th className="w-[21%]">Applications</th>
+                <th className="w-[11%]">MARN</th>
+                <th className="w-[12%]">OMARA</th>
+                <th className="w-[8%]">Students</th>
+                <th className="w-[19%]">Applications</th>
+                <th className="w-[11%]">Status</th>
+                <th className="w-[15%]"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const ended = r.relationship === "ended";
+                const status = r.agentStatus ?? (r.profile?.status === "Active" ? "Active" : "Inactive");
                 return (
                   <tr key={r.omaraId} className={ended ? "opacity-70" : ""}>
                     <td>
-                      {r.profile ? <Link to={`/admin/agents/${r.profile.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link> : <span className="font-semibold text-foreground-900">{r.name}</span>}
-                      <p className="mt-0.5 text-xs text-foreground-500">{ended ? `Left this business ${formatDate(r.endedAt)}` : r.place || r.email || ""}</p>
+                      <Link to={`/admin/agents/${r.agentId ?? r.omaraId}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link>
+                      <p className="mt-0.5 text-xs text-foreground-500">{ended ? `Left this business ${formatDate(r.endedAt)}` : r.profile ? `${r.profile.role === "agency_admin" ? "Agency admin" : "Agent"}, ${r.profile.email}` : r.place || r.email || ""}</p>
                     </td>
                     <td className="tabular-nums">{r.marn}</td>
                     <td>
@@ -268,22 +292,27 @@ function OmaraAgentsSection({ businessId }: { businessId: string }) {
                         {ended ? "Ended" : r.registered ? "Registered" : "Not registered"}
                       </span>
                     </td>
-                    <td>
-                      {r.profile ? (
-                        <>
-                          <Link to={`/admin/agents/${r.profile.id}`} className="inline-flex items-center gap-1 font-medium text-emerald-800 hover:text-primary-700"><i className="ri-check-line" aria-hidden="true" />{r.profile.name}</Link>
-                          <p className="text-xs text-foreground-500">{r.profile.role === "agency_admin" ? "Agency admin" : "Agent"}, {r.profile.status.toLowerCase()}</p>
-                        </>
-                      ) : <span className="text-xs text-foreground-500">No login linked</span>}
-                    </td>
                     <td>{r.profile ? <b className="text-foreground-900">{r.students}</b> : <span className="text-xs text-foreground-500">None</span>}</td>
                     <td>{Object.keys(r.statusCounts).length ? <ApplicationStatusPills counts={r.statusCounts} /> : <span className="text-xs text-foreground-500">None</span>}</td>
+                    <td><AgentStatusBadge status={status} /></td>
+                    <td>
+                      <div className="flex justify-end">
+                        {status === "Inactive"
+                          ? <Button size="sm" disabled={ended} onClick={() => setActivating({ agentId: r.agentId ?? null, omaraId: r.omaraId, name: r.name, email: r.profile?.email || r.email, marn: r.marn,
+                              role: r.profile?.role === "agency_admin" ? "agency_admin" : "agent", hasLogin: Boolean(r.profile), business })}>Activate</Button>
+                          : r.agentId ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(r)}>Deactivate</Button> : null}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </ResponsiveTable>
         )}
+      <ActivateAgentDialog agent={activating} open={Boolean(activating)} onClose={() => setActivating(null)} onDone={refresh} />
+      <ConfirmDialog open={Boolean(confirm)} title={`Deactivate ${confirm?.name ?? "this agent"}?`}
+        message="They will not be able to sign in, and an invitation still waiting is withdrawn. Their students and applications stay with the business."
+        confirmLabel={busy ? "Deactivating…" : "Deactivate agent"} onConfirm={() => { if (confirm && !busy) void deactivate(confirm); }} onCancel={() => { if (!busy) setConfirm(null); }} />
     </Card>
   );
 }

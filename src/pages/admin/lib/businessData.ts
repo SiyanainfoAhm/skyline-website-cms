@@ -61,6 +61,9 @@ export interface OmaraAgentRow {
   profile: null | { id: string; name: string; email: string; role: string | null; status: BusinessStatus };
   students: number;
   statusCounts: StatusCounts;
+  /** Skyline's own record of the agent, once a SLIT administrator has activated them (older databases omit both). */
+  agentId?: string | null;
+  agentStatus?: AgentStatus;
 }
 
 export interface ApplicationRow {
@@ -111,7 +114,7 @@ async function call<T>(fn: string, params: Record<string, unknown>, fallback: st
 /** Database messages written for people are passed through; anything technical becomes the caller's fallback. */
 function friendly(message: string | undefined): string {
   if (!message) return "";
-  return /^(SLIT administrator|Business|Agency|That business|This business|An agency|This MARN|Say how|Portal user|OMARA agent|Status must)/.test(message) ? message : "";
+  return /^(SLIT administrator|Business|Agency|That business|This business|An agency|This MARN|Say how|Portal user|OMARA agent|Status must|Agent not found|A business with|Choose the business|This agent|Enter |Role must)/.test(message) ? message : "";
 }
 
 export const listBusinesses = (f: { search?: string; status?: string; source?: string; workspace?: string; limit: number; offset: number }) =>
@@ -146,3 +149,72 @@ export const getAgent = (id: string) => call<AgentDetail | null>("admin_agent_de
 
 export const linkAgentMarn = (profileId: string, omaraId: string | null, evidence: string) =>
   call<{ linked: boolean; marn?: string }>("admin_link_agent_marn", { p_profile: profileId, p_omara: omaraId, p_evidence: evidence }, "We could not link this MARN.");
+
+/* ------------------------------------------------------------------ agents (every OMARA agent plus people added by hand) */
+
+/** Active: approved and signed up. Invited: approved, invitation not accepted yet. Inactive: everything else (the default). */
+export type AgentStatus = "Active" | "Invited" | "Inactive";
+export interface AgentCounts { all: number; active: number; invited: number; inactive: number }
+
+export interface DirectoryAgent {
+  /** Stable id for links: the Skyline agent record, or the OMARA record while the agent has never been activated. */
+  key: string;
+  agentId: string | null;
+  omaraId: string | null;
+  profileId: string | null;
+  name: string;
+  email: string;
+  phone: string;
+  role: "agent" | "agency_admin" | null;
+  status: AgentStatus;
+  marn: string;
+  registered: boolean | null;
+  place: string;
+  businessId: string | null;
+  businessName: string;
+  businessStatus: BusinessStatus | null;
+  students: number;
+  statusCounts: StatusCounts;
+}
+
+export interface AgentOverview {
+  key: string;
+  agentId: string | null;
+  profileId: string | null;
+  omaraId: string | null;
+  name: string;
+  email: string;
+  phone: string;
+  role: "agent" | "agency_admin" | null;
+  status: AgentStatus;
+  statusChangedAt: string | null;
+  business: null | { id: string; name: string; status: BusinessStatus };
+  omara: null | {
+    id: string; marn: string; registered: boolean; registrationStatus: string; place: string;
+    business: null | { id: string; name: string; status: BusinessStatus };
+  };
+  applications: ApplicationRow[];
+  students: Array<{ id: string; name: string; email: string }>;
+}
+
+export interface ActivationResult {
+  agentId: string; businessId: string; businessName: string; agencyId: string | null;
+  businessCreated: boolean; businessActivated: boolean; hasLogin: boolean; email: string; name: string; role: "agent" | "agency_admin";
+}
+
+export const listAgentDirectory = (f: { search?: string; status?: string; businessId?: string | null; limit: number; offset: number }) =>
+  call<{ total: number; counts: AgentCounts; rows: DirectoryAgent[] }>("admin_agent_directory", {
+    p_search: f.search ?? "", p_status: f.status ?? "", p_business: f.businessId ?? null, p_limit: f.limit, p_offset: f.offset,
+  }, "We could not load agents. Please try again.");
+
+/** Accepts a Skyline agent id, a portal profile id or an OMARA agent id. */
+export const getAgentOverview = (id: string) => call<AgentOverview | null>("admin_agent_overview", { p_id: id }, "We could not load this agent.");
+
+export const activateAgent = (input: {
+  agentId?: string | null; omaraId?: string | null; businessId?: string | null; newBusinessName?: string; name: string; email: string; role: "agent" | "agency_admin";
+}) => call<ActivationResult>("admin_agent_activate", {
+  p_agent: input.agentId ?? null, p_omara: input.omaraId ?? null, p_business: input.newBusinessName ? null : input.businessId ?? null,
+  p_new_business: input.newBusinessName ?? null, p_name: input.name, p_email: input.email, p_role: input.role,
+}, "We could not activate this agent.");
+
+export const deactivateAgent = (agentId: string) => call<{ agentId: string; status: "Inactive" }>("admin_agent_deactivate", { p_agent: agentId }, "We could not deactivate this agent.");

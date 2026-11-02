@@ -1,28 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Button, Card, ConfirmDialog, Field, PageHeader, Select, TextInput } from "@/pages/admin/components/ui";
+import { Button, Card, ConfirmDialog, PageHeader, Select } from "@/pages/admin/components/ui";
 import { AgencyStatusBadge, ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
+import ActivateAgentDialog from "@/pages/admin/components/ActivateAgentDialog";
+import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import ApplicationsList from "@/pages/admin/components/ApplicationsList";
 import { ListMessage } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { getAgent, linkAgentMarn, type AgentDetail } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, getAgentOverview, type AgentOverview } from "@/pages/admin/lib/businessData";
 import { groupByStudent } from "@/pages/admin/lib/businessGroups";
-import { invokePortalUsers } from "@/pages/agency/lib/portalData";
+import { formatDate } from "@/pages/agency/lib/portalData";
 
-/** Agencies > Agents > {name}: MARN, status, and the agent's students with each one's applications. */
+/** Agencies > Agents > {name}. The id may be the agent record, the portal login or the OMARA record. */
 export default function AgentDetailPage() {
   const { id = "" } = useParams();
   const { push } = useToast();
-  const [agent, setAgent] = useState<AgentDetail | null>(null);
+  const [agent, setAgent] = useState<AgentOverview | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const found = await getAgent(id);
+      const found = await getAgentOverview(id);
       setAgent(found);
       setState(found ? "ready" : "missing");
     } catch (e) {
@@ -32,15 +35,15 @@ export default function AgentDetailPage() {
   }, [id]);
   useEffect(() => { setState("loading"); void load(); }, [load]);
 
-  const changeStatus = async (next: "Active" | "Inactive") => {
-    if (!agent) return;
+  const deactivate = async () => {
+    if (!agent?.agentId) return;
     setBusy(true);
     try {
-      await invokePortalUsers({ action: "update", profileId: agent.id, status: next });
-      push(next === "Inactive" ? `${agent.name} disabled. They can no longer sign in.` : `${agent.name} enabled.`);
+      await deactivateAgent(agent.agentId);
+      push(`${agent.name} deactivated. They can no longer sign in.`);
       await load();
     } catch (e) {
-      push(e instanceof Error ? e.message : "We could not change this agent’s status.", "error");
+      push(e instanceof Error ? e.message : "We could not deactivate this agent.", "error");
     } finally {
       setBusy(false);
       setConfirm(false);
@@ -62,49 +65,79 @@ export default function AgentDetailPage() {
   const groups = groupByStudent(shown, agent.students);
   const counts: Record<string, number> = {};
   for (const a of agent.applications) counts[a.status] = (counts[a.status] ?? 0) + 1;
+  const startBusiness = agent.business ?? agent.omara?.business ?? null;
 
   return (
     <div>
-      <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap gap-1.5 text-sm text-foreground-600">
-        <Link to="/admin/agents" className="hover:text-foreground-900">Agents</Link>
-        {agent.business ? <><span aria-hidden="true">/</span><Link to={`/admin/businesses/${agent.business.id}`} className="hover:text-foreground-900">{agent.business.name}</Link></> : null}
-      </nav>
+      <Link to="/admin/agents" className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-foreground-600 hover:text-foreground-900">
+        <i className="ri-arrow-left-line" aria-hidden="true" /> Agents
+      </Link>
       <PageHeader
-        title={agent.name || agent.email}
-        description={`${agent.role === "agency_admin" ? "Agency admin" : "Agent"}${agent.business ? ` at ${agent.business.name}` : ""}. ${agent.email}`}
-        actions={
-          <>
-            <AgencyStatusBadge status={agent.status} />
-            {agent.status === "Active"
-              ? <Button variant="outline" disabled={busy} onClick={() => setConfirm(true)}>Disable agent</Button>
-              : <Button disabled={busy || agent.business?.status !== "Active"} onClick={() => void changeStatus("Active")}>{busy ? "Enabling…" : "Enable agent"}</Button>}
-          </>
-        }
+        title={agent.name}
+        description={[agent.omara ? `MARN ${agent.omara.marn}` : "Not on the OMARA register", agent.role === "agency_admin" ? "Agency admin" : agent.role ? "Agent" : null,
+          agent.business ? `with ${agent.business.name}` : null].filter(Boolean).join(", ")}
+        actions={<>
+          <AgentStatusBadge status={agent.status} />
+          {agent.status === "Inactive"
+            ? <Button onClick={() => setDialog(true)}>Activate agent</Button>
+            : <Button variant="outline" disabled={busy} onClick={() => setConfirm(true)}>Deactivate agent</Button>}
+        </>}
       />
-      {agent.business && agent.business.status !== "Active" ? (
+      {agent.status === "Invited" ? (
+        <p role="status" className="-mt-2 mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Approved{agent.statusChangedAt ? ` on ${formatDate(agent.statusChangedAt)}` : ""}. Waiting for {agent.email || "them"} to accept the sign-in invitation; until then they cannot sign in.
+        </p>
+      ) : agent.status === "Inactive" ? (
         <p role="status" className="-mt-2 mb-5 rounded-md border border-background-300 bg-background-100 px-4 py-3 text-sm text-foreground-700">
-          {agent.business.name} is inactive, so nobody in it can sign in. Activate the business first.
+          Inactive. Activate this agent to attach them to a business and let them sign in.
         </p>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap items-start gap-5">
-        <dl className="grid min-w-0 flex-[999_1_480px] grid-cols-3 gap-px overflow-hidden rounded-lg border border-background-200 bg-background-200">
-          <div className="bg-background-50 px-4 py-3"><dt className="text-xs text-foreground-500">Students</dt><dd className="mt-1 font-heading text-xl font-bold tabular-nums">{agent.students.length}</dd></div>
-          <div className="bg-background-50 px-4 py-3"><dt className="text-xs text-foreground-500">Applications</dt><dd className="mt-1 font-heading text-xl font-bold tabular-nums">{agent.applications.length}</dd></div>
-          <div className="bg-background-50 px-4 py-3"><dt className="text-xs text-foreground-500">By status</dt><dd className="mt-1.5"><ApplicationStatusPills counts={counts} />{agent.applications.length ? null : <span className="text-xs text-foreground-500">None yet</span>}</dd></div>
-        </dl>
-        <MarnCard agent={agent} onChanged={load} />
+      <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card className="p-4">
+          <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">Business</h2>
+          {agent.business ? (
+            <div className="space-y-1.5 text-sm">
+              <Link to={`/admin/businesses/${agent.business.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{agent.business.name}</Link>
+              <div><AgencyStatusBadge status={agent.business.status} /></div>
+            </div>
+          ) : <p className="text-sm text-foreground-600">Not attached yet. {startBusiness ? `OMARA lists ${startBusiness.name}.` : ""}</p>}
+        </Card>
+        <Card className="p-4">
+          <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">OMARA registration</h2>
+          {agent.omara ? (
+            <dl className="space-y-1.5 text-sm">
+              <div><dt className="inline text-foreground-500">MARN </dt><dd className="inline font-semibold tabular-nums text-foreground-900">{agent.omara.marn}</dd></div>
+              <dd className={agent.omara.registered ? "text-emerald-800" : "font-medium text-amber-700"}>{agent.omara.registered ? "Registered" : "No longer registered"}</dd>
+              {agent.omara.business ? <dd className="text-foreground-700">Listed with {agent.omara.business.name}{agent.omara.place ? `, ${agent.omara.place}` : ""}</dd> : null}
+            </dl>
+          ) : <p className="text-sm text-foreground-600">Not on the OMARA register.</p>}
+        </Card>
+        <Card className="p-4">
+          <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">Contact and sign-in</h2>
+          <dl className="space-y-1.5 text-sm">
+            <dd className={agent.email ? "text-foreground-900" : "text-foreground-500"}>{agent.email || "No email"}</dd>
+            {agent.phone ? <dd className="text-foreground-900">{agent.phone}</dd> : null}
+            <dd className="text-foreground-600">{agent.profileId ? "Has a portal login" : agent.status === "Invited" ? "Invitation sent, not accepted yet" : "No portal login"}</dd>
+          </dl>
+        </Card>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-heading text-lg font-semibold text-foreground-900">Students and applications</h2>
-        <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
-          <option value="">All statuses</option>
-          {Object.keys(counts).map((s) => <option key={s} value={s}>{s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())} ({counts[s]})</option>)}
-        </Select>
+        {agent.applications.length ? (
+          <span className="flex flex-wrap items-center gap-3">
+            <ApplicationStatusPills counts={counts} />
+            <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto">
+              <option value="">All statuses</option>
+              {Object.keys(counts).map((s) => <option key={s} value={s}>{s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())} ({counts[s]})</option>)}
+            </Select>
+          </span>
+        ) : null}
       </div>
       {groups.length === 0 ? (
-        <Card><ListMessage icon="ri-user-line" title={status ? "No applications in this status" : "No students yet"} text={status ? "Choose another status." : "Students appear here when this agent starts an application."} /></Card>
+        <Card><ListMessage icon="ri-user-line" title={status ? "No applications in this status" : "No students yet"}
+          text={status ? "Choose another status." : agent.profileId ? "Students appear here when this agent starts an application." : "Students appear here once the agent has signed in and starts an application."} /></Card>
       ) : (
         <div className="space-y-4">
           {groups.map((g) => (
@@ -122,56 +155,12 @@ export default function AgentDetailPage() {
         </div>
       )}
 
-      <ConfirmDialog open={confirm} title={`Disable ${agent.name || "this agent"}?`}
-        message="They will be signed out and cannot sign in. Their students and applications stay with the business, and you can enable them again."
-        confirmLabel={busy ? "Disabling…" : "Disable agent"} onConfirm={() => { if (!busy) void changeStatus("Inactive"); }} onCancel={() => { if (!busy) setConfirm(false); }} />
+      <ActivateAgentDialog open={dialog} onClose={() => setDialog(false)} onDone={() => void load()}
+        agent={{ agentId: agent.agentId, omaraId: agent.omaraId, name: agent.name, email: agent.email, marn: agent.omara?.marn, role: agent.role,
+          hasLogin: Boolean(agent.profileId), business: startBusiness }} />
+      <ConfirmDialog open={confirm} title={`Deactivate ${agent.name}?`}
+        message="They will not be able to sign in, and an invitation still waiting is withdrawn. Their students and applications stay with the business. You can activate them again at any time."
+        confirmLabel={busy ? "Deactivating…" : "Deactivate agent"} onConfirm={() => { if (!busy) void deactivate(); }} onCancel={() => { if (!busy) setConfirm(false); }} />
     </div>
-  );
-}
-
-function MarnCard({ agent, onChanged }: { agent: AgentDetail; onChanged: () => Promise<void> }) {
-  const { push } = useToast();
-  const [pick, setPick] = useState("");
-  const [evidence, setEvidence] = useState("");
-  const [busy, setBusy] = useState(false);
-  const save = async (omaraId: string | null) => {
-    setBusy(true);
-    try {
-      const r = await linkAgentMarn(agent.id, omaraId, evidence);
-      push(r.linked ? `MARN ${r.marn ?? ""} linked.` : "MARN unlinked.");
-      setPick(""); setEvidence("");
-      await onChanged();
-    } catch (e) {
-      push(e instanceof Error ? e.message : "We could not link this MARN.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Card className="flex-[1_1_280px] p-4">
-      <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">OMARA registration</h2>
-      {agent.omara ? (
-        <div className="space-y-2 text-sm">
-          <p><span className="text-foreground-500">MARN</span> <b className="tabular-nums text-foreground-900">{agent.omara.marn}</b></p>
-          <p className={agent.omara.registered ? "text-emerald-800" : "font-medium text-amber-700"}>{agent.omara.registered ? "Registered with OMARA" : "No longer registered with OMARA"}</p>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save(null)}>Unlink MARN</Button>
-        </div>
-      ) : agent.marnOptions.length === 0 ? (
-        <p className="text-sm text-foreground-600">No unlinked MARN is listed for {agent.business?.name ?? "this business"}.</p>
-      ) : (
-        <div className="space-y-3">
-          <Field label="MARN">
-            <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={busy}>
-              <option value="">Choose the agent’s MARN</option>
-              {agent.marnOptions.map((o) => <option key={o.id} value={o.id}>{o.marn}, {o.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="How you checked it">
-            <TextInput value={evidence} onChange={(e) => setEvidence(e.target.value)} disabled={busy} placeholder="For example: checked on the OMARA register" />
-          </Field>
-          <Button size="sm" disabled={busy || !pick || !evidence.trim()} onClick={() => void save(pick)}>{busy ? "Linking…" : "Link MARN"}</Button>
-        </div>
-      )}
-    </Card>
   );
 }
