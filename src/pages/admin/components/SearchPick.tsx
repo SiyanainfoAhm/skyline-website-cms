@@ -49,6 +49,7 @@ export default function SearchPick({
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
+  const [retry, setRetry] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -70,14 +71,17 @@ export default function SearchPick({
     }
     setLoading(true);
     setFailed(false);
+    // Typing is debounced; the first list (empty query) loads straight away.
     const timer = window.setTimeout(() => {
-      search(query)
+      // A request that never answers must not leave the list on "Searching…" forever.
+      const slow = new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("timeout")), 12000));
+      Promise.race([search(query), slow])
         .then((rows) => { if (live) { setOptions(rows); setActive(0); } })
         .catch(() => { if (live) { setOptions([]); setFailed(true); } })
         .finally(() => { if (live) setLoading(false); });
-    }, 220);
+    }, query ? 220 : 0);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [q, open, search, resetKey, searchWhenEmpty]);
+  }, [q, open, search, resetKey, searchWhenEmpty, retry]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
@@ -123,8 +127,13 @@ export default function SearchPick({
       </div>
       {open && !disabled ? (
         <ul ref={listRef} id={`${id}-list`} role="listbox" className="mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-background-200 bg-background-50 py-1 shadow-sm">
-          {loading && options.length === 0 ? <li className="px-3 py-2.5 text-sm text-foreground-500">Searching…</li> : null}
-          {failed ? <li className="px-3 py-2.5 text-sm text-red-700">Search did not load. Type again to retry.</li> : null}
+          {loading && options.length === 0 ? <li className="px-3 py-2.5 text-sm text-foreground-500">{typed ? "Searching…" : `Loading ${addNoun}s…`}</li> : null}
+          {failed ? (
+            <li className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm text-red-700">
+              The list did not load.
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); setRetry((n) => n + 1); }} className="font-semibold text-primary-700 hover:text-primary-800">Try again</button>
+            </li>
+          ) : null}
           {!loading && !failed && options.length === 0 && !showAdd ? (
             <li className="px-3 py-2.5 text-sm text-foreground-500">{typed ? "No matches." : searchWhenEmpty ? `No ${addNoun}s yet. Type a name to add one.` : `Start typing to search.`}</li>
           ) : null}
