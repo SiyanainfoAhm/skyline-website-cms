@@ -50,6 +50,12 @@ export default function SearchPick({
   const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // The list sits in the page flow (a floating dropdown is clipped by scrolling dialogs), so bring it into view when it opens.
+  useEffect(() => {
+    if (open) listRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,11 +122,11 @@ export default function SearchPick({
         />
       </div>
       {open && !disabled ? (
-        <ul id={`${id}-list`} role="listbox" className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-background-200 bg-background-50 py-1 shadow-lg">
+        <ul ref={listRef} id={`${id}-list`} role="listbox" className="mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-background-200 bg-background-50 py-1 shadow-sm">
           {loading && options.length === 0 ? <li className="px-3 py-2.5 text-sm text-foreground-500">Searching…</li> : null}
           {failed ? <li className="px-3 py-2.5 text-sm text-red-700">Search did not load. Type again to retry.</li> : null}
           {!loading && !failed && options.length === 0 && !showAdd ? (
-            <li className="px-3 py-2.5 text-sm text-foreground-500">{typed ? "No matches." : `Start typing a ${addNoun} name.`}</li>
+            <li className="px-3 py-2.5 text-sm text-foreground-500">{typed ? "No matches." : searchWhenEmpty ? `No ${addNoun}s yet. Type a name to add one.` : `Start typing to search.`}</li>
           ) : null}
           {options.map((o, i) => (
             <li key={o.id} role="option" aria-selected={i === active}

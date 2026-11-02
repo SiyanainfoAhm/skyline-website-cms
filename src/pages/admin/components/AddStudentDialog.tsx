@@ -197,7 +197,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
                 () => { setBusiness(null); setAgent(null); })}
             </>
           ) : (
-            <SearchPick label="Business" addNoun="business" autoFocus placeholder="Search business name, place or email"
+            <SearchPick label="Business" addNoun="business" autoFocus searchWhenEmpty placeholder="Search business name, place or email"
               search={searchBusinesses}
               onPick={(o) => {
                 const b = (o as PickOption & { raw: { id: string; name: string; status: BusinessStatus; agencyId: string | null } }).raw;
@@ -213,7 +213,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
           <div>
             {agent ? (
               <>
-                <p className="mb-1.5 text-[13px] font-medium text-foreground-800">Portal team member</p>
+                <p className="mb-1.5 text-[13px] font-medium text-foreground-800">Agent</p>
                 {agent.kind === "existing"
                   ? chip(agent.row.name, agent.row.email || "No email on record", () => setAgent(null), <AgentStatusBadge status={agent.row.status} />)
                   : chip(agent.details.name, [agent.details.email, agent.details.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "), () => setAgent(null))}
@@ -227,7 +227,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
                 <button type="button" className="font-semibold text-primary-700 hover:text-primary-800" onClick={() => openNewAgent("")}>Add its first agent</button>
               </div>
             ) : (
-              <SearchPick label="Portal team member" addNoun="team member" placeholder={`Search team members at ${business.name}`} resetKey={business.id} autoFocus searchWhenEmpty openOnMount
+              <SearchPick label="Agent" addNoun="agent" placeholder={`Search or pick an agent at ${business.name}`} resetKey={business.id} autoFocus searchWhenEmpty openOnMount
                 search={searchAgents}
                 onPick={(o) => setAgent({ kind: "existing", row: (o as PickOption & { raw: DirectoryAgent }).raw })}
                 onAddNew={openNewAgent} />
