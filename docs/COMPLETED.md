@@ -1,5 +1,8 @@
 # Completed log (newest first)
 
+## 2026-11-02 - Backend admin sidebar (local; native acceptance pending)
+Migration 95 + authorized dynamic renderer; original URLs/mobile drawer preserved, public navigation separate. Type-check/build/lint, all eight offline test scripts and 30 embedded PostgreSQL checks PASS; 25 added pgTAP cases/native lab NOT RUN (Docker missing). Published on feat/backend-admin-sidebar in SiyanainfoAhm/skyline-website-cms; production undeployed.
+
 ## 2026-10-26 - Repo cleanup
 docs/ cut to TASKS, COMPLETED, SUPABASE, ARCHITECTURE; evidence trees, phase docs and one-off scripts deleted (zip backup outside repo). Kept: product tests, native lab chain, backup-task scripts. Not committed.
 
