@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, PageHeader, TextInput } from "@/pages/admin/components/ui";
@@ -282,8 +283,8 @@ function AgentsTab({ agencyId, agencyName, onChanged }: { agencyId: string; agen
         {!loading && members.length === 0 ? (
           <EmptyState icon="ri-team-line" title="No agents yet" description="Invite this agency's first agent above." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-left text-sm" aria-busy={loading}>
+          <div className="">
+            <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr className="border-b border-background-200 text-xs uppercase text-foreground-500">
                   <th className="p-4">Name</th><th className="p-4">Email</th><th className="p-4">Role</th><th className="p-4">Status</th><th className="p-4 text-right">Access</th>
@@ -306,7 +307,7 @@ function AgentsTab({ agencyId, agencyName, onChanged }: { agencyId: string; agen
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
       </Card>
@@ -357,3 +358,4 @@ function ApplicationsTab({ agencyId }: { agencyId: string }) {
     />
   );
 }
+

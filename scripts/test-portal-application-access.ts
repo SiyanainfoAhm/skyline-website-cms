@@ -1,7 +1,53 @@
+import { createElement as h } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ResponsiveTable from "../src/components/ui/ResponsiveTable.tsx";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
+import type { DirectoryAgency } from '../src/pages/agency/lib/portalData.ts';
+
+test('agency directory fills real business fields, keeps inactive status and does not invent missing contact details', () => {
+  const agency: DirectoryAgency = { ...EMPTY_AGENCY_FORM, id: 'directory:sample', name: 'Sample Business', code: 'OMARA-ABC12345',
+    phone: '+61412345678 / +61400000000', primaryContact: 'Registered Contact', status: 'Inactive', businessEmail: '',
+    address: '1 Sample Street', country: 'Australia', registrationNumber: '', isPermanent: false, createdAt: '',
+    agentCount: 0, applicationCount: 0, directoryKey: 'sample', existingAgencyId: null, source: 'directory', marn: '1234567' };
+  const form = directoryAgencyToForm(agency);
+  assert.equal(form.name, agency.name);
+  assert.equal(form.address, agency.address);
+  assert.equal(form.primaryContact, agency.primaryContact);
+  assert.equal(form.status, 'Inactive');
+  assert.equal(form.businessEmail, '');
+  assert.equal(form.registrationNumber, '', 'a person MARN is not an agency ABN');
+  assert.equal(validateAgencyForm(form).phone, '+61412345678');
+  assert.ok(validateAgencyForm(form).errors.businessEmail, 'missing directory email must be completed before creating');
+  assert.equal(directoryAgencyToForm({ ...agency, phone: '', primaryContact: '' }).phone, '');
+});
+import { menuTree, menuActive, menuIcon, type AdminMenuItem } from "../src/pages/admin/lib/adminMenu.ts";
 import { canManagePortalUsers, isEditableApplicationStatus, portalAccessMessage, portalLanding } from "../src/pages/agency/lib/applicationAccess.ts";
 import { availableActions, csvCell, EXPORT_COLUMNS, exportCsv, EXCEPTION_TEXT, normaliseCoeNumber, registrationChecklist, registrationWarning, validateCorrection, verifyBlockers } from "../src/pages/agency/lib/registrationWorkbench.ts";
+
+test('admin menu: order, nesting and active deep links follow backend rows', () => {
+  const row = (id: string, parent_id: string | null, route: string | null, sort_order = 0): AdminMenuItem =>
+    ({ id, parent_id, route, sort_order, label: id, icon_key: 'pages', is_enabled: true, open_in_new_tab: false });
+  const tree = menuTree([row('site', null, null, 20), row('pages', 'site', '/admin/pages'), row('home', null, '/admin', 0)]);
+  assert.deepEqual(tree.map(n => n.id), ['home', 'site']);
+  assert.equal(menuActive(tree[1], '/admin/pages/a-page'), true);
+  assert.equal(menuActive(tree[0], '/admin/pages'), false);
+  assert.equal(menuActive(tree[1], '/admin/pages-lookalike'), false);
+});
+test('admin menu: denied parents, disabled rows, cycles and unsafe routes fail closed', () => {
+  const row = (id: string, parent_id: string | null, route: string | null): AdminMenuItem =>
+    ({ id, parent_id, route, sort_order: 0, label: id, icon_key: 'pages', is_enabled: true, open_in_new_tab: false });
+  assert.deepEqual(menuTree([
+    row('orphan', 'denied', '/admin/users'), row('a', 'b', null), row('b', 'a', null),
+    row('script', null, 'javascript:alert(1)'), row('remote', null, '//example.test'),
+    row('unknown', null, '/admin/not-implemented'), row('empty', null, null),
+    { ...row('disabled', null, '/admin/pages'), is_enabled: false },
+  ]), []);
+  assert.equal(menuIcon('pages'), 'ri-file-text-line');
+  assert.equal(menuIcon('evil onclick=alert(1)'), 'ri-folder-line');
+  assert.equal(menuIcon('__proto__'), 'ri-folder-line');
+});
 
 test("only database-editable portal statuses enable draft UI", () => {
   assert.equal(isEditableApplicationStatus("draft"), true);
@@ -390,7 +436,7 @@ test("recipients: addresses are split, trimmed, lower-cased and validated; dupli
   assert.equal(parseRecipients("").error, null);
   assert.match(parseRecipients("not-an-email").error ?? "", /not a valid email/i);
   assert.match(parseRecipients("a@b.test, A@B.test").error ?? "", /listed twice/i);
-  assert.match(parseRecipients(Array.from({ length: 11 }, (_, i) => `r${i}@example.test`).join("\n")).error ?? "", /at most 10/i);
+  assert.match(parseRecipients(Array.from({ length: 21 }, (_, i) => `r${i}@example.test`).join("\n")).error ?? "", /at most 20/i);
   assert.match(parseRecipients(`${"x".repeat(250)}@b.test`).error ?? "", /not a valid/i);
 });
 
@@ -445,3 +491,31 @@ test("coe/voe: Approve and issue is blocked for every reason the database would 
   assert.match(coeErrorMessage({ code: "42501" }), /permission/i);
   assert.ok(!coeErrorMessage({ code: "XX000", message: "relation enrollment_coe_documents 8f2c1d3e" }).includes("8f2c1d3e"));
 });
+
+
+test("shared table keeps conditional column labels, native controls, and full-width messages aligned", () => {
+  const html = renderToStaticMarkup(h(ResponsiveTable, { "aria-label": "Registrations", "aria-busy": true },
+    h("thead", null, h("tr", null, h("th", null, "Student"), false, h("th", null, "Actions"))),
+    h("tbody", null,
+      h("tr", null, h("td", null, "Sample Student"), null, h("td", null, h("input", { type: "checkbox", "aria-label": "Select for export", defaultChecked: true }))),
+      h("tr", null, h("td", { colSpan: 2 }, "Loading registrations")))));
+  assert.match(html, /data-label="Student"/);
+  assert.match(html, /data-label="Actions"/);
+  assert.match(html, /scope="col"/);
+  assert.match(html, /headers="[^"]+-column-1"/);
+  assert.match(html, /type="checkbox"[^>]*aria-label="Select for export"[^>]*checked/);
+  assert.match(html, /colSpan="2"[^>]*data-table-message/i);
+  assert.match(html, /aria-busy="true"/);
+  assert.equal((html.match(/data-label=/g) ?? []).length, 2);
+});
+
+test("shared table exposes sorting controls in the small-screen toolbar without invoking handlers", () => {
+  let calls = 0;
+  const html = renderToStaticMarkup(h(ResponsiveTable, null,
+    h("thead", null, h("tr", null, h("th", null, h("button", { onClick: () => { calls++; } }, "Student")))),
+    h("tbody", null, h("tr", null, h("td", null, "Name")))));
+  assert.match(html, /aria-label="Table sorting"/);
+  assert.equal((html.match(/<button/g) ?? []).length, 2);
+  assert.equal(calls, 0);
+});
+

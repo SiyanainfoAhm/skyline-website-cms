@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useState } from "react";
 import { formatPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
 import { Link, Navigate, useParams } from "react-router-dom";
@@ -451,8 +452,8 @@ export default function ApplicationDetailPage() {
               message="Upload passport, visa, English, licence and academic documents with the Document upload wizard. They will appear here as soon as they are persisted."
             />
           ) : (
-            <div className="overflow-x-auto rounded-card border border-background-200 bg-background-50">
-              <table className="w-full min-w-[640px] text-left text-sm">
+            <div className="rounded-card border border-background-200 bg-background-50">
+              <ResponsiveTable>
                 <thead className="bg-background-100 text-xs uppercase tracking-wide text-foreground-700">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Category</th>
@@ -485,7 +486,7 @@ export default function ApplicationDetailPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </ResponsiveTable>
             </div>
           )
         ) : null}
@@ -541,3 +542,4 @@ export default function ApplicationDetailPage() {
     </div>
   );
 }
+

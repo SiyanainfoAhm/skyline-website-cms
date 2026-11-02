@@ -1,7 +1,29 @@
 -- Security assertions (REG-AUTH/SEC), originally red until P02-03/04, now green; includes the P06-01 tenant administration matrix.
 -- Synthetic SQL actor simulation; every write is rolled back.
 begin;
-select plan(425);
+select plan(470);
+-- Backend-driven admin navigation: grants, protection and fail-closed reads.
+select is(has_table_privilege('anon','public.admin_menu_items','select'),false,'menu is not public');
+select is(has_table_privilege('authenticated','public.admin_menu_items','insert'),false,'browser cannot insert menu');
+select is(has_table_privilege('authenticated','public.admin_menu_items','update'),false,'browser cannot update menu');
+select is(has_table_privilege('authenticated','public.admin_menu_items','delete'),false,'browser cannot delete menu');
+select is((select relrowsecurity from pg_class where oid='public.admin_menu_items'::regclass),true,'menu has RLS');
+select is((select count(*)::int from public.admin_menu_items),32,'desired menu seeded');
+select is((select count(*)::int from public.admin_menu_items where not is_enabled),4,'unimplemented and retired menu children disabled');
+select throws_ok($$delete from public.admin_menu_items where id='dashboard'$$,'23514',null,'system menu cannot be deleted');
+select throws_ok($$update public.admin_menu_items set route='/admin/users' where id='dashboard'$$,'23514',null,'system destination protected');
+select throws_ok($$update public.admin_menu_items set permission_key='cms.read' where id='users'$$,'23514',null,'system permission protected');
+select throws_ok($$update public.admin_menu_items set is_system=false where id='dashboard'$$,'23514',null,'system flag protected');
+select lives_ok($$update public.admin_menu_items set sort_order=0 where id='dashboard'$$,'ordering remains dynamic');
+select throws_ok($$insert into public.admin_menu_items(id,label,route,permission_key) values('bad_url','Bad','//evil.test','cms.read')$$,'23514',null,'external routes rejected');
+select throws_ok($$insert into public.admin_menu_items(id,parent_id,label,permission_key) values('bad_parent','missing','Bad','cms.read')$$,'23503',null,'missing parent rejected');
+insert into public.admin_menu_items(id,parent_id,label,permission_key) values ('test_root',null,'Test','cms.read'),('test_child','test_root','Child','cms.read');
+select throws_ok($$update public.admin_menu_items set parent_id='test_child' where id='test_root'$$,'23514',null,'hierarchy cycles rejected');
+delete from public.admin_menu_items where id='test_child';
+delete from public.admin_menu_items where id='test_root';
+set local role authenticated;
+select is((select count(*)::int from public.admin_menu_items),0,'missing identity gets no menu');
+reset role;
 insert into public.agencies(id,name,code) values
  ('12000000-0000-0000-0000-000000000001','Security A','P2-SEC-A'),
  ('12000000-0000-0000-0000-000000000002','Security B','P2-SEC-B');
@@ -58,6 +80,23 @@ insert into public.tenant_memberships(tenant_id,auth_user_id,role) values
 insert into public.platform_admins(auth_user_id) values ('a0000000-0000-0000-0000-000000000003');
 insert into public.tenant_domains(hostname,tenant_id,verified_at,verification_evidence) values
  ('a.p06.example.test','1a000000-0000-0000-0000-000000000001',now(),'DNS proof'),('b.p06.example.test','1a000000-0000-0000-0000-000000000002',now(),'DNS proof');
+set local role authenticated;
+set local request.headers='{"x-tenant-domain":"a.p06.example.test"}';
+set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000001';
+select is((select count(*)::int from public.admin_menu_items where id='institution'),1,'tenant administrator sees institution');
+select is((select count(*)::int from public.admin_menu_items where id='users'),0,'tenant never sees legacy users');
+select is((select count(*)::int from public.admin_menu_items where id='applications'),1,'reviewer sees admissions');
+set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000004';
+select is((select count(*)::int from public.admin_menu_items where id='institution'),0,'editor cannot see administration');
+select is((select count(*)::int from public.admin_menu_items where id='pages'),1,'editor sees website pages');
+select is((select count(*)::int from public.admin_menu_items where id='applications'),0,'editor cannot see admissions');
+select is((select count(*)::int from public.admin_menu_items where not is_enabled),0,'disabled entries never leave backend');
+set local request.headers='{"x-tenant-domain":"b.p06.example.test"}';
+select is((select count(*)::int from public.admin_menu_items),0,'foreign tenant membership cannot read menu');
+set local request.headers='{"x-tenant-domain":"unknown.example.test"}';
+select is((select count(*)::int from public.admin_menu_items),0,'unknown tenant fails closed');
+reset role;
+set local request.headers='{}';
 set local role authenticated;
 set local request.jwt.claim.sub='a0000000-0000-0000-0000-000000000001';
 select is(public.tenant_admin_overview('1a000000-0000-0000-0000-000000000001')->'tenant'->>'name','Institution A','tenant admin reads own institution overview');
@@ -827,5 +866,47 @@ reset role;
 select is((select count(*)::int from public.notification_deliveries where application_id='45000000-0000-0000-0000-000000000004' and state='pending'),0,'the backlog from before the resume is suppressed, not released');
 select is((select count(*)::int from public.notification_deliveries where application_id='45000000-0000-0000-0000-000000000004' and state_reason='created_before_activation'),1,'with the reason created_before_activation');
 select is((select count(*)::int from public.notification_deliveries where state in ('sending','sent','unknown','delivered','bounced','complained','failed') and state_reason='created_before_activation'),0,'deliveries already sent or in flight are never rewritten');
+-- Unified agencies: registry grouping, page boundaries, status and duplicate protection.
+reset role;
+insert into auth.users(id,email,email_confirmed_at) values ('a9000000-0000-0000-0000-000000000001','directory-admin@example.test',now());
+insert into public.cms_users(id,name,email,role,status,auth_user_id,must_change_password) values
+ ('directory-fixture-admin','Directory administrator','directory-admin@example.test','Admin','Active','a9000000-0000-0000-0000-000000000001',false);
+insert into public.omara_agents(marn,full_name,business_name,country,is_active,email) values
+ ('directory-fixture-1','Contact One','Directory Fixture Alpha','Australia',true,'alpha@example.test'),
+ ('directory-fixture-2','Contact Two',' Directory   Fixture Alpha ','Australia',false,null),
+ ('directory-fixture-3','Contact Three','Directory Fixture Beta','Australia',false,'beta@example.test'),
+ ('directory-fixture-4','Contact Four','Directory Fixture Gamma','Australia',true,null);
+insert into public.agencies(id,name,code,status,country) values
+ ('a9000000-0000-0000-0000-000000000002','Directory Fixture Alpha','DIR-FIX-ALPHA','Inactive','Australia'),
+ ('a9000000-0000-0000-0000-000000000003','Directory Fixture Local','DIR-FIX-LOCAL','Active','Australia');
+set local request.headers='{}';
+set local request.jwt.claim.sub='a9000000-0000-0000-0000-000000000001';
+set local role authenticated;
+select is((public.admin_agency_directory('Directory Fixture')->>'total')::int,4,'registry contacts group into businesses, including local agencies');
+select is(jsonb_array_length(public.admin_agency_directory('Directory Fixture')->'rows'),4,'one row per business');
+select is(public.admin_agency_directory('Directory Fixture')->'rows'->0->>'name','Directory Fixture Gamma','active agencies sorted first');
+select is(public.admin_agency_directory('Directory Fixture')->'rows'->1->>'status','Active','second active business precedes all inactive ones');
+select is(public.admin_agency_directory('Directory Fixture')->'rows'->2->>'status','Inactive','existing inactive status overrides a registered contact');
+select is((public.admin_agency_directory('Directory Fixture','Active')->>'total')::int,2,'active filter');
+select is((public.admin_agency_directory('Directory Fixture','Inactive')->>'total')::int,2,'inactive filter');
+select is(jsonb_array_length(public.admin_agency_directory('Directory Fixture','',2)->'rows'),2,'bounded first page');
+select is(public.admin_agency_directory('Directory Fixture','',2,2)->'rows'->0->>'name','Directory Fixture Alpha','second page has no overlap');
+select is(jsonb_array_length(public.admin_agency_directory('Directory Fixture','',25,999999)->'rows'),0,'empty out-of-range page');
+select is((public.admin_agency_directory('Directory Fixture Alpha')->>'total')::int,1,'existing business is not repeated from the registry');
+select is(public.admin_agency_directory('Directory Fixture Alpha')->'rows'->0->>'source','portal','existing portal record is selected');
+select is(public.admin_agency_directory('','',1,0,public.agency_directory_key('Directory Fixture Beta','Australia'))->'rows'->0->>'business_email','beta@example.test','exact directory selection returns contact details');
+select is(public.admin_agency_directory('Directory Fixture Beta')->'rows'->0->>'registration_number','','a contact MARN is not misrepresented as an agency ABN');
+select throws_ok($$insert into public.agencies(id,name,code,country) values ('a9000000-0000-0000-0000-000000000004',' DIRECTORY   FIXTURE ALPHA ','DIR-FIX-DUP',' Australia ')$$,'23505',null,'duplicate agency prevented across case and spacing');
+select is((select count(*)::int from public.admin_menu_items where id in ('agent_users','agency_directory')),0,'retired admin links hidden');
+select is((select route from public.admin_menu_items where id='agencies'),'/admin/agencies','Agencies is the direct menu destination');
+set local request.headers='{"x-tenant-domain":"unknown-directory-fixture.invalid"}';
+select throws_ok($$select public.admin_agency_directory()$$,'42501',null,'unknown tenant cannot query the directory');
+set local request.headers='{}';
+set local request.jwt.claim.sub='';
+select throws_ok($$select public.admin_agency_directory()$$,'42501',null,'missing identity denied');
+reset role;
+set local role anon;
+select throws_ok($$select public.admin_agency_directory()$$,'42501',null,'anonymous execution denied');
+reset role;
 select * from finish();
 rollback;

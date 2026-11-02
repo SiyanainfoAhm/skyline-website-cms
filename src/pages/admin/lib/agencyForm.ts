@@ -1,6 +1,7 @@
 import { DEFAULT_DIAL, formatPhone, normalizePhoneInput, validatePhone } from "../../../../supabase/functions/_shared/validation/identifiers";
-import { validateEmail, validateName } from "@/pages/agency/lib/userValidation";
+import { validateEmail, validateName } from "../../agency/lib/userValidation";
 import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
+import type { DirectoryAgency } from '../../agency/lib/portalData';
 
 export interface AgencyFormState {
   name: string;
@@ -24,6 +25,11 @@ export function agencyToForm(agency: PortalAgency): AgencyFormState {
     phone: formatPhone(agency.phone), address: agency.address, country: agency.country, primaryContact: agency.primaryContact,
     status: agency.status === "Inactive" ? "Inactive" : "Active",
   };
+}
+
+/** Registry contact numbers may contain alternatives; never invent missing email/ABN. */
+export function directoryAgencyToForm(agency: DirectoryAgency): AgencyFormState {
+  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()) };
 }
 
 /** A starting code from the name (initials plus a number); the administrator can change it. */

@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { Link } from "react-router-dom";
@@ -37,7 +38,7 @@ interface ApplicationsTableProps {
 }
 
 const SELECT_CLASS =
-  "rounded-md border border-background-300 bg-background-50 px-3 py-2 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40";
+  "min-w-0 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40";
 
 const SORTABLE: SortKey[] = ["reference", "student", "agency", "agent", "status", "completion", "created", "updated"];
 
@@ -159,12 +160,11 @@ export default function ApplicationsTable({
 
   const resetPage = () => setPage(1);
 
-  const headerCell = (label: string, key: SortKey, extra = "") => (
-    <th className={`whitespace-nowrap px-3 py-2.5 font-semibold ${extra}`}>
+  const sortButton = (label: string, key: SortKey) => (
       <button
         type="button"
         onClick={() => toggleSort(key)}
-        className="inline-flex cursor-pointer items-center gap-1 text-foreground-700 transition-colors hover:text-primary-600"
+        className="inline-flex max-w-full cursor-pointer items-center gap-1 text-foreground-700 transition-colors hover:text-primary-600"
       >
         {label}
         <i
@@ -178,7 +178,10 @@ export default function ApplicationsTable({
           aria-hidden="true"
         />
       </button>
-    </th>
+  );
+
+  const headerCell = (label: string, key: SortKey, extra = "") => (
+    <th className={`px-2 py-2.5 font-semibold ${extra}`}>{sortButton(label, key)}</th>
   );
 
   if (loading && !remote) return <PortalLoading label="Loading applications\u2026" />;
@@ -291,21 +294,16 @@ export default function ApplicationsTable({
         <PortalEmpty icon="ri-file-list-3-line" title={emptyTitle} message={emptyMessage} action={emptyAction} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-card border border-background-200 bg-background-50">
-            <table className="w-full min-w-[880px] border-collapse text-left text-sm">
+          <div className="rounded-card border border-background-200 bg-background-50">
+            <ResponsiveTable>
               <thead className="bg-background-100 text-xs uppercase tracking-wide text-foreground-700">
                 <tr>
-                  {headerCell("Reference", "reference")}
-                  {headerCell("Student", "student")}
-                  <th className="whitespace-nowrap px-3 py-2.5 font-semibold">Course(s)</th>
-                  <th className="whitespace-nowrap px-3 py-2.5 font-semibold">Intake</th>
-                  {!compact && agencies ? headerCell("Agency", "agency") : null}
-                  {headerCell("Agent", "agent")}
+                  <th className="w-[24%] px-2 py-2.5"><div className="flex flex-wrap gap-x-2 gap-y-1">{sortButton("Student", "student")}{sortButton("Reference", "reference")}</div></th>
+                  <th className="px-2 py-2.5 font-semibold">Course / Intake</th>
+                  <th className="px-2 py-2.5"><div className="flex flex-wrap gap-x-2 gap-y-1">{!compact && agencies ? sortButton("Agency", "agency") : null}{sortButton("Agent", "agent")}</div></th>
                   {headerCell("Status", "status")}
                   {headerCell("Progress", "completion")}
-                  {headerCell("Created", "created")}
-                  {!compact ? headerCell("Submitted", "created") : null}
-                  {headerCell("Updated", "updated")}
+                  <th className="w-[16%] px-2 py-2.5"><div className="flex flex-wrap gap-x-2 gap-y-1">{sortButton("Created", "created")}{sortButton("Updated", "updated")}</div></th>
                   <th className="whitespace-nowrap px-3 py-2.5 text-right font-semibold">Actions</th>
                 </tr>
               </thead>
@@ -314,7 +312,7 @@ export default function ApplicationsTable({
                   const meta = statusMeta(row.status);
                   return (
                     <tr key={row.id} className="border-t border-background-200 transition-colors hover:bg-background-100/60">
-                      <td className="whitespace-nowrap px-3 py-3">
+                      <td data-label="Student / Reference" className="px-2 py-3">
                         <span className="font-mono text-xs font-semibold text-foreground-900">
                           {row.reference || "\u2014"}
                         </span>
@@ -323,12 +321,11 @@ export default function ApplicationsTable({
                             Test
                           </span>
                         ) : null}
-                      </td>
-                      <td className="px-3 py-3">
+
                         <p className="font-medium text-foreground-950">{row.studentName || "Unnamed student"}</p>
                         <p className="text-xs text-foreground-500">{row.studentEmail || "\u2014"}</p>
                       </td>
-                      <td className="px-3 py-3">
+                      <td data-label="Course / Intake" className="px-3 py-3">
                         {row.courses.length === 0 ? (
                           <span className="text-xs text-foreground-400">Not selected</span>
                         ) : (
@@ -336,34 +333,30 @@ export default function ApplicationsTable({
                             {row.courses.map((c) => c.code).join(", ")}
                           </span>
                         )}
+                        <p className="mt-1 text-xs text-foreground-500">Intake: {row.intake || "\u2014"}</p>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-xs text-foreground-700">{row.intake || "\u2014"}</td>
-                      {!compact && agencies ? (
-                        <td className="px-3 py-3 text-xs text-foreground-700">{row.agencyName || "\u2014"}</td>
-                      ) : null}
-                      <td className="px-3 py-3 text-xs text-foreground-700">
+                      <td data-label="Agency / Agent" className="px-3 py-3 text-xs text-foreground-700">
+                        {!compact && agencies ? <p className="mb-1 font-medium">{row.agencyName || "\u2014"}</p> : null}
                         {row.agentName || <span className="text-foreground-400">Unassigned</span>}
                       </td>
-                      <td className="px-3 py-3">
+                      <td data-label="Status" className="px-3 py-3">
                         <StatusBadge status={row.status} />
                       </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-background-200">
+                      <td data-label="Progress" className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <div className="h-1.5 w-full max-w-16 overflow-hidden rounded-full bg-background-200">
                             <div className={`h-full rounded-full ${meta.icon ? "bg-primary-500" : ""}`} style={{ width: `${row.completion}%` }} />
                           </div>
                           <span className="text-xs text-foreground-600">{row.completion}%</span>
                         </div>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-xs text-foreground-600">{formatDate(row.createdAt)}</td>
-                      {!compact ? (
-                        <td className="whitespace-nowrap px-3 py-3 text-xs text-foreground-600">
-                          {row.submittedAt ? formatDate(row.submittedAt) : "\u2014"}
-                        </td>
-                      ) : null}
-                      <td className="whitespace-nowrap px-3 py-3 text-xs text-foreground-600">{formatDate(row.updatedAt)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        <div className="inline-flex items-center gap-2">
+                      <td data-label="Dates" className="px-2 py-3 text-xs text-foreground-600">
+                        <p>Created: {formatDate(row.createdAt)}</p>
+                        {!compact ? <p className="mt-1">Submitted: {row.submittedAt ? formatDate(row.submittedAt) : "\u2014"}</p> : null}
+                        <p className="mt-1">Updated: {formatDate(row.updatedAt)}</p>
+                      </td>
+                      <td data-label="Actions" className="whitespace-nowrap px-3 py-3 text-right">
+                        <div className="inline-flex flex-col items-end gap-2">
                           {row.status === "draft" ? (
                             <Link
                               to={paths.detail(row.id)}
@@ -387,7 +380,7 @@ export default function ApplicationsTable({
                   );
                 })}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
 
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -396,7 +389,7 @@ export default function ApplicationsTable({
               {showFilters && !remote ? ` (of ${rows.length} total)` : ""}
             </p>
             {showPagination && totalPages > 1 ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
                   onClick={() => setPage(Math.max(1, currentPage - 1))}
