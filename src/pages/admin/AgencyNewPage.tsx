@@ -46,6 +46,8 @@ export default function AgencyNewPage() {
     event.preventDefault();
     if (lookupLoading || saving) return;
     if (selected?.existingAgencyId) { navigate(`/admin/agencies/${selected.existingAgencyId}`); return; }
+    // A business from the OMARA register already has a record: activating it there creates its workspace without a duplicate.
+    if (selected?.source === 'directory') { navigate(`/admin/businesses?q=${encodeURIComponent(selected.name)}`); return; }
     setFormError("");
     const checked = validateAgencyForm(form);
     const first = validateFirstPerson(person.name, person.email);
@@ -94,9 +96,9 @@ export default function AgencyNewPage() {
 
   return (
     <form onSubmit={submit} noValidate>
-      <PageHeader breadcrumb="Agencies > Add agency" title="Add agency" description="Search the directory to fill available business details, or enter a new agency. Complete any missing contact information before saving." />
+      <PageHeader breadcrumb="Businesses > Add business" title="Add business" description="Search first. If the business is in the OMARA register, open it in Businesses and activate it there. Otherwise enter its details; a business you add here starts active." />
       {lookupLoading ? <p role="status" className="mb-4 text-sm">Loading agency details…</p> : null}
-      {selected ? <p role="status" className="mb-4 text-sm text-foreground-600">{selected.existingAgencyId ? 'This agency is already added. Open its existing record to edit details or manage its team.' : 'Available directory details have been filled. Review them and complete any missing information.'}</p> : null}
+      {selected ? <p role="status" className="mb-4 text-sm text-foreground-600">{selected.existingAgencyId ? 'This agency is already added. Open its existing record to edit details or manage its team.' : 'This business is in the OMARA register. Open it in Businesses and activate it there, so its registered agents stay linked.'}</p> : null}
       <Card className="p-5">
         <AgencyForm value={form} errors={errors} disabled={saving || lookupLoading || Boolean(selected?.existingAgencyId)} onChange={patch}
           nameInput={<AgencyNameSearch value={form.name} disabled={saving || lookupLoading} error={errors.name} onSelect={selectAgency}
@@ -125,8 +127,8 @@ export default function AgencyNewPage() {
       </Card> : null}
       {formError ? <p role="alert" className="mt-4 text-sm font-medium text-red-700">{formError}</p> : null}
       <div className="mt-5 flex items-center gap-3">
-        <Button type="submit" icon="ri-save-line" disabled={saving || lookupLoading}>{saving ? "Creating…" : selected?.existingAgencyId ? 'Open existing agency' : "Create agency"}</Button>
-        <Link to="/admin/agencies" className="text-sm font-medium text-foreground-600 hover:text-foreground-900">Cancel</Link>
+        <Button type="submit" icon="ri-save-line" disabled={saving || lookupLoading}>{saving ? "Creating…" : selected?.existingAgencyId ? 'Open existing agency' : selected?.source === 'directory' ? 'Open in Businesses' : "Create business"}</Button>
+        <Link to="/admin/businesses" className="text-sm font-medium text-foreground-600 hover:text-foreground-900">Cancel</Link>
       </div>
     </form>
   );

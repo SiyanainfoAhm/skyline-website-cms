@@ -72,6 +72,8 @@ export function decideLogin(access: AccessSummary, next: string | null = null, l
     if (options.includes("portal") && /^\/agency(?:[/?#]|$)/.test(target)) return { kind: "go", to: target };
   }
   if (options.length === 1) return { kind: "go", to: DESTINATION_PATH[options[0]] };
+  // A SLIT administrator manages everything from the CMS (its menu links to the portal pages), so there is nothing to choose.
+  if (access.portal === "org_admin" && options.includes("cms")) return { kind: "go", to: DESTINATION_PATH.cms };
   // Last used first, so the remembered choice is one click.
   return { kind: "choose", options: last && options.includes(last) ? [last, ...options.filter((o) => o !== last)] : options };
 }

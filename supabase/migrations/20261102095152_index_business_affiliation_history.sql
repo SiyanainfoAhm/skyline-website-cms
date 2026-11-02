@@ -1,0 +1,1 @@
+CREATE INDEX business_agent_business_history ON public.business_agent_affiliations(business_id,first_seen_at);

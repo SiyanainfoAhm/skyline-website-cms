@@ -24,6 +24,8 @@ interface ApplicationsTableProps {
   showFilters?: boolean;
   /** Pins the list to one agency (the agency page): sent to the query, never filtered after loading. */
   fixedAgencyId?: string;
+  /** Status filter selected when the table first renders (for links such as "2 Draft" on the Agencies list). */
+  initialStatus?: string;
   /** SLIT Admin: filter by agency. */
   agencies?: Option[];
   /** Agency Admin / SLIT Admin: filter by assigned agent. */
@@ -72,6 +74,7 @@ export default function ApplicationsTable({
   onRetry,
   showFilters = true,
   fixedAgencyId = "",
+  initialStatus = "",
   agencies,
   agents,
   pageSize = 10,
@@ -83,7 +86,7 @@ export default function ApplicationsTable({
 }: ApplicationsTableProps) {
   const paths = useApplicationPaths();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(initialStatus);
   const [chosenAgencyId, setAgencyId] = useState("");
   const agencyId = fixedAgencyId || chosenAgencyId;
   const [agentId, setAgentId] = useState("");

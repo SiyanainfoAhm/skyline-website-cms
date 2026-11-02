@@ -27,9 +27,12 @@ export function agencyToForm(agency: PortalAgency): AgencyFormState {
   };
 }
 
-/** Registry contact numbers may contain alternatives; never invent missing email/ABN. */
+/**
+ * Registry contact numbers may contain alternatives; never invent missing email/ABN. An imported business is listed as Inactive,
+ * but a SLIT administrator adding it is the approval, so the new agency starts Active (they can still choose Inactive).
+ */
 export function directoryAgencyToForm(agency: DirectoryAgency): AgencyFormState {
-  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()) };
+  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()), status: "Active" };
 }
 
 /** A starting code from the name (initials plus a number); the administrator can change it. */

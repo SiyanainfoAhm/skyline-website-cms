@@ -6,7 +6,7 @@ import test from "node:test";
 import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
 import type { DirectoryAgency } from '../src/pages/agency/lib/portalData.ts';
 
-test('agency directory fills real business fields, keeps inactive status and does not invent missing contact details', () => {
+test('agency directory fills real business fields, starts the added agency active and does not invent missing contact details', () => {
   const agency: DirectoryAgency = { ...EMPTY_AGENCY_FORM, id: 'directory:sample', name: 'Sample Business', code: 'OMARA-ABC12345',
     phone: '+61412345678 / +61400000000', primaryContact: 'Registered Contact', status: 'Inactive', businessEmail: '',
     address: '1 Sample Street', country: 'Australia', registrationNumber: '', isPermanent: false, createdAt: '',
@@ -15,7 +15,7 @@ test('agency directory fills real business fields, keeps inactive status and doe
   assert.equal(form.name, agency.name);
   assert.equal(form.address, agency.address);
   assert.equal(form.primaryContact, agency.primaryContact);
-  assert.equal(form.status, 'Inactive');
+  assert.equal(form.status, 'Active', 'imported businesses are listed inactive; adding one in the CMS is the approval');
   assert.equal(form.businessEmail, '');
   assert.equal(form.registrationNumber, '', 'a person MARN is not an agency ABN');
   assert.equal(validateAgencyForm(form).phone, '+61412345678');
@@ -276,11 +276,12 @@ test("login: unauthenticated users go to /login with a safe next; old login URLs
   assert.equal(legacyLoginTarget("", "https://evil.example"), "/login");
 });
 
-test("login: each kind of access lands in the right place and multiple kinds ask first", () => {
+test("login: each kind of access lands in the right place; SLIT admins go to the CMS and other multiple kinds ask first", () => {
   const cms = { active: true, mustChangePassword: false };
   assert.deepEqual(decideLogin({ cms, portal: "no_access" }), { kind: "go", to: "/admin" });
   assert.deepEqual(decideLogin({ cms: null, portal: "active" }), { kind: "go", to: "/agency" });
-  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }), { kind: "choose", options: ["cms", "portal"] });
+  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }), { kind: "go", to: "/admin" }, "a SLIT administrator is never asked to choose");
+  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }, null, "portal"), { kind: "go", to: "/admin" }, "not even when the portal was used last");
   assert.deepEqual(decideLogin({ cms, portal: "active" }, null, "portal"), { kind: "choose", options: ["portal", "cms"] });
   assert.deepEqual(decideLogin({ cms, portal: "no_access" }, "/admin/courses"), { kind: "go", to: "/admin/courses" });
   assert.deepEqual(decideLogin({ cms: null, portal: "active" }, "/admin/courses"), { kind: "go", to: "/agency" }, "a return path into an area the user cannot use is ignored");
@@ -519,3 +520,33 @@ test("shared table exposes sorting controls in the small-screen toolbar without 
   assert.equal(calls, 0);
 });
 
+// ---- Agencies list: application status breakdown ----
+import { sortedStatusCounts } from "../src/pages/admin/lib/agencyStatus.ts";
+
+test("agencies list: status breakdown puts work needing attention first and drops empty or unknown statuses", () => {
+  assert.deepEqual(sortedStatusCounts({ offer_accepted: 1, draft: 2, action_required: 1, enrolled: 0, mystery: 4 }),
+    [["action_required", 1], ["draft", 2], ["offer_accepted", 1]]);
+  assert.deepEqual(sortedStatusCounts(undefined), []);
+  assert.deepEqual(sortedStatusCounts({}), []);
+});
+
+// ---- Businesses, agents and students (CMS) ----
+import { groupByStudent } from "../src/pages/admin/lib/businessGroups.ts";
+import type { ApplicationRow } from "../src/pages/admin/lib/businessData.ts";
+
+test("agent page: applications group under their student, newest activity first, unknown students kept", () => {
+  const app = (id: string, studentId: string): ApplicationRow => ({ id, reference: id, status: "draft", intake: "", completion: 0, createdAt: "", updatedAt: "",
+    submittedAt: null, studentId, agentId: "a", agentName: "Agent", courses: [] });
+  const groups = groupByStudent([app("1", "s2"), app("2", "s1"), app("3", "s2"), app("4", "s9")],
+    [{ id: "s1", name: "One", email: "" }, { id: "s2", name: "Two", email: "" }]);
+  assert.deepEqual(groups.map((g) => [g.student.name, g.applications.map((a) => a.id)]), [["Two", ["1", "3"]], ["One", ["2"]], ["Student", ["4"]]]);
+});
+
+test("business, agent and student screens fit the page: no horizontal scrolling tables", () => {
+  for (const file of ["BusinessesPage", "BusinessDetailPage", "AgentsPage", "AgentDetailPage", "StudentsPage", "StudentDetailPage",
+    "components/StudentsTable", "components/ApplicationsList"]) {
+    const source = readFileSync(`src/pages/admin/${file}.tsx`, "utf8");
+    assert.doesNotMatch(source, /overflow-x-auto|min-w-\[\d/, `${file} must not scroll sideways`);
+    if (/<thead>/.test(source)) assert.match(source, /ResponsiveTable/, `${file} uses the shared responsive table`);
+  }
+});
