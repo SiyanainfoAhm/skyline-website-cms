@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Modal } from "@/pages/admin/components/ui";
 import { useToast } from "@/pages/admin/components/toastContext";
@@ -56,26 +56,47 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
     })) as PickOption[];
   }, []);
 
+  // Each business's team is loaded once and kept, so the agent list is ready by the time a business is picked:
+  // loading starts while the business is highlighted in the list, and typing filters it on this device.
+  const teams = useRef(new Map<string, Promise<DirectoryAgent[]>>());
+  const loadTeam = useCallback((id: string): Promise<DirectoryAgent[]> => {
+    const cached = teams.current.get(id);
+    if (cached) return cached;
+    const request = (async () => {
+      const members: DirectoryAgent[] = [];
+      let offset = 0;
+      let total = 0;
+      let pageSize = 0;
+      do {
+        const result = await listAgentDirectory({ search: "", businessId: id, limit: 100, offset });
+        members.push(...result.rows.filter((row) => row.agentId !== null));
+        total = result.total;
+        pageSize = result.rows.length;
+        offset += pageSize;
+      } while (offset < total && pageSize > 0);
+      return members;
+    })();
+    teams.current.set(id, request);
+    request.catch(() => teams.current.delete(id));
+    return request;
+  }, []);
+  const prefetchTeam = useCallback((o: PickOption) => { void loadTeam(o.id).catch(() => undefined); }, [loadTeam]);
+  useEffect(() => { if (open) teams.current.clear(); }, [open]);
+
   const businessId = business?.kind === "existing" ? business.id : null;
   const searchAgents = useCallback(async (q: string): Promise<PickOption[]> => {
     if (!businessId) return [];
-    const members: DirectoryAgent[] = [];
-    let offset = 0;
-    let total = 0;
-    let pageSize = 0;
-    do {
-      const result = await listAgentDirectory({ search: q, businessId, limit: 100, offset });
-      members.push(...result.rows.filter((row) => row.agentId !== null));
-      total = result.total;
-      pageSize = result.rows.length;
-      offset += pageSize;
-    } while (offset < total && pageSize > 0);
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const members = (await loadTeam(businessId)).filter((a) => {
+      const text = `${a.name} ${a.email} ${a.marn} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase();
+      return words.every((w) => text.includes(w));
+    });
     return members.map((a) => ({
       id: a.key, label: a.name || a.email,
       meta: [a.email, a.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "),
       tag: <AgentStatusBadge status={a.status} />, raw: a,
     }));
-  }, [businessId]);
+  }, [businessId, loadTeam]);
 
   const needsActivation = agent?.kind === "new" || (agent?.kind === "existing" && agent.row.status === "Inactive") || business?.kind === "new";
   const businessWillActivate = business?.kind === "new" || (business?.kind === "existing" && business.status !== "Active");
@@ -198,9 +219,10 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
             </>
           ) : (
             <SearchPick label="Business" addNoun="business" autoFocus searchWhenEmpty placeholder="Search business name, place or email"
-              search={searchBusinesses}
+              search={searchBusinesses} onHighlight={prefetchTeam}
               onPick={(o) => {
                 const b = (o as PickOption & { raw: { id: string; name: string; status: BusinessStatus; agencyId: string | null } }).raw;
+                void loadTeam(b.id).catch(() => undefined);
                 setBusiness({ kind: "existing", id: b.id, name: b.name, status: b.status, agencyId: b.agencyId });
                 setAgent(null);
               }}

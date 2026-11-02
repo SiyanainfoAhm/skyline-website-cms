@@ -24,6 +24,7 @@ export default function SearchPick({
   autoFocus,
   resetKey,
   searchWhenEmpty = false,
+  onHighlight,
   openOnMount = false,
 }: {
   label: string;
@@ -37,6 +38,8 @@ export default function SearchPick({
   autoFocus?: boolean;
   /** Change to re-run the search (e.g. a parent filter changed). */
   resetKey?: string;
+  /** Called when an option is highlighted (hover, arrow keys, or first result), e.g. to prefetch what picking it will need. */
+  onHighlight?: (option: PickOption) => void;
   /** Load options on focus when an empty query is meaningful, such as a scoped team list. */
   searchWhenEmpty?: boolean;
   /** Show the dropdown immediately when the picker is mounted. */
@@ -50,6 +53,11 @@ export default function SearchPick({
   const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
   const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    const option = options[active];
+    if (open && option && onHighlight) onHighlight(option);
+  }, [open, options, active, onHighlight]);
   const boxRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
