@@ -34,6 +34,7 @@ import AdminUsersPage from "@/pages/agency/users/page";
 import AllApplicationsPage from "@/pages/agency/all-applications/page";
 import AdminAuditLogPage from "@/pages/agency/audit-log/page";
 import RegistrationWorkbenchPage from "@/pages/agency/registrations/page";
+import AgencyWorkspacePage from "@/pages/agency/workspace/page";
 
 import AdminProviders from "@/pages/admin/components/AdminProviders";
 import AdminLayout from "@/pages/admin/components/AdminLayout";
@@ -109,6 +110,7 @@ const routes: RouteObject[] = [
         children: [
           { index: true, element: <PortalLanding /> },
           { path: "dashboard", element: <PortalDashboardPage /> },
+          { path: "workspace", element: <AgencyWorkspacePage /> },
           { path: "applications", element: <PortalApplicationsPage /> },
           { path: "applications/new", element: <NewApplicationPage /> },
           { path: "applications/:id", element: <ApplicationDetailPage /> },

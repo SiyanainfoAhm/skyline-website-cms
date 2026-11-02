@@ -1,6 +1,6 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { supabase } from "@/pages/admin/lib/supabase";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 import { invokePortalUsers, listAgencies, listInvitations, listPortalUsers, ROLE_LABELS, type InvitationRow, type PortalUserRow } from "@/pages/agency/lib/portalData";
@@ -44,6 +44,14 @@ function LegacyUsersPage() {
   const [inviteLink, setInviteLink] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // "Add agent" in the workspace links here with ?add=1 to open the invite dialog straight away.
+  useEffect(() => {
+    if (searchParams.get("add") !== "1") return;
+    setDialog({ kind: "add" });
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);

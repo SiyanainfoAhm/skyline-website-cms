@@ -10,14 +10,12 @@ interface NavEntry {
   end?: boolean;
 }
 
+// Agency roles get a short list: the workspace holds the business profile, agents and candidates.
+// Profile, sign-out and notifications live in the header; "Add candidate" lives in the workspace.
 const AGENCY_NAV: NavEntry[] = [
-  { to: "/agency/dashboard", label: "Dashboard", icon: "ri-dashboard-3-line" },
+  { to: "/agency/workspace", label: "Workspace", icon: "ri-building-2-line" },
   { to: "/agency/applications", label: "Applications", icon: "ri-file-list-3-line", end: true },
-  { to: "/agency/applications/new", label: "Add New Form", icon: "ri-add-circle-line" },
   { to: "/agency/documents", label: "Documents", icon: "ri-folder-3-line" },
-  { to: "/agency/notifications", label: "Notifications", icon: "ri-notification-3-line" },
-  { to: "/agency/agency-profile", label: "Agency Profile", icon: "ri-building-2-line" },
-  { to: "/agency/profile", label: "My Profile", icon: "ri-user-settings-line" },
 ];
 
 const SLIT_NAV: NavEntry[] = [
@@ -32,7 +30,8 @@ const SLIT_NAV: NavEntry[] = [
 const CRUMB_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
   applications: "Applications",
-  new: "Add New Form",
+  new: "Add candidate",
+  workspace: "Workspace",
   documents: "Documents",
   notifications: "Notifications",
   "agency-profile": "Agency Profile",
@@ -46,7 +45,7 @@ const CRUMB_LABELS: Record<string, string> = {
 
 function buildCrumbs(pathname: string): { label: string; to?: string }[] {
   const parts = pathname.replace(/^\/agency\/?/, "").split("/").filter(Boolean);
-  const crumbs: { label: string; to?: string }[] = [{ label: "Agency Portal", to: "/agency/dashboard" }];
+  const crumbs: { label: string; to?: string }[] = [{ label: "Agency Portal", to: "/agency" }];
   let acc = "/agency";
   parts.forEach((part, index) => {
     acc += `/${part}`;
@@ -88,7 +87,7 @@ export default function PortalLayout() {
 
   const displayName = profile?.fullName?.trim() || authUser?.name || "User";
   const isSlit = role === "slit_admin";
-  const nav = isSlit ? SLIT_NAV : role === "agency_admin" ? [...AGENCY_NAV, { to: "/agency/users", label: selectedScope?.tenantId ? "Institution agents" : "Team", icon: "ri-group-line" }] : AGENCY_NAV;
+  const nav = isSlit ? SLIT_NAV : role === "agency_admin" ? [...AGENCY_NAV, { to: "/agency/users", label: selectedScope?.tenantId ? "Institution agents" : "Agents", icon: "ri-group-line" }] : AGENCY_NAV;
   const crumbs = buildCrumbs(location.pathname);
   const workspaceName = isSlit ? selectedScope?.tenantId ? selectedScope.name : "SLIT Administration" : agency?.name || "Agency";
 
@@ -136,13 +135,13 @@ export default function PortalLayout() {
             Website CMS
           </Link>
         ) : null}
-        <Link
+        {isSlit ? <Link
           to="/"
           className="flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-foreground-700 transition-colors hover:bg-background-100"
         >
           <i className="ri-external-link-line text-lg" aria-hidden="true" />
           View public website
-        </Link>
+        </Link> : null}
       </div>
     </nav>
   );
@@ -186,15 +185,6 @@ export default function PortalLayout() {
               </div>
 
               <div className="flex items-center gap-2">
-                {!isSlit ? (
-                  <Link
-                    to="/agency/applications/new"
-                    className="hidden items-center gap-1.5 whitespace-nowrap rounded-md bg-primary-500 px-4 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 sm:inline-flex"
-                  >
-                    <i className="ri-add-line text-base" aria-hidden="true" />
-                    Add New Form
-                  </Link>
-                ) : null}
                 <Link
                   to="/agency/notifications"
                   aria-label="Notifications"
@@ -249,7 +239,7 @@ export default function PortalLayout() {
               </div>
             </div>
 
-            <nav aria-label="Breadcrumb" className="border-t border-background-100 px-4 py-2 md:px-6">
+            {crumbs.length > 2 ? <nav aria-label="Breadcrumb" className="border-t border-background-100 px-4 py-2 md:px-6">
               <ol className="flex flex-wrap items-center gap-1.5 text-xs text-foreground-500">
                 {crumbs.map((crumb, index) => (
                   <li key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
@@ -264,7 +254,7 @@ export default function PortalLayout() {
                   </li>
                 ))}
               </ol>
-            </nav>
+            </nav> : null}
           </header>
 
           <main className="px-4 py-6 md:px-6 md:py-7">

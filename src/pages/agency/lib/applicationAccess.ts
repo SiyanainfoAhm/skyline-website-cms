@@ -49,7 +49,7 @@ export type PortalAccessState = "org_admin" | "active" | "agency_suspended" | "u
 
 /** Landing page per database-resolved role. Navigation convenience only; RLS and the edge function decide access. */
 export function portalLanding(role: "slit_admin" | "agency_admin" | "agent" | null): string {
-  return role === "agent" ? "/agency/applications" : "/agency/dashboard";
+  return role === "slit_admin" ? "/agency/dashboard" : "/agency/workspace";
 }
 
 /** Only organization and agency administrators see user management. The server enforces the same rule. */
