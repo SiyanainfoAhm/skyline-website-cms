@@ -110,6 +110,29 @@ export interface AgencySummary extends PortalAgency {
   createdAt: string;
 }
 
+export interface DirectoryAgency extends AgencySummary {
+  directoryKey: string;
+  existingAgencyId: string | null;
+  source: 'portal' | 'directory';
+  marn: string;
+}
+
+/** Live imported businesses plus scoped portal agencies, paged and authorized by SQL. */
+export async function queryAgencyDirectory(filters: { search?: string; status?: string; limit: number; offset: number; key?: string }): Promise<{ total: number; rows: DirectoryAgency[] }> {
+  const { data, error } = await supabase.rpc('admin_agency_directory', {
+    p_search: filters.search ?? '', p_status: filters.status ?? '', p_limit: filters.limit,
+    p_offset: filters.offset, p_key: filters.key ?? null,
+  });
+  if (error) throw new Error('We could not load the agency directory. Please try again.');
+  const result = data as { total: number; rows: Record<string, unknown>[] };
+  return { total: Number(result.total), rows: result.rows.map(r => ({
+    ...mapAgency(r), createdAt: String(r.created_at ?? ''), agentCount: Number(r.agent_count ?? 0),
+    applicationCount: Number(r.application_count ?? 0), directoryKey: String(r.directory_key),
+    existingAgencyId: r.existing_agency_id ? String(r.existing_agency_id) : null,
+    source: r.source === 'portal' ? 'portal' : 'directory', marn: String(r.marn ?? ''),
+  })) };
+}
+
 /**
  * One page of agencies for the CMS list. Search, status, counts and paging are all done by the query: the agent and application
  * counts are embedded counts per agency row, and the total comes from the same filtered query.

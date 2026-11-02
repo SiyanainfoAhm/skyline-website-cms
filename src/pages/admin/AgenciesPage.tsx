@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, EmptyState, PageHeader, Select, TextInput } from "@/pages/admin/components/ui";
-import { formatDate, queryAgencies, type AgencySummary } from "@/pages/agency/lib/portalData";
+import { formatDate, queryAgencyDirectory, type DirectoryAgency } from "@/pages/agency/lib/portalData";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 
 /** Agencies (administrators only): the agency list with counts, search, status filter and paging, all done by the query. */
 export default function AgenciesPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<AgencySummary[]>([]);
+  const [rows, setRows] = useState<DirectoryAgency[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -19,10 +19,11 @@ export default function AgenciesPage() {
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setRows([]);
     setError("");
     const timer = window.setTimeout(() => {
-      queryAgencies({ search, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
-        .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); } })
+      queryAgencyDirectory({ search, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+        .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setPage(p => Math.min(p, Math.max(1, Math.ceil(result.total / PAGE_SIZE)))); } })
         .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load agencies."); })
         .finally(() => { if (active) setLoading(false); });
     }, 180);
@@ -37,7 +38,7 @@ export default function AgenciesPage() {
       <PageHeader
         breadcrumb="Agencies"
         title="Agencies"
-        description="The education agencies that submit student applications. Open an agency to manage its details, agents and applications."
+        description="All agencies from the imported directory and your existing agencies. Active agencies appear first. Open an existing agency to manage its team, or choose a directory business to add it."
         actions={<Link to="/admin/agencies/new"><Button icon="ri-add-line">Add agency</Button></Link>}
       />
 
@@ -45,7 +46,7 @@ export default function AgenciesPage() {
         <div className="flex flex-col gap-3 sm:flex-row">
           <TextInput type="search" aria-label="Search agencies" placeholder="Search by name, code or email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
           <Select aria-label="Filter by status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-44">
-            <option value="">All statuses</option>
+            <option value="">All agencies</option>
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
           </Select>
@@ -76,11 +77,12 @@ export default function AgenciesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-background-200">
+                {loading ? <tr><td colSpan={5} className="p-6 text-foreground-500">Loading agencies…</td></tr> : null}
                 {rows.map((agency) => (
                   <tr key={agency.id}>
                     <td className="p-4">
-                      <Link to={`/admin/agencies/${agency.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{agency.name}</Link>
-                      <div className="text-xs text-foreground-500">{agency.code}</div>
+                      <Link to={agency.existingAgencyId ? `/admin/agencies/${agency.existingAgencyId}` : `/admin/agencies/new?directory=${agency.directoryKey}`} className="font-semibold text-foreground-900 hover:text-primary-700">{agency.name}</Link>
+                      <div className="text-xs text-foreground-500">{agency.country}{agency.source === 'directory' ? ' · Directory' : ` · ${agency.code}`}</div>
                     </td>
                     <td className="p-4">{agency.agentCount}</td>
                     <td className="p-4">{agency.applicationCount}</td>
@@ -92,12 +94,12 @@ export default function AgenciesPage() {
             </table>
           </div>
         )}
-        {total > PAGE_SIZE ? (
+        {!error ? (
           <div className="flex items-center justify-between border-t border-background-200 p-4 text-xs text-foreground-600">
-            <span>Page {Math.min(page, pages)} of {pages} · {total} agencies</span>
+            <span role="status">Page {Math.min(page, pages)} of {pages} · {total.toLocaleString()} agencies</span>
             <span className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-              <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              <Button size="sm" variant="outline" disabled={loading || page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+              <Button size="sm" variant="outline" disabled={loading || page >= pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
             </span>
           </div>
         ) : null}

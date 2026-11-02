@@ -1,5 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
+import type { DirectoryAgency } from '../src/pages/agency/lib/portalData.ts';
+
+test('agency directory fills real business fields, keeps inactive status and does not invent missing contact details', () => {
+  const agency: DirectoryAgency = { ...EMPTY_AGENCY_FORM, id: 'directory:sample', name: 'Sample Business', code: 'OMARA-ABC12345',
+    phone: '+61412345678 / +61400000000', primaryContact: 'Registered Contact', status: 'Inactive', businessEmail: '',
+    address: '1 Sample Street', country: 'Australia', registrationNumber: '', isPermanent: false, createdAt: '',
+    agentCount: 0, applicationCount: 0, directoryKey: 'sample', existingAgencyId: null, source: 'directory', marn: '1234567' };
+  const form = directoryAgencyToForm(agency);
+  assert.equal(form.name, agency.name);
+  assert.equal(form.address, agency.address);
+  assert.equal(form.primaryContact, agency.primaryContact);
+  assert.equal(form.status, 'Inactive');
+  assert.equal(form.businessEmail, '');
+  assert.equal(form.registrationNumber, '', 'a person MARN is not an agency ABN');
+  assert.equal(validateAgencyForm(form).phone, '+61412345678');
+  assert.ok(validateAgencyForm(form).errors.businessEmail, 'missing directory email must be completed before creating');
+  assert.equal(directoryAgencyToForm({ ...agency, phone: '', primaryContact: '' }).phone, '');
+});
 import { menuTree, menuActive, menuIcon, type AdminMenuItem } from "../src/pages/admin/lib/adminMenu.ts";
 import { canManagePortalUsers, isEditableApplicationStatus, portalAccessMessage, portalLanding } from "../src/pages/agency/lib/applicationAccess.ts";
 import { availableActions, csvCell, EXPORT_COLUMNS, exportCsv, EXCEPTION_TEXT, normaliseCoeNumber, registrationChecklist, registrationWarning, validateCorrection, verifyBlockers } from "../src/pages/agency/lib/registrationWorkbench.ts";
