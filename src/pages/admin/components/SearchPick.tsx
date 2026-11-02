@@ -23,6 +23,7 @@ export default function SearchPick({
   disabled,
   autoFocus,
   resetKey,
+  searchWhenEmpty = false,
 }: {
   label: string;
   placeholder: string;
@@ -35,6 +36,8 @@ export default function SearchPick({
   autoFocus?: boolean;
   /** Change to re-run the search (e.g. a parent filter changed). */
   resetKey?: string;
+  /** Load options on focus when an empty query is meaningful, such as a scoped team list. */
+  searchWhenEmpty?: boolean;
 }) {
   const id = useId();
   const [q, setQ] = useState("");
@@ -49,7 +52,7 @@ export default function SearchPick({
     if (!open) return;
     let live = true;
     const query = q.trim();
-    if (!query) {
+    if (!query && !searchWhenEmpty) {
       setOptions([]);
       setLoading(false);
       setFailed(false);
@@ -65,7 +68,7 @@ export default function SearchPick({
         .finally(() => { if (live) setLoading(false); });
     }, 220);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [q, open, search, resetKey]);
+  }, [q, open, search, resetKey, searchWhenEmpty]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };

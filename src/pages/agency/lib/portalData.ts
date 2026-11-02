@@ -194,17 +194,22 @@ export async function listAgencyInvitations(agencyId: string): Promise<Invitatio
 }
 
 /** Adds an agency record without a first administrator (with one, use the create_agency function, which is atomic). */
-export async function createAgencyRecord(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<string> {
+export async function createAgencyRecordWithBusiness(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<{ agencyId: string; businessId: string }> {
   const { data, error } = await supabase
     .from("agencies")
     .insert({
       name: input.name.trim(), code: input.code.trim(), registration_number: input.registrationNumber.trim(), business_email: input.businessEmail.trim(),
       phone: input.phone.trim(), address: input.address.trim(), country: input.country.trim(), primary_contact: input.primaryContact.trim(), status: input.status,
     })
-    .select("id")
+    .select("id, business_id")
     .single();
   if (error) throw new Error(error.message);
-  return String(data.id);
+  return { agencyId: String(data.id), businessId: String(data.business_id) };
+}
+
+export async function createAgencyRecord(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<string> {
+  const created = await createAgencyRecordWithBusiness(input);
+  return created.agencyId;
 }
 
 /**
