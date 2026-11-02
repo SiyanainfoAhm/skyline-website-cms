@@ -1,3 +1,6 @@
+import { createElement as h } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ResponsiveTable from "../src/components/ui/ResponsiveTable.tsx";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
@@ -488,3 +491,31 @@ test("coe/voe: Approve and issue is blocked for every reason the database would 
   assert.match(coeErrorMessage({ code: "42501" }), /permission/i);
   assert.ok(!coeErrorMessage({ code: "XX000", message: "relation enrollment_coe_documents 8f2c1d3e" }).includes("8f2c1d3e"));
 });
+
+
+test("shared table keeps conditional column labels, native controls, and full-width messages aligned", () => {
+  const html = renderToStaticMarkup(h(ResponsiveTable, { "aria-label": "Registrations", "aria-busy": true },
+    h("thead", null, h("tr", null, h("th", null, "Student"), false, h("th", null, "Actions"))),
+    h("tbody", null,
+      h("tr", null, h("td", null, "Sample Student"), null, h("td", null, h("input", { type: "checkbox", "aria-label": "Select for export", defaultChecked: true }))),
+      h("tr", null, h("td", { colSpan: 2 }, "Loading registrations")))));
+  assert.match(html, /data-label="Student"/);
+  assert.match(html, /data-label="Actions"/);
+  assert.match(html, /scope="col"/);
+  assert.match(html, /headers="[^"]+-column-1"/);
+  assert.match(html, /type="checkbox"[^>]*aria-label="Select for export"[^>]*checked/);
+  assert.match(html, /colSpan="2"[^>]*data-table-message/i);
+  assert.match(html, /aria-busy="true"/);
+  assert.equal((html.match(/data-label=/g) ?? []).length, 2);
+});
+
+test("shared table exposes sorting controls in the small-screen toolbar without invoking handlers", () => {
+  let calls = 0;
+  const html = renderToStaticMarkup(h(ResponsiveTable, null,
+    h("thead", null, h("tr", null, h("th", null, h("button", { onClick: () => { calls++; } }, "Student")))),
+    h("tbody", null, h("tr", null, h("td", null, "Name")))));
+  assert.match(html, /aria-label="Table sorting"/);
+  assert.equal((html.match(/<button/g) ?? []).length, 2);
+  assert.equal(calls, 0);
+});
+

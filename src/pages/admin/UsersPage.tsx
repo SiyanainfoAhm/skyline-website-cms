@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useState } from "react";
 import { useAuth, passwordResetUrl } from "@/pages/admin/lib/authContext";
 import { supabase } from "@/pages/admin/lib/supabase";
@@ -201,8 +202,8 @@ export default function UsersPage() {
       ) : null}
 
       <Card className="mb-5">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+        <div className="">
+          <ResponsiveTable>
             <thead>
               <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                 <th className="px-4 py-3 font-medium">User</th>
@@ -270,15 +271,15 @@ export default function UsersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ResponsiveTable>
         </div>
       </Card>
 
       <Card className="p-5">
         <h2 className="mb-1 font-heading text-base font-semibold text-foreground-950">Permissions by role</h2>
         <p className="mb-4 text-sm text-foreground-500">The default access each role has in the CMS.</p>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-left text-sm">
+        <div className="">
+          <ResponsiveTable>
             <thead>
               <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                 <th className="px-3 py-2.5 font-medium">Area</th>
@@ -299,7 +300,7 @@ export default function UsersPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </ResponsiveTable>
         </div>
       </Card>
 

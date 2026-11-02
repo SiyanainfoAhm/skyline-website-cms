@@ -1,3 +1,4 @@
+import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAdminData } from "@/pages/admin/lib/storeContext";
@@ -173,8 +174,8 @@ export default function PagesPage() {
         {filtered.length === 0 ? (
           <EmptyState title="No pages found" description="Try a different search or create a new page." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+          <div className="">
+            <ResponsiveTable>
               <thead>
                 <tr className="border-b border-background-200 text-xs uppercase tracking-wide text-foreground-500">
                   <th className="px-4 py-3 font-medium">Page</th>
@@ -244,7 +245,7 @@ export default function PagesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </ResponsiveTable>
           </div>
         )}
       </Card>
@@ -391,3 +392,4 @@ export default function PagesPage() {
     </div>
   );
 }
+
