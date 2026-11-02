@@ -1,8 +1,9 @@
 import { Field, Select, TextInput } from "@/pages/admin/components/ui";
 import type { AgencyFormErrors, AgencyFormState } from "@/pages/admin/lib/agencyForm";
+import type { ReactNode } from 'react';
 
 /** The agency fields, shared by Add agency and the agency Details tab. */
-export default function AgencyForm({ value, errors, disabled = false, onChange }: { value: AgencyFormState; errors: AgencyFormErrors; disabled?: boolean; onChange: (patch: Partial<AgencyFormState>) => void }) {
+export default function AgencyForm({ value, errors, disabled = false, onChange, nameInput }: { value: AgencyFormState; errors: AgencyFormErrors; disabled?: boolean; onChange: (patch: Partial<AgencyFormState>) => void; nameInput?: ReactNode }) {
   const field = (key: keyof AgencyFormState, label: string, hint: string, props: { required?: boolean; type?: string; placeholder?: string } = {}) => (
     <div>
       <Field label={label} hint={errors[key] ? undefined : hint} required={props.required}>
@@ -13,7 +14,7 @@ export default function AgencyForm({ value, errors, disabled = false, onChange }
   );
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      {field("name", "Agency name", "As it appears to staff and on applications.", { required: true })}
+      {nameInput ?? field("name", "Agency name", "As it appears to staff and on applications.", { required: true })}
       {field("code", "Agency code", "A short unique code, for example GPE-001.", { required: true })}
       {field("businessEmail", "Contact email", "The agency’s main business email.", { required: true, type: "email" })}
       {field("phone", "Phone", "Australian numbers as 0412 345 678 or 02 9123 4567; otherwise start with + and the country code.", { placeholder: "0412 345 678" })}

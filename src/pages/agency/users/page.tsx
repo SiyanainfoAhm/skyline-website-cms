@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Navigate } from 'react-router-dom';
 import { supabase } from "@/pages/admin/lib/supabase";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 import { invokePortalUsers, listAgencies, listInvitations, listPortalUsers, ROLE_LABELS, type InvitationRow, type PortalUserRow } from "@/pages/agency/lib/portalData";
@@ -18,6 +19,7 @@ const ROLES = [
 
 export default function AdminUsersPage() {
   const { selectedScope, role } = usePortalAuth();
+  if (role === 'slit_admin') return <Navigate to="/admin/agencies" replace />;
   // UI reflection only: portal-admin-users and RLS enforce who may manage whom.
   if (!canManagePortalUsers(role)) {
     return <PortalError message="User management is available to organization and agency administrators only." />;
