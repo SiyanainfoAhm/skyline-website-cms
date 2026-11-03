@@ -106,7 +106,9 @@ type AgentSelection =
   | { kind: "new"; details: NewStudentAgent };
 
 /** The student's contact details are the first thing on every application; the form shows them prefilled. */
-function saveContact(id: string, student: StudentContact): Promise<void> {
+async function saveContact(id: string, student: StudentContact): Promise<void> {
+  // Saves are version-checked; a draft created a moment ago has no known version until it is read once.
+  await getApplication(id);
   return saveApplicationDraft(id, {
     data: { values: { email: student.email, confirm_email: student.email, mobile: student.mobile } },
     studentName: "",
