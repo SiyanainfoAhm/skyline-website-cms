@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import AddressSearch from "@/pages/agency/components/AddressSearch";
+import { validateUsi } from "../../../../supabase/functions/_shared/validation/identifiers";
 import type { AppField, AppSection } from "@/data/applicationForms";
 import { ApplicationFieldControl } from "@/components/feature/applicationFieldKit";
 import { isConditionMet, isFieldFilled, sectionHeading, sectionIcon } from "@/components/feature/applicationFieldHelpers";
@@ -39,6 +40,9 @@ import { PortalError } from "@/pages/agency/components/PortalUI";
 const FORM_ID = "portal-application-form";
 const STUDENT_CONTACT_FIELDS = new Set(["mobile", "email", "confirm_email", "email_note"]);
 const AUSTRALIAN_ADDRESS: Record<string, string> = { address_type: "Australian Address", au_country: "Australia" };
+// Answers the portal fixes (greyed out, not editable): an Australian address, and a USI is always required.
+const FIXED_VALUES: Record<string, string> = { ...AUSTRALIAN_ADDRESS, has_usi: "Yes" };
+const USI_CONSENT_TEXT = "I consent to SLIT using/providing my USI for enrolment, reporting and verification purposes where required.";
 const AU_ADDRESS_FIELDS = ["au_street", "au_line2", "au_suburb", "au_state", "au_zip"] as const;
 const LICENCE_CATEGORY = "Driving Licence";
 const ADDRESS_SOURCES = ["search", "licence", "manual"];
@@ -53,7 +57,7 @@ const IDENTIFIER_DEFAULTS: Record<string, string> = {
   employment: "Unemployed - Seeking Part-Time Work - 07",
   language_home: "Yes, language other than English",
 };
-const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability"];
+const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability", "usi_consent"];
 const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "year_completed", "prior_ed"] as const;
 
 /** Best reading of the highest school level a qualification shows; "" when it says nothing about school. */
@@ -160,7 +164,8 @@ export default function ApplicationWorkspace({
     const out: DraftValues = { ...storedValues };
     for (const [name, value] of Object.entries(seed)) if (!String(out[name] ?? "").trim()) out[name] = value;
     // The student's address is always an Australian one (fixed and greyed out on the form).
-    Object.assign(out, AUSTRALIAN_ADDRESS);
+    Object.assign(out, FIXED_VALUES);
+    if (!Array.isArray(out.usi_consent) || !out.usi_consent.length) out.usi_consent = [USI_CONSENT_TEXT];
     for (const [name, value] of Object.entries(IDENTIFIER_DEFAULTS)) if (!String(out[name] ?? "").trim()) out[name] = value;
     return out;
   }, [seed, storedValues]);
@@ -227,12 +232,34 @@ export default function ApplicationWorkspace({
     progressRef.current = progress;
   }, [progress]);
 
+  /**
+   * Reading or removing a document changes the application on the server, which raises its draft version; saving with
+   * the old version is then refused. This takes the current version and copies in any value the server filled that is
+   * still empty here, so the next save neither fails nor blanks it.
+   */
+  const syncWithServer = useCallback(async () => {
+    const detail = await getApplication(application.id, true);
+    const form = formRef.current;
+    if (!detail || !form) return detail;
+    const serverValues = ((detail.data ?? {}) as { values?: DraftValues }).values ?? {};
+    const fills: DraftValues = {};
+    for (const [name, value] of Object.entries(serverValues)) {
+      if (typeof value !== "string" || !value.trim()) continue;
+      const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(`[name="${CSS.escape(name)}"]`));
+      if (!controls.length) continue;
+      const filled = controls.some((control) => (control instanceof HTMLInputElement && (control.type === "radio" || control.type === "checkbox") ? control.checked : control.value.trim() !== ""));
+      if (!filled) fills[name] = value;
+    }
+    if (Object.keys(fills).length) applyFormValues(form, fills);
+    return detail;
+  }, [application.id]);
+
   const refreshAttachments = useCallback(async () => {
-    const [rows, detail] = await Promise.all([listApplicationDocuments(application.id), getApplication(application.id, false)]);
+    const [rows, detail] = await Promise.all([listApplicationDocuments(application.id), syncWithServer()]);
     setAttachments(rows.filter((document) => document.isCurrent));
     setAttachmentsLoaded(true);
     if (detail) setQualifications(readQualifications(detail.data));
-  }, [application.id]);
+  }, [application.id, syncWithServer]);
 
   useEffect(() => {
     void refreshAttachments().catch((error) => setDocumentMessage(error instanceof Error ? error.message : "We could not load saved documents."));
@@ -299,7 +326,7 @@ export default function ApplicationWorkspace({
     setSaveState("saving");
     setSaveError("");
     try {
-      await saveApplicationDraft(application.id, {
+      const save = () => saveApplicationDraft(application.id, {
         data: {
           values: snapshot.values,
           courses: snapshot.courses.map(resolveCourse),
@@ -315,6 +342,14 @@ export default function ApplicationWorkspace({
         intake: String(snapshot.values.preferred_intake ?? ""),
         completion: progressRef.current.overall,
       });
+      try {
+        await save();
+      } catch (error) {
+        // The server copy moved on (usually a document was read); catch up once and save again.
+        if (!(error instanceof Error) || !/another session changed this application/i.test(error.message)) throw error;
+        await syncWithServer();
+        await save();
+      }
 
       setSaveState("saved");
       setLastSavedAt(new Date().toISOString());
@@ -325,7 +360,7 @@ export default function ApplicationWorkspace({
       setSaveError(error instanceof Error ? error.message : "We could not save your draft.");
       throw error;
     }
-  }, [application.id, collectSnapshot, agentName, onSaved, resolveCourse]);
+  }, [application.id, collectSnapshot, agentName, onSaved, resolveCourse, syncWithServer]);
 
   /** Serialises saves so an older save can never overwrite a newer change. */
   const enqueueSave = useCallback(() => {
@@ -812,7 +847,18 @@ export default function ApplicationWorkspace({
     setVisaNote(`${document.filename} was deleted. Choose how to add the visa.`);
   };
 
+  const [usiError, setUsiError] = useState("");
   const goTo = (index: number) => {
+    if (index > step && sections[step]?.fields.some((field) => field.name === "usi_number") && !readOnly) {
+      const usi = formRef.current?.querySelector<HTMLInputElement>('[name="usi_number"]')?.value ?? "";
+      const problem = usi.trim() ? validateUsi(usi) : "Enter the student's USI to continue.";
+      if (problem) {
+        setUsiError(problem);
+        formRef.current?.querySelector<HTMLInputElement>('[name="usi_number"]')?.focus();
+        return;
+      }
+    }
+    setUsiError("");
     void flushSave().catch(() => undefined);
     setStep(index);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -996,7 +1042,7 @@ export default function ApplicationWorkspace({
       const saved = String(mergedInitial[field.name] ?? (field.name === "confirm_email" ? mergedInitial.email ?? "" : ""));
       return <input key={field.name} type="hidden" name={field.name} defaultValue={saved} />;
     }
-    const fixedAustralia = field.name in AUSTRALIAN_ADDRESS;
+    const fixedAustralia = field.name in FIXED_VALUES;
     const fromDocument = documentFields.has(field.name) || derivedFields.has(field.name);
     const documentLocked = !readOnly && !fixedAustralia && field.type !== "file" && (fromDocument || prefilledFields.has(field.name)) && !unlockedFields.has(field.name);
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
@@ -1069,7 +1115,7 @@ export default function ApplicationWorkspace({
           {fixedAustralia ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-background-200 px-2 py-0.5 text-[10px] font-semibold normal-case text-foreground-700">
               <i className="ri-lock-line" aria-hidden="true" />
-              Australia only
+              {field.name === "has_usi" ? "Required" : "Australia only"}
             </span>
           ) : null}
           {documentLocked ? (
@@ -1113,6 +1159,12 @@ export default function ApplicationWorkspace({
             <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
           </div>
         )}
+        {field.name === "usi_number" && usiError ? (
+          <p className="mt-1.5 flex items-center gap-1 text-xs text-primary-700" role="alert">
+            <i className="ri-error-warning-line" aria-hidden="true" />
+            {usiError}
+          </p>
+        ) : null}
         {missing ? (
           <p className="mt-1.5 flex items-center gap-1 text-xs text-primary-700">
             <i className="ri-error-warning-line" aria-hidden="true" />
