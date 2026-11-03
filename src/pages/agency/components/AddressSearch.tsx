@@ -33,13 +33,16 @@ async function lookup(q: string, signal: AbortSignal): Promise<Lookup> {
 const format = (pick: AddressPick) => [pick.line2, pick.line, `${pick.suburb} ${pick.state} ${pick.postcode}`].filter(Boolean).join(", ");
 
 /** Search box above the street field: picking a result fills street, line 2, suburb, state and postcode. */
-export default function AddressSearch({ disabled, onPick }: { disabled?: boolean; onPick: (pick: AddressPick) => void }) {
+export default function AddressSearch({ disabled, onPick, onUnavailable }: { disabled?: boolean; onPick: (pick: AddressPick) => void; onUnavailable?: () => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AddressPick[]>([]);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<"idle" | "searching" | "empty" | "unavailable">("idle");
   const [active, setActive] = useState(-1);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Held in a ref so a new callback from the parent never restarts a search.
+  const unavailableRef = useRef(onUnavailable);
+  useEffect(() => { unavailableRef.current = onUnavailable; }, [onUnavailable]);
 
   useEffect(() => {
     const q = query.trim();
@@ -49,12 +52,12 @@ export default function AddressSearch({ disabled, onPick }: { disabled?: boolean
       setStatus("searching");
       lookup(q, controller.signal)
         .then((result) => {
-          if (result.kind === "unavailable") { setResults([]); setStatus("unavailable"); return; }
+          if (result.kind === "unavailable") { setResults([]); setStatus("unavailable"); unavailableRef.current?.(); return; }
           setResults(result.suggestions);
           setActive(-1);
           setStatus(result.suggestions.length ? "idle" : "empty");
         })
-        .catch((error) => { if ((error as Error)?.name !== "AbortError") { setResults([]); setStatus("unavailable"); } });
+        .catch((error) => { if ((error as Error)?.name !== "AbortError") { setResults([]); setStatus("unavailable"); unavailableRef.current?.(); } });
     }, DEBOUNCE_MS);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [query]);
@@ -123,10 +126,10 @@ export default function AddressSearch({ disabled, onPick }: { disabled?: boolean
       ) : null}
       <p className="mt-1 text-xs text-foreground-500">
         {status === "empty"
-          ? "No matching address found. Keep typing, or enter the address in the fields below."
+          ? "No matching address found. Keep typing, or try a shorter search."
           : status === "unavailable"
-            ? "Address search is unavailable right now. Enter the address in the fields below."
-            : "Pick a result to fill the address fields below."}
+            ? "Address search is unavailable right now."
+            : "Pick a result to fill in the address."}
       </p>
     </div>
   );

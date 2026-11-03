@@ -408,6 +408,10 @@ export default function ApplicationWorkspace({
 
   const [licenceNote, setLicenceNote] = useState("");
   const [addressMode, setAddressMode] = useState<"search" | "licence">("search");
+  // The address fields stay hidden until a search pick or a licence fills them (or an address is already saved).
+  const [addressShown, setAddressShown] = useState(() => AU_ADDRESS_FIELDS.some((name) => String(storedValues[name] ?? "").trim() !== ""));
+  const [searchUnavailable, setSearchUnavailable] = useState(false);
+  const [licenceUnreadable, setLicenceUnreadable] = useState(false);
   const appliedLicencesRef = useRef<Set<string>>(new Set());
   const watchLicencesRef = useRef(false);
 
@@ -427,6 +431,7 @@ export default function ApplicationWorkspace({
     }
     const names = Object.keys(updates);
     if (!names.length) return 0;
+    setAddressShown(true);
     setUnlockedFields((prev) => new Set([...prev, ...names]));
     setEditedFields((prev) => new Set([...prev, ...names]));
     applyFormValues(form, { ...updates, ...AUSTRALIAN_ADDRESS });
@@ -467,12 +472,14 @@ export default function ApplicationWorkspace({
       if (appliedLicencesRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
       appliedLicencesRef.current.add(document.id);
       const extracted = ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {};
-      if (status === "failed") { setLicenceNote("The licence could not be read. Search for the address or enter it below."); continue; }
+      if (status === "failed") { setLicenceUnreadable(true); setLicenceNote("The licence could not be read. Search for the address instead."); continue; }
       if (extracted.address_type === "Overseas Address" || (!extracted.au_street && extracted.ov_street)) {
-        setLicenceNote("The licence shows an overseas address. Only an Australian address can be used here; search for it or enter it below.");
+        setLicenceUnreadable(true);
+        setLicenceNote("The licence shows an overseas address. Only an Australian address can be used here; search for it instead.");
         continue;
       }
       const filled = fillAustralianAddress(extracted, false);
+      if (!filled) setLicenceUnreadable(true);
       setLicenceNote(filled ? `Filled ${filled} address field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.` : `No new address details were found on ${document.filename}; fields already filled were left as they were.`);
     }
   }, [licences, fillAustralianAddress]);
@@ -675,6 +682,10 @@ export default function ApplicationWorkspace({
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
     // Always "Australian Address": the two ways to fill it (search or licence) are offered above the fields instead.
     if (field.name === "address_type") return <input key={field.name} type="hidden" name={field.name} defaultValue={AUSTRALIAN_ADDRESS.address_type} />;
+    // Kept in the form (saved, fillable) but out of sight until the address has been found.
+    if (!addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name))) {
+      return <div key={field.name} hidden>{renderFieldBody(field, locked, documentLocked, fixedAustralia)}</div>;
+    }
     return renderFieldBody(field, locked, documentLocked, fixedAustralia);
   };
 
@@ -804,7 +815,7 @@ export default function ApplicationWorkspace({
           </div>
           <div className="mt-4">
             {addressMode === "search" ? (
-              <AddressSearch onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
+              <AddressSearch onUnavailable={() => setSearchUnavailable(true)} onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
             ) : (
               <ApplicationAttachmentField
                 field={LICENCE_FIELD}
@@ -819,7 +830,19 @@ export default function ApplicationWorkspace({
             )}
           </div>
           {addressMode === "licence" && licenceNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{licenceNote}</p> : null}
-          <p className="mt-3 text-xs text-foreground-500">The address fields below fill in automatically; check them before continuing.</p>
+          {addressShown ? (
+            <p className="mt-3 text-xs text-foreground-500">The address fields below were filled in automatically; check them before continuing.</p>
+          ) : showErrors ? (
+            <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
+              <i className="ri-error-warning-line" aria-hidden="true" />
+              Search for the address or upload a driving licence to fill it.
+            </p>
+          ) : null}
+          {!addressShown && (searchUnavailable || licenceUnreadable) ? (
+            <button type="button" onClick={() => setAddressShown(true)} className="mt-2 cursor-pointer text-xs font-semibold text-primary-700 underline">
+              Enter the address manually
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div
