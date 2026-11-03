@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Field, Modal, TextInput } from "@/pages/admin/components/ui";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { activateAgent, listBusinesses, type BusinessRow, type BusinessStatus } from "@/pages/admin/lib/businessData";
+import { activateAgent, listBusinesses, type ActivationResult, type BusinessRow, type BusinessStatus } from "@/pages/admin/lib/businessData";
 import type { AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { invokePortalUsers } from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
@@ -15,7 +15,7 @@ const EMAIL = /^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/;
  * and optionally send the sign-in invitation. With no agent passed it adds an agent who is not in the OMARA register.
  */
 export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
-  agent: AgentToActivate | null; open: boolean; onClose: () => void; onDone: () => void;
+  agent: AgentToActivate | null; open: boolean; onClose: () => void; onDone: (result: ActivationResult) => void;
 }) {
   const { push } = useToast();
   const manual = !agent?.omaraId && !agent?.agentId;
@@ -89,7 +89,7 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
         message += " No invitation was sent.";
       }
       push(message);
-      onDone();
+      onDone(result);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not activate this agent.");

@@ -103,7 +103,9 @@ type PortalTeamMember = {
 
 type AgentSelection =
   | { kind: "existing"; row: PortalTeamMember }
-  | { kind: "new"; details: NewStudentAgent };
+  | { kind: "new"; details: NewStudentAgent }
+  // Added through the shared Add agent form, which creates and invites them straight away.
+  | { kind: "created"; details: NewStudentAgent };
 
 /** The student's contact details are the first thing on every application; the form shows them prefilled. */
 async function saveContact(id: string, student: StudentContact): Promise<void> {
@@ -135,7 +137,6 @@ export default function NewApplicationPage() {
   const [business, setBusiness] = useState<BusinessSelection | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
   const [recordDialogMode, setRecordDialogMode] = useState<"business" | "agent" | null>(null);
-  const [initialBusinessName, setInitialBusinessName] = useState("");
   const [initialAgentName, setInitialAgentName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -296,8 +297,7 @@ export default function NewApplicationPage() {
     });
   }, [phase, role, agency?.id]);
 
-  const openNewBusiness = (name: string) => {
-    setInitialBusinessName(name);
+  const openNewBusiness = () => {
     setInitialAgentName("");
     setRecordDialogMode("business");
   };
@@ -308,13 +308,17 @@ export default function NewApplicationPage() {
   };
 
   const saveNewRecord = (value: AddStudentRecordValue) => {
-    if (value.kind === "business") {
-      setBusiness({ kind: "new", name: value.business.name, details: value.business });
-      setSelectedAgent({ kind: "new", details: value.agent });
-    } else {
-      setSelectedAgent({ kind: "new", details: value.agent });
-    }
     setRecordDialogMode(null);
+    if (value.kind === "business") {
+      const { agencyId, businessId, name } = value.business;
+      if (!businessId) { setError(`${name} was added; search for it by name to continue.`); return; }
+      agentOptionsByBusiness.delete(businessId);
+      setBusiness({ kind: "existing", id: businessId, name, status: "Active", agencyId });
+      setSelectedAgent(null);
+    } else {
+      if (business?.kind === "existing") agentOptionsByBusiness.delete(business.id);
+      setSelectedAgent({ kind: "created", details: value.agent });
+    }
   };
 
   const handlePick = async () => {
@@ -371,6 +375,9 @@ export default function NewApplicationPage() {
                 : "The agent invitation was not sent; send it from the business’s Portal team tab.");
             }
           }
+          assignedAgentId = null;
+          notes.push(`Assign ${selectedAgent.details.name} on the application once they have signed in.`);
+        } else if (selectedAgent.kind === "created") {
           assignedAgentId = null;
           notes.push(`Assign ${selectedAgent.details.name} on the application once they have signed in.`);
         } else if (selectedAgent.row.status === "Inactive" && selectedAgent.row.profileId) {
@@ -725,7 +732,7 @@ export default function NewApplicationPage() {
       </div>
       <AddStudentRecordDialog
         mode={recordDialogMode}
-        initialBusinessName={initialBusinessName}
+        business={business?.kind === "existing" ? { id: business.id, name: business.name, status: business.status } : null}
         initialAgentName={initialAgentName}
         onCancel={() => setRecordDialogMode(null)}
         onSave={saveNewRecord}

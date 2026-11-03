@@ -32,7 +32,9 @@ type PortalTeamMember = {
 
 type Agent =
   | { kind: "existing"; row: PortalTeamMember }
-  | { kind: "new"; details: NewStudentAgent };
+  | { kind: "new"; details: NewStudentAgent }
+  // Added through the shared Add agent form, which creates and invites them straight away.
+  | { kind: "created"; details: NewStudentAgent };
 
 function newKey(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `key-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -49,14 +51,13 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
   const [business, setBusiness] = useState<Business | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [recordDialogMode, setRecordDialogMode] = useState<"business" | "agent" | null>(null);
-  const [initialBusinessName, setInitialBusinessName] = useState("");
   const [initialAgentName, setInitialAgentName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setBusiness(null); setAgent(null); setRecordDialogMode(null); setInitialBusinessName(""); setInitialAgentName(""); setError("");
+    setBusiness(null); setAgent(null); setRecordDialogMode(null); setInitialAgentName(""); setError("");
   }, [open]);
 
   const searchBusinesses = useCallback(async (q: string): Promise<PickOption[]> => {
@@ -117,8 +118,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
 
   const businessWillActivate = business?.kind === "new" || (business?.kind === "existing" && business.status !== "Active");
 
-  const openNewBusiness = (name: string) => {
-    setInitialBusinessName(name);
+  const openNewBusiness = () => {
     setInitialAgentName("");
     setRecordDialogMode("business");
   };
@@ -129,13 +129,17 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
   };
 
   const saveNewRecord = (value: AddStudentRecordValue) => {
-    if (value.kind === "business") {
-      setBusiness({ kind: "new", name: value.business.name, details: value.business });
-      setAgent({ kind: "new", details: value.agent });
-    } else {
-      setAgent({ kind: "new", details: value.agent });
-    }
     setRecordDialogMode(null);
+    if (value.kind === "business") {
+      const { agencyId: newAgencyId, businessId: newBusinessId, name } = value.business;
+      if (!newBusinessId) { setError(`${name} was added; search for it by name to continue.`); return; }
+      teams.current.delete(newBusinessId);
+      setBusiness({ kind: "existing", id: newBusinessId, name, status: "Active", agencyId: newAgencyId });
+      setAgent(null);
+    } else {
+      if (business?.kind === "existing") teams.current.delete(business.id);
+      setAgent({ kind: "created", details: value.agent });
+    }
   };
 
   const submit = async () => {
@@ -151,7 +155,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
       const profileId: string | null = agent.kind === "existing" && agent.row.role !== "agency_admin" ? agent.row.profileId : null;
       const existingAgent = agent.kind === "existing" ? agent.row : null;
       const newAgent = agent.kind === "new" ? agent.details : null;
-      const agentLabel = existingAgent?.name ?? newAgent?.name ?? "";
+      const agentLabel = existingAgent?.name ?? (agent.kind === "existing" ? "" : agent.details.name);
       const cleanEmail = newAgent?.email.trim().toLowerCase() ?? "";
 
       if (business.kind === "new") {
@@ -240,7 +244,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
               search={searchBusinesses} onHighlight={prefetchTeam}
               onPick={(o) => {
                 const b = (o as PickOption & { raw: { id: string; name: string; status: BusinessStatus; agencyId: string | null } }).raw;
-                void loadTeam(b.id).catch(() => undefined);
+                if (b.agencyId) void loadTeam(b.id, b.agencyId).catch(() => undefined);
                 setBusiness({ kind: "existing", id: b.id, name: b.name, status: b.status, agencyId: b.agencyId });
                 setAgent(null);
               }}
@@ -281,7 +285,8 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
         {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}
       </div>
     </Modal>
-    <AddStudentRecordDialog mode={recordDialogMode} initialBusinessName={initialBusinessName} initialAgentName={initialAgentName}
+    <AddStudentRecordDialog mode={recordDialogMode} initialAgentName={initialAgentName}
+      business={business?.kind === "existing" ? { id: business.id, name: business.name, status: business.status } : null}
       onCancel={() => setRecordDialogMode(null)} onSave={saveNewRecord} />
   </>);
 }
