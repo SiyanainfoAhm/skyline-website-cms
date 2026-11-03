@@ -62,7 +62,7 @@ const IDENTIFIER_DEFAULTS: Record<string, string> = {
 const FORM_DEFAULTS: Record<string, string | string[]> = {
   study_reason: "To get a job - 01",
   rpl: "No",
-  oshc_require: "Yes",
+  oshc_require: "No",
   oshc_self_confirm: ["I understand I must arrange and maintain my own Overseas Student Health Cover for the full duration of my student visa and provide proof when requested."],
   hear_about: "Agent",
 };
