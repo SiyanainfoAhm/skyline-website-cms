@@ -286,6 +286,14 @@ export default function ApplicationWorkspace({
 
   /* --------------------------------------------------------- progress */
 
+  /** Filled, in a valid format, and (for the address) actually found by search or licence. */
+  const answered = (form: HTMLFormElement, field: AppField): boolean => {
+    if (!addressShownRef.current && (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name)) return false;
+    if (!isFieldFilled(form, field)) return false;
+    const control = form.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(`[name="${field.name}"]`);
+    return !control || control.checkValidity();
+  };
+
   const computeProgress = useCallback(() => {
     const form = formRef.current;
     if (!form) return;
@@ -301,7 +309,7 @@ export default function ApplicationWorkspace({
         if (!isConditionMet(field.showIf, values)) continue;
         total += 1;
         const category = field.type === "file" ? documentCategoryForField(field.name) : null;
-        if (category ? attachments.some((document) => document.category === category) : isFieldFilled(form, field)) done += 1;
+        if (category ? attachments.some((document) => document.category === category) : answered(form, field)) done += 1;
       }
       doneAll += done;
       totalAll += total;
@@ -507,7 +515,7 @@ export default function ApplicationWorkspace({
   // A licence read in the document wizard counts too: its address fields carry document provenance and are shown
   // filled (green, with Edit) straight away.
   const addressFromWizardLicence = AU_ADDRESS_FIELDS.some((name) => documentFields.has(name));
-  const [addressShown, setAddressShown] = useState(() => ADDRESS_SOURCES.includes(String(storedValues.address_source ?? "")) || addressFromWizardLicence);
+  const [addressShown, setAddressShown] = useState(() => ADDRESS_SOURCES.includes(String(storedValues.address_source ?? "")) || addressFromWizardLicence || String(storedValues.au_street ?? "").trim() !== "");
   const addressShownRef = useRef(addressShown);
   useEffect(() => { addressShownRef.current = addressShown; }, [addressShown]);
   const [searchUnavailable, setSearchUnavailable] = useState(false);

@@ -433,10 +433,28 @@ export default function ApplicationReview({
               Ready to submit
             </p>
           ) : (
-            <p className="flex items-center gap-2 text-foreground-600">
-              <i className="ri-information-line" aria-hidden="true" />
-              Complete the missing items and consent confirmations to submit.
-            </p>
+            <div className="text-foreground-700">
+              <p className="flex items-center gap-2 font-semibold text-primary-900">
+                <i className="ri-information-line" aria-hidden="true" />
+                Before you can submit:
+              </p>
+              <ul className="mt-1.5 space-y-1 pl-6 text-xs">
+                {missing.map((item) => {
+                  const page = pageOfMissing(item);
+                  return (
+                    <li key={item} className="list-disc">
+                      {page < 0 ? item : (
+                        <button type="button" onClick={() => onEditSection(page)} className="cursor-pointer text-left text-primary-700 underline underline-offset-2 hover:text-primary-900">
+                          {item}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+                {!consent.confirmed ? <li className="list-disc">Tick that the student reviewed and authorised the application.</li> : null}
+                {!consent.authorised ? <li className="list-disc">Tick that you are the agent authorised to submit it.</li> : null}
+              </ul>
+            </div>
           )}
         </div>
         <div className="flex flex-wrap gap-3">
