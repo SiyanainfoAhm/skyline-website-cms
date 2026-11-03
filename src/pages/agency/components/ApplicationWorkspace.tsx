@@ -336,6 +336,10 @@ export default function ApplicationWorkspace({
       const key = element.name.replace(/\[\]$/, "");
       if (!(key in collected)) collected[key] = element instanceof HTMLInputElement && element.type === "checkbox" ? [] : "";
     }
+    // The submission still requires "Is the emergency contact in Australia?", which the page no longer asks:
+    // it is answered from the contact's phone number (an Australian +61 number means Yes).
+    const ecPhone = String(collected.ec_phone ?? "").replace(/\s/g, "");
+    if (ecPhone) collected.ec_in_au = ecPhone.startsWith("+61") || /^0[1-9]\d{8}$/.test(ecPhone) ? "Yes" : "No";
     const coursesRaw = (collected[COURSE_FIELD] as string[] | undefined) ?? [];
     return { values: collected, courses: coursesRaw };
   }, []);
@@ -970,6 +974,8 @@ export default function ApplicationWorkspace({
     }
     setSubmitting(true);
     try {
+      // Always save once more: the server checks the saved draft, which must carry the derived answers (e.g. ec_in_au).
+      dirtyRef.current = true;
       await flushSave();
       const signedDocumentRef = consent.file ? await uploadConsentDocument(application.id, consent.file) : "";
       const snapshot = collectSnapshot();
