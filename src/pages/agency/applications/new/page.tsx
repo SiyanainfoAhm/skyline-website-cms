@@ -33,8 +33,12 @@ import {
   getApplication,
   listApplicationDocuments,
   listAssignableAgents,
+  saveApplicationDraft,
   type AgentOption,
 } from "@/pages/agency/lib/portalApplications";
+import { PhoneInput } from "@/components/feature/applicationInputs";
+import { validateEmail } from "@/pages/agency/lib/userValidation";
+import { formatPhone, parseStoredPhone, validateStoredPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import ApplicationWizard from "@/pages/agency/components/ApplicationWizard";
 import { isEditableApplicationStatus } from "@/pages/agency/lib/applicationAccess";
@@ -79,7 +83,9 @@ function clearSession(uid: string): void {
   }
 }
 
-type Phase = "checking" | "pick" | "wizard";
+type Phase = "checking" | "student" | "pick" | "wizard";
+
+type StudentContact = { email: string; mobile: string };
 
 type BusinessSelection =
   | { kind: "existing"; id: string; name: string; status: BusinessStatus; agencyId: string | null }
@@ -119,6 +125,9 @@ export default function NewApplicationPage() {
   const [initialAgentName, setInitialAgentName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [contact, setContact] = useState<StudentContact>({ email: "", mobile: "" });
+  const [contactErrors, setContactErrors] = useState<{ email?: string; mobile?: string }>({});
+  const contactFormRef = useRef<HTMLFormElement>(null);
   const selectedBusinessId = business?.kind === "existing" ? business.id : null;
   const selectedAgencyId = business?.kind === "existing" ? business.agencyId : null;
 
@@ -183,14 +192,48 @@ export default function NewApplicationPage() {
   }, [agentOptionsByBusiness, selectedAgencyId, selectedBusinessId]);
 
   const startDraft = useCallback(
-    async (assignedAgentId: string | null, selectedAgencyId?: string | null): Promise<string> => {
+    async (student: StudentContact, assignedAgentId: string | null, selectedAgencyId?: string | null): Promise<string> => {
       const { id } = await createApplication(clientKeyRef.current, assignedAgentId, selectedAgencyId);
       clientKeyRef.current = newClientKey();
       if (authUser?.id) writeSession(authUser.id, id);
+      // The student's contact details are the first thing on every application; the form shows them prefilled.
+      await saveApplicationDraft(id, {
+        data: { values: { email: student.email, confirm_email: student.email, mobile: student.mobile } },
+        studentName: "",
+        studentEmail: student.email,
+        intake: "",
+        completion: 0,
+      });
       return id;
     },
     [authUser?.id],
   );
+
+  const submitContact = async () => {
+    const form = contactFormRef.current;
+    const email = String(new FormData(form ?? undefined).get("email") ?? "").trim().toLowerCase();
+    const mobile = String(new FormData(form ?? undefined).get("mobile") ?? "").trim();
+    const errors = {
+      email: validateEmail(email) ?? undefined,
+      mobile: !mobile.startsWith("+") || !parseStoredPhone(mobile)?.national ? "Enter the student's mobile number." : validateStoredPhone(mobile) || undefined,
+    };
+    setContactErrors(errors);
+    if (errors.email || errors.mobile) return;
+    const next = { email, mobile };
+    setContact(next);
+    setError("");
+    if (role !== "agent") { setPhase("pick"); return; }
+    setCreating(true);
+    try {
+      const id = await startDraft(next, null);
+      setApplicationId(id);
+      setPhase("wizard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "We could not start a new application.");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   // Resolve an existing wizard session, or create a fresh draft.
   useEffect(() => {
@@ -213,23 +256,14 @@ export default function NewApplicationPage() {
           clearSession(authUser.id);
         }
 
-        if (role === "agent") {
-          setCreating(true);
-          const id = await startDraft(null);
-          setApplicationId(id);
-          setPhase("wizard");
-        } else {
-          setPhase("pick");
-        }
+        setPhase("student");
       } catch (e) {
         setError(e instanceof Error ? e.message : "We could not start a new application.");
-        setPhase(role === "agent" ? "checking" : "pick");
+        setPhase("student");
         bootRef.current = false;
-      } finally {
-        setCreating(false);
       }
     })();
-  }, [authLoading, identityLoading, role, authUser, startDraft]);
+  }, [authLoading, identityLoading, role, authUser]);
 
   useEffect(() => {
     if (phase !== "pick") return;
@@ -327,7 +361,8 @@ export default function NewApplicationPage() {
         if (!agencyId) throw new Error("This business has no workspace yet, so the application could not be created. Activate the business and try again.");
       }
 
-      const id = await startDraft(assignedAgentId, role === "slit_admin" ? agencyId : null);
+      if (!contact.email || !contact.mobile) { setPhase("student"); throw new Error("Enter the student's email and mobile first."); }
+      const id = await startDraft(contact, assignedAgentId, role === "slit_admin" ? agencyId : null);
       if (notes.length) push(notes.join(" "));
       setApplicationId(id);
       setPhase("wizard");
@@ -356,16 +391,12 @@ export default function NewApplicationPage() {
       const docs = await listApplicationDocuments(abandoned).catch(() => []);
       await Promise.all(docs.map((doc) => deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).catch(() => undefined)));
       await deleteApplicationDraft(abandoned).catch(() => undefined);
-      if (role === "agent") {
-        const id = await startDraft(null);
-        setApplicationId(id);
-        setPhase("wizard");
-      } else {
-        setBusiness(null);
-        setSelectedAgent(null);
-        setAgentId("");
-        setPhase("pick");
-      }
+      setBusiness(null);
+      setSelectedAgent(null);
+      setAgentId("");
+      setContact({ email: "", mobile: "" });
+      setContactErrors({});
+      setPhase("student");
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not start a new application.");
     } finally {
@@ -379,7 +410,7 @@ export default function NewApplicationPage() {
         <PageHeading
           eyebrow="Add New Form"
           title="Starting a new application"
-          description="Student details always start empty and are only ever filled from the documents you upload."
+          description="Starting with the student's contact details; everything else is filled from the documents you upload."
         />
         <div className="mt-6">
           {error ? (
@@ -413,6 +444,93 @@ export default function NewApplicationPage() {
     );
   }
 
+  if (phase === "student") {
+    return (
+      <div>
+        <PageHeading
+          eyebrow="Add New Form"
+          title="New student application"
+          description="Start with the student's contact details. Everything else is filled from the documents you upload."
+        />
+        <form
+          ref={contactFormRef}
+          noValidate
+          onSubmit={(event) => { event.preventDefault(); void submitContact(); }}
+          className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6"
+        >
+          <h2 className="font-heading text-base font-semibold text-foreground-950">Student contact details</h2>
+          <p className="mt-1.5 text-sm text-foreground-600">Both are required to start the application.</p>
+
+          <div className="mt-5 space-y-4">
+            <div>
+              <label htmlFor="new-app-email" className="mb-1.5 block text-[13px] font-medium text-foreground-800">
+                Student email <span className="text-primary-600">*</span>
+              </label>
+              <input
+                id="new-app-email"
+                name="email"
+                type="email"
+                required
+                autoFocus
+                autoComplete="off"
+                maxLength={254}
+                defaultValue={contact.email}
+                placeholder="student@example.com"
+                aria-invalid={Boolean(contactErrors.email)}
+                className="w-full rounded-md border border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-950 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
+              />
+              {contactErrors.email ? <p className="mt-1 text-xs text-primary-800" role="alert">{contactErrors.email}</p> : null}
+            </div>
+            <div>
+              <label htmlFor="new-app-mobile" className="mb-1.5 block text-[13px] font-medium text-foreground-800">
+                Student mobile <span className="text-primary-600">*</span>
+              </label>
+              <PhoneInput id="new-app-mobile" name="mobile" value={contact.mobile} required placeholder="412 345 678" />
+              {contactErrors.mobile ? <p className="mt-1 text-xs text-primary-800" role="alert">{contactErrors.mobile}</p> : null}
+            </div>
+          </div>
+
+          {error ? (
+            <div className="mt-4">
+              <PortalError message={error} />
+            </div>
+          ) : null}
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              type="submit"
+              disabled={creating}
+              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creating ? (
+                <>
+                  <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
+                  Creating&hellip;
+                </>
+              ) : role === "agent" ? (
+                <>
+                  <i className="ri-magic-line" aria-hidden="true" />
+                  Start with document wizard
+                </>
+              ) : (
+                <>
+                  Continue
+                  <i className="ri-arrow-right-line" aria-hidden="true" />
+                </>
+              )}
+            </button>
+            <Link
+              to={paths.list}
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100"
+            >
+              Cancel
+            </Link>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   const businessNeedsActivation = business?.kind === "new" || (business?.kind === "existing" && business.status !== "Active");
 
   return (
@@ -420,10 +538,18 @@ export default function NewApplicationPage() {
       <PageHeading
         eyebrow="Add New Form"
         title="New student application"
-        description="Choose the business and agent for this application. Student details always start empty."
+        description="Choose the business and agent for this application."
       />
 
-      <div className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
+      <div className="mt-6 flex max-w-2xl items-center justify-between gap-3 rounded-card border border-background-200 bg-background-50 px-4 py-3">
+        <span className="min-w-0 text-sm text-foreground-700">
+          <span className="text-xs font-semibold uppercase tracking-wide text-foreground-500">Student</span>{" "}
+          <b className="font-medium text-foreground-900">{contact.email}</b> &middot; {formatPhone(contact.mobile)}
+        </span>
+        <button type="button" disabled={creating} onClick={() => setPhase("student")} className="shrink-0 rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
+      </div>
+
+      <div className="mt-4 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
         <h2 className="font-heading text-base font-semibold text-foreground-950">Who is this application for?</h2>
         <p className="mt-1.5 text-sm text-foreground-600">
           {role === "slit_admin"
