@@ -92,3 +92,7 @@ Original cron: extraction worker `*/5 * * * *`, public indexing `*/15 * * * *`.
 - Edge: redeploy the previous source version of the function; JWT settings stay as in the table.
 - Scheduler: restoring `* * * * *` schedules is done by the reviewed alter_job statements for `portal-document-extraction-worker` and `public-assistant-index-worker`; do not drop the event-dispatch helpers.
 - Local DB-backed lab: disposable network:none Docker containers only; never point tests at hosted data.
+
+## Agency ABN form lookup (released; GitHub sync pending)
+
+Local `portal-admin-users` adds organization-admin-only `lookup_agency_abn` (checksum-validated ABN, direct public ABN Lookup detail page, 10-second timeout, bounded five-minute cache and per-instance request spacing). No API secret, new function, migration, table or background job. `create_agency` now requires a checksum-valid registration_number. The new manual agency form requires a successful lookup and keeps contact email/phone manual; existing agency editing and directory activation remain separate. Released 2026-11-03: portal-admin-users v18 with JWT enabled, and production frontend deployment dpl_6KY1fe4nfPWJ6EqMoPXBUQPcEH32. No DB migration or background job. The frontend was published directly through the Vercel connection because GitHub writes are unavailable; this source change still needs to be pushed to GitHub before a subsequent Git-based release.

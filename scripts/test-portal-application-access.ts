@@ -564,3 +564,38 @@ test("agents: the Activate dialog starts from the agent's business and knows whe
   assert.equal(toActivate({ ...base, businessId: null }).business, null, "an agent OMARA lists without a business starts with no business chosen");
   assert.equal(toActivate({ ...base, profileId: "p1", role: "agency_admin" }).hasLogin, true);
 });
+
+// Agency ABN onboarding: deterministic fixtures only; no government calls.
+import { normalizeAbn, validateAbn, parseAgencyAbnPage, lookupAgencyAbn } from '../supabase/functions/_shared/validation/abn.ts';
+
+test('new manual agencies require checksum-valid ABNs; legacy editing remains compatible', () => {
+  assert.equal(normalizeAbn('85 165 345 717'), '85165345717');
+  assert.equal(validateAbn('85 165 345 717'), '');
+  assert.ok(validateAbn('')); assert.ok(validateAbn('85165345718')); assert.ok(validateAbn('8516534571a'));
+  const form = { ...EMPTY_AGENCY_FORM, name: 'Sample', code: 'SAM-001', businessEmail: 'agency@example.test' };
+  assert.ok(validateAgencyForm(form, true).errors.registrationNumber);
+  assert.equal(validateAgencyForm(form).errors.registrationNumber, undefined);
+  assert.equal(validateAgencyForm({ ...form, registrationNumber: '85165345717' }, true).errors.registrationNumber, undefined);
+});
+
+test('ABN lookup extracts only published business data and fails closed on a different ABN or blocked page', async () => {
+  const html = `<h1>Current details for ABN 85 165 345 717</h1><table>
+    <tr><th>Entity name:</th><td>SYNTHETIC &amp; COMPANY</td></tr>
+    <tr><th>ABN status:</th><td>Active from 19&nbsp;Jun&nbsp;2020</td></tr>
+    <tr><th>Entity type:</th><td>Individual/Sole Trader</td></tr>
+    <tr><th>Goods &amp; Services Tax (GST):</th><td>Not currently registered</td></tr>
+    <tr><th>Main business location:</th><td>WA 6112</td></tr></table>
+    <table><caption>Business name(s)</caption><tr><td>Sample agency</td><td>14 Sep 2025</td></tr></table>`;
+  const result = parseAgencyAbnPage(html, '85165345717');
+  assert.equal(result.legalName, 'SYNTHETIC & COMPANY');
+  assert.deepEqual(result.businessNames, ['Sample agency']); assert.equal(result.postcode, '6112');
+  assert.equal('email' in result, false); assert.equal('phone' in result, false);
+  assert.throws(() => parseAgencyAbnPage(html, '95830955864'));
+  assert.throws(() => parseAgencyAbnPage('<h1>Access denied</h1>', '85165345717'));
+  let requested = '';
+  const mock = (async (url: string) => { requested = url; return new Response(html); }) as typeof fetch;
+  assert.equal((await lookupAgencyAbn('85 165 345 717', mock)).abn, '85165345717');
+  assert.equal(requested, 'https://abr.business.gov.au/ABN/View?abn=85165345717');
+  await assert.rejects(lookupAgencyAbn('https://evil.invalid', mock));
+  await assert.rejects(lookupAgencyAbn('85165345717', (async () => new Response('Blocked', { status: 429 })) as typeof fetch));
+});

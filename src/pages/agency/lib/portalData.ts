@@ -1,3 +1,4 @@
+import { normalizeAbn, validateAbn } from "../../../../supabase/functions/_shared/validation/abn";
 import { supabase } from "@/pages/admin/lib/supabase";
 import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_LABELS } from "@/pages/agency/lib/applicationAccess";
@@ -195,10 +196,12 @@ export async function listAgencyInvitations(agencyId: string): Promise<Invitatio
 
 /** Adds an agency record without a first administrator (with one, use the create_agency function, which is atomic). */
 export async function createAgencyRecordWithBusiness(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<{ agencyId: string; businessId: string }> {
+  const abnProblem = validateAbn(input.registrationNumber);
+  if (abnProblem) throw new Error(abnProblem);
   const { data, error } = await supabase
     .from("agencies")
     .insert({
-      name: input.name.trim(), code: input.code.trim(), registration_number: input.registrationNumber.trim(), business_email: input.businessEmail.trim(),
+      name: input.name.trim(), code: input.code.trim(), registration_number: normalizeAbn(input.registrationNumber), business_email: input.businessEmail.trim(),
       phone: input.phone.trim(), address: input.address.trim(), country: input.country.trim(), primary_contact: input.primaryContact.trim(), status: input.status,
     })
     .select("id, business_id")

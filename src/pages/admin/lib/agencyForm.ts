@@ -1,3 +1,4 @@
+import { validateAbn } from "../../../../supabase/functions/_shared/validation/abn";
 import { DEFAULT_DIAL, formatPhone, normalizePhoneInput, validatePhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 import { validateEmail, validateName } from "../../agency/lib/userValidation";
 import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
@@ -41,8 +42,9 @@ export function suggestAgencyCode(name: string, suffix: number): string {
 export type AgencyFormErrors = Partial<Record<keyof AgencyFormState | "firstName" | "firstEmail", string>>;
 
 /** Validates the agency fields; the phone defaults to +61 and is returned as E.164. */
-export function validateAgencyForm(form: AgencyFormState): { errors: AgencyFormErrors; phone: string } {
+export function validateAgencyForm(form: AgencyFormState, requireAbn = false): { errors: AgencyFormErrors; phone: string } {
   const errors: AgencyFormErrors = {};
+  if (requireAbn) { const problem = validateAbn(form.registrationNumber); if (problem) errors.registrationNumber = problem; }
   if (form.name.trim().length < 2) errors.name = "Enter the agency name.";
   if (!form.code.trim()) errors.code = "Enter a unique agency code.";
   const email = validateEmail(form.businessEmail);
