@@ -1,4 +1,4 @@
-import { enrolSections, type AppSection } from "@/data/applicationForms";
+import { enrolSections, type AppField, type AppSection } from "@/data/applicationForms";
 import { courses } from "@/data/courses";
 
 /**
@@ -90,7 +90,39 @@ function splitVisaSection(section: AppSection): AppSection[] {
   ];
 }
 
-export const portalSections: AppSection[] = enrolSections.flatMap(splitVisaSection).map((section) => ({
+/** Education questions that the portal asks on the Academic documents page instead of the Student identifier page. */
+export const EDUCATION_FIELD_NAMES = new Set(["secondary_enrolled", "school_level", "year_completed", "prior_ed"]);
+
+/** The language actually spoken, asked when "Yes, language other than English" is chosen. */
+const LANGUAGE_OTHER_FIELD: AppField = {
+  name: "language_other",
+  label: "Which language?",
+  type: "text",
+  required: true,
+  full: true,
+  placeholder: "e.g. Hindi",
+  showIf: { field: "language_home", equals: ["Yes, language other than English"] },
+};
+
+/** Moves the education questions next to the academic documents they can be read from, and adds the language box. */
+function regroupStudentSections(list: AppSection[]): AppSection[] {
+  const identifier = list.find((section) => section.fields.some((field) => field.name === "employment"));
+  const education = identifier?.fields.filter((field) => EDUCATION_FIELD_NAMES.has(field.name)) ?? [];
+  return list.map((section) => {
+    if (section === identifier) {
+      const fields = section.fields.filter((field) => !EDUCATION_FIELD_NAMES.has(field.name));
+      const at = fields.findIndex((field) => field.name === "language_home");
+      return { ...section, fields: [...fields.slice(0, at + 1), LANGUAGE_OTHER_FIELD, ...fields.slice(at + 1)] };
+    }
+    if (section.fields.some((field) => field.name === "academic_upload")) {
+      const at = section.fields.findIndex((field) => field.name === "academic_upload");
+      return { ...section, fields: [...section.fields.slice(0, at + 1), ...education, ...section.fields.slice(at + 1)] };
+    }
+    return section;
+  });
+}
+
+export const portalSections: AppSection[] = regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map((section) => ({
   ...section,
   fields: section.fields.map((field) =>
     field.name === COURSE_FIELD

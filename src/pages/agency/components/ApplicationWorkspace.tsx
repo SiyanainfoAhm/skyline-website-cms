@@ -46,6 +46,23 @@ const VISA_CATEGORY = "Visa";
 const VISA_DETAIL_FIELDS = ["visa_subclass", "visa_grant_date", "visa_stay_until", "visa_grant_number"] as const;
 const VISA_UPLOAD_FIELD: AppField = { name: "visa_upload", label: "Visa grant notice or VEVO record", type: "file" };
 const ENGLISH_CATEGORY = "English Test";
+// Student identifier answers that start with a default when empty (shown pre-filled, green, with Edit).
+const IDENTIFIER_DEFAULTS: Record<string, string> = {
+  employment: "Unemployed - Seeking Part-Time Work - 07",
+  language_home: "Yes, language other than English",
+};
+const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability"];
+const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "year_completed", "prior_ed"] as const;
+
+/** Best reading of the highest school level a qualification shows; "" when it says nothing about school. */
+function schoolLevelOf(text: string): string {
+  const t = ` ${text.toLowerCase()} `;
+  if (/(bachelor|degree|diploma|master|graduate|year\s*12|\bxii\b|\b12th\b|higher secondary|senior secondary|\bhsc\b|intermediate|a[ -]level|class 12|grade 12)/.test(t)) return "Year 12 or equivalent - 12";
+  if (/(year\s*11|\bxi\b|\b11th\b|class 11|grade 11)/.test(t)) return "Year 11 or equivalent - 11";
+  if (/(year\s*10|\bx\b|\b10th\b|\bssc\b|secondary school certificate|matric|o[ -]level|class 10|grade 10)/.test(t)) return "Year 10 or equivalent - 10";
+  return "";
+}
+const SCHOOL_RANK = ["Year 10 or equivalent - 10", "Year 11 or equivalent - 11", "Year 12 or equivalent - 12"];
 const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
 const ENGLISH_UPLOAD_FIELD: AppField = { name: "english_results", label: "English test result", type: "file" };
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
@@ -121,6 +138,8 @@ export default function ApplicationWorkspace({
   // Values read from a document start greyed out and read-only, so they are clearly told apart from what still needs
   // filling in; Edit opens one for changes. Empty fields are never locked.
   const [unlockedFields, setUnlockedFields] = useState<Set<string>>(() => new Set());
+  // Education answers worked out from the academic documents: shown as "From document", green, with Edit.
+  const [derivedFields, setDerivedFields] = useState<Set<string>>(() => new Set());
   // Applications started with the contact step already hold the student's unique email and mobile.
   const [contactFixed] = useState(() => Boolean(String(storedValues.email ?? "").trim() && String(storedValues.mobile ?? "").trim()));
   // Current dates behind the expiry warnings, kept live as the form is edited.
@@ -135,8 +154,11 @@ export default function ApplicationWorkspace({
     for (const [name, value] of Object.entries(seed)) if (!String(out[name] ?? "").trim()) out[name] = value;
     // The student's address is always an Australian one (fixed and greyed out on the form).
     Object.assign(out, AUSTRALIAN_ADDRESS);
+    for (const [name, value] of Object.entries(IDENTIFIER_DEFAULTS)) if (!String(out[name] ?? "").trim()) out[name] = value;
     return out;
   }, [seed, storedValues]);
+  // Student identifier answers already filled (or defaulted) when the form opens: green, with Edit.
+  const [prefilledFields] = useState<Set<string>>(() => new Set(PREFILL_LOCK_FIELDS.filter((name) => String(mergedInitial[name] ?? "").trim())));
 
   const [values, setValues] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
@@ -608,6 +630,37 @@ export default function ApplicationWorkspace({
     setVisaNote("The visa document these details were read from is no longer attached. Check the details below, or upload the visa document again.");
   }, [attachmentsLoaded, visaMode, visaRead, visas.length]);
 
+  /* ------------------------------------------------- education answers */
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form || !attachmentsLoaded || readOnly) return;
+    const attached = new Set(attachments.map((document) => document.id));
+    const fromDocuments = qualifications.filter((item) => item.documentIds.some((id) => attached.has(id)));
+    if (!fromDocuments.length) return;
+    let level = "";
+    let levelYear = "";
+    for (const item of fromDocuments) {
+      const found = schoolLevelOf(`${item.qualification} ${item.program}`);
+      if (found && SCHOOL_RANK.indexOf(found) >= SCHOOL_RANK.indexOf(level)) { level = found; levelYear = item.year.match(/\d{4}/)?.[0] ?? levelYear; }
+    }
+    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level, year_completed: levelYear };
+    const updates: Record<string, string> = {};
+    for (const name of EDUCATION_FIELDS) {
+      const value = answers[name];
+      if (!value) continue;
+      const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`));
+      const current = controls.some((control) => (control instanceof HTMLInputElement && control.type === "radio" ? control.checked : control.value.trim() !== ""));
+      if (!current) updates[name] = value;
+    }
+    const names = Object.keys(updates);
+    if (!names.length) return;
+    applyFormValues(form, updates);
+    setDerivedFields((prev) => new Set([...prev, ...names]));
+    window.requestAnimationFrame(() => computeProgress());
+    scheduleSave(true);
+  }, [attachments, attachmentsLoaded, qualifications, readOnly, computeProgress, scheduleSave]);
+
   /* ---------------------------------------------------------- English */
 
   const [englishNote, setEnglishNote] = useState("");
@@ -876,7 +929,8 @@ export default function ApplicationWorkspace({
       return <input key={field.name} type="hidden" name={field.name} defaultValue={saved} />;
     }
     const fixedAustralia = field.name in AUSTRALIAN_ADDRESS;
-    const documentLocked = !readOnly && !fixedAustralia && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
+    const fromDocument = documentFields.has(field.name) || derivedFields.has(field.name);
+    const documentLocked = !readOnly && !fixedAustralia && field.type !== "file" && (fromDocument || prefilledFields.has(field.name)) && !unlockedFields.has(field.name);
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
     // Always "Australian Address": the two ways to fill it (search or licence) are offered above the fields instead.
     if (field.name === "address_type") return <input key={field.name} type="hidden" name={field.name} defaultValue={AUSTRALIAN_ADDRESS.address_type} />;
@@ -920,6 +974,18 @@ export default function ApplicationWorkspace({
         >
           {field.label}
           {field.required ? <span className="text-primary-600">*</span> : null}
+          {derivedFields.has(field.name) && !documentFields.has(field.name) && !unlockedFields.has(field.name) ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900" title="Worked out from the uploaded academic documents. Check it; you can edit it.">
+              <i className="ri-file-text-line" aria-hidden="true" />
+              From document
+            </span>
+          ) : null}
+          {prefilledFields.has(field.name) && !documentFields.has(field.name) && !unlockedFields.has(field.name) ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900" title="Already filled in. Use Edit to change it.">
+              <i className="ri-checkbox-circle-line" aria-hidden="true" />
+              Pre-filled
+            </span>
+          ) : null}
           {documentFields.has(field.name) && !editedFields.has(field.name) ? (
             <span
               className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900"
