@@ -67,12 +67,13 @@ const FORM_DEFAULTS: Record<string, string | string[]> = {
   hear_about: "Agent",
 };
 const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability", "usi_consent"];
-const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "year_completed", "prior_ed"] as const;
+const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "prior_ed"] as const;
 
 /** Best reading of the highest school level a qualification shows; "" when it says nothing about school. */
 function schoolLevelOf(text: string): string {
   const t = ` ${text.toLowerCase()} `;
-  if (/(bachelor|degree|diploma|master|graduate|year\s*12|\bxii\b|\b12th\b|higher secondary|senior secondary|\bhsc\b|intermediate|a[ -]level|class 12|grade 12)/.test(t)) return "Year 12 or equivalent - 12";
+  // Any university degree (bachelor's, master's, doctorate) means school was completed to Year 12.
+  if (/(bachelor|degree|diploma|master|graduate|university|engineering|\bb\.?\s?(e|tech|sc|com|a|ba|ca|pharm|arch)\b|\bm\.?\s?(e|tech|sc|com|a|ba|ca|phil)\b|\bph\.?\s?d\b|doctor|year\s*12|\bxii\b|\b12th\b|higher secondary|senior secondary|\bhsc\b|intermediate|a[ -]level|class 12|grade 12)/.test(t)) return "Year 12 or equivalent - 12";
   if (/(year\s*11|\bxi\b|\b11th\b|class 11|grade 11)/.test(t)) return "Year 11 or equivalent - 11";
   if (/(year\s*10|\bx\b|\b10th\b|\bssc\b|secondary school certificate|matric|o[ -]level|class 10|grade 10)/.test(t)) return "Year 10 or equivalent - 10";
   return "";
@@ -343,6 +344,7 @@ export default function ApplicationWorkspace({
     // it is answered from the contact's phone number (an Australian +61 number means Yes).
     const ecPhone = String(collected.ec_phone ?? "").replace(/\s/g, "");
     if (ecPhone) collected.ec_in_au = ecPhone.startsWith("+61") || /^0[1-9]\d{8}$/.test(ecPhone) ? "Yes" : "No";
+    if (String(collected.academic_year ?? "").trim()) collected.year_completed = String(collected.academic_year);
     const coursesRaw = (collected[COURSE_FIELD] as string[] | undefined) ?? [];
     return { values: collected, courses: coursesRaw };
   }, []);
@@ -720,12 +722,11 @@ export default function ApplicationWorkspace({
     const fromDocuments = qualifications.filter((item) => item.documentIds.some((id) => attached.has(id)));
     if (!fromDocuments.length) return;
     let level = "";
-    let levelYear = "";
     for (const item of fromDocuments) {
       const found = schoolLevelOf(`${item.qualification} ${item.program}`);
-      if (found && SCHOOL_RANK.indexOf(found) >= SCHOOL_RANK.indexOf(level)) { level = found; levelYear = item.year.match(/\d{4}/)?.[0] ?? levelYear; }
+      if (found && SCHOOL_RANK.indexOf(found) >= SCHOOL_RANK.indexOf(level)) level = found;
     }
-    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level, year_completed: levelYear };
+    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level };
     const updates: Record<string, string> = {};
     for (const name of EDUCATION_FIELDS) {
       const value = answers[name];
