@@ -41,6 +41,7 @@ const STUDENT_CONTACT_FIELDS = new Set(["mobile", "email", "confirm_email", "ema
 const AUSTRALIAN_ADDRESS: Record<string, string> = { address_type: "Australian Address", au_country: "Australia" };
 const AU_ADDRESS_FIELDS = ["au_street", "au_line2", "au_suburb", "au_state", "au_zip"] as const;
 const LICENCE_CATEGORY = "Driving Licence";
+const ADDRESS_SOURCES = ["search", "licence", "manual"];
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
 
 // A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
@@ -409,7 +410,11 @@ export default function ApplicationWorkspace({
   const [licenceNote, setLicenceNote] = useState("");
   const [addressMode, setAddressMode] = useState<"search" | "licence">("search");
   // The address fields stay hidden until a search pick or a licence fills them (or an address is already saved).
-  const [addressShown, setAddressShown] = useState(() => AU_ADDRESS_FIELDS.some((name) => String(storedValues[name] ?? "").trim() !== ""));
+  // An address only counts once it came from a search pick or a licence (or the manual fallback); the saved
+  // address_source records which, so an address typed in before this step existed has to be found again.
+  const [addressShown, setAddressShown] = useState(() => ADDRESS_SOURCES.includes(String(storedValues.address_source ?? "")));
+  const addressShownRef = useRef(addressShown);
+  useEffect(() => { addressShownRef.current = addressShown; }, [addressShown]);
   const [searchUnavailable, setSearchUnavailable] = useState(false);
   const [licenceUnreadable, setLicenceUnreadable] = useState(false);
   const appliedLicencesRef = useRef<Set<string>>(new Set());
@@ -419,14 +424,16 @@ export default function ApplicationWorkspace({
    * Writes Australian address values into the form. A search pick replaces the address; a licence only fills fields that
    * are still empty. Written fields lose any document lock so they show as ordinary, editable values.
    */
-  const fillAustralianAddress = useCallback((picked: Record<string, string>, replace: boolean): number => {
+  const fillAustralianAddress = useCallback((picked: Record<string, string>, replace: boolean, source: "search" | "licence"): number => {
     const form = formRef.current;
     if (!form) return 0;
     const updates: Record<string, string> = {};
+    // Until an address has been found here, whatever the hidden fields hold (an older typed address) is replaced.
+    const overwrite = replace || !addressShownRef.current;
     for (const name of AU_ADDRESS_FIELDS) {
       const value = String(picked[name] ?? "").trim();
       const control = form.querySelector<HTMLInputElement>(`[name="${name}"]`);
-      if (!control || (!value && !replace) || (!replace && control.value.trim())) continue;
+      if (!control || (!value && !overwrite) || (!overwrite && control.value.trim())) continue;
       updates[name] = value;
     }
     const names = Object.keys(updates);
@@ -434,7 +441,7 @@ export default function ApplicationWorkspace({
     setAddressShown(true);
     setUnlockedFields((prev) => new Set([...prev, ...names]));
     setEditedFields((prev) => new Set([...prev, ...names]));
-    applyFormValues(form, { ...updates, ...AUSTRALIAN_ADDRESS });
+    applyFormValues(form, { ...updates, ...AUSTRALIAN_ADDRESS, address_source: source });
     window.requestAnimationFrame(() => computeProgress());
     scheduleSave(true);
     return names.length;
@@ -478,7 +485,7 @@ export default function ApplicationWorkspace({
         setLicenceNote("The licence shows an overseas address. Only an Australian address can be used here; search for it instead.");
         continue;
       }
-      const filled = fillAustralianAddress(extracted, false);
+      const filled = fillAustralianAddress(extracted, false, "licence");
       if (!filled) setLicenceUnreadable(true);
       setLicenceNote(filled ? `Filled ${filled} address field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.` : `No new address details were found on ${document.filename}; fields already filled were left as they were.`);
     }
@@ -789,6 +796,7 @@ export default function ApplicationWorkspace({
       {section.scans?.length ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
       {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
         <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
+          <input type="hidden" name="address_source" defaultValue={String(storedValues.address_source ?? "")} />
           <p className="text-sm font-semibold text-foreground-900">How would you like to fill the address?</p>
           <div role="radiogroup" aria-label="How to fill the address" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([
@@ -815,7 +823,7 @@ export default function ApplicationWorkspace({
           </div>
           <div className="mt-4">
             {addressMode === "search" ? (
-              <AddressSearch onUnavailable={() => setSearchUnavailable(true)} onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
+              <AddressSearch onUnavailable={() => setSearchUnavailable(true)} onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true, "search")} />
             ) : (
               <ApplicationAttachmentField
                 field={LICENCE_FIELD}
@@ -839,7 +847,15 @@ export default function ApplicationWorkspace({
             </p>
           ) : null}
           {!addressShown && (searchUnavailable || licenceUnreadable) ? (
-            <button type="button" onClick={() => setAddressShown(true)} className="mt-2 cursor-pointer text-xs font-semibold text-primary-700 underline">
+            <button
+              type="button"
+              onClick={() => {
+                setAddressShown(true);
+                if (formRef.current) applyFormValues(formRef.current, { address_source: "manual" });
+                scheduleSave(true);
+              }}
+              className="mt-2 cursor-pointer text-xs font-semibold text-primary-700 underline"
+            >
               Enter the address manually
             </button>
           ) : null}
