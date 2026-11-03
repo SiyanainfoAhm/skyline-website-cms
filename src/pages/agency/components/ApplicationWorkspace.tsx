@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, useLayoutEffect } from "react";
 import AddressSearch from "@/pages/agency/components/AddressSearch";
 import CourseSearchField from "@/pages/agency/components/CourseSearchField";
 import { validateUsi } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -70,6 +70,18 @@ const FORM_DEFAULTS: Record<string, string | string[]> = {
 };
 const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability", "usi_consent"];
 const EDUCATION_FIELDS = ["secondary_enrolled", "highest_education", "school_level", "prior_ed"] as const;
+
+/**
+ * A hidden answer the page sets itself (visa answer, address source). Its saved value is written once: given as
+ * defaultValue, React puts it back on every re-render (a hidden input's value is its default value), undoing what the
+ * page set and leaving required answers blank.
+ */
+function KeptValue({ name, value }: { name: string; value: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const saved = useRef(value);
+  useLayoutEffect(() => { if (ref.current) ref.current.value = saved.current; }, []);
+  return <input ref={ref} type="hidden" name={name} />;
+}
 
 /** Highest university level a qualification shows (PhD, Master's, Bachelor's); "" when it shows none. */
 function degreeOf(text: string): string {
@@ -1203,7 +1215,7 @@ export default function ApplicationWorkspace({
     // Kept in the form (saved, fillable) but out of sight until the address has been found. Only visibility changes, never
     // the element tree: rebuilding the inputs would reset them to their saved values and undo a search pick.
     // The visa question is answered by the choice card on the Visa page; the old file field is replaced by its upload.
-    if (field.name === "holds_visa") return <input key={field.name} type="hidden" name={field.name} defaultValue={String(mergedInitial.holds_visa ?? "")} />;
+    if (field.name === "holds_visa") return <KeptValue key={field.name} name={field.name} value={String(mergedInitial.holds_visa ?? "")} />;
     if (field.name === "visa_copy" || field.name === "english_upload") return null;
     // The Application checklist page is gone; its required answer is always ticked and kept out of sight.
     if (field.name === "checklist") {
@@ -1357,7 +1369,7 @@ export default function ApplicationWorkspace({
       {section.scans?.length && !section.fields.some((field) => field.name === "english_type") ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
       {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
         <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
-          <input type="hidden" name="address_source" defaultValue={String(storedValues.address_source ?? "") || (addressFromWizardLicence ? "licence" : "")} />
+          <KeptValue name="address_source" value={String(storedValues.address_source ?? "") || (addressFromWizardLicence ? "licence" : "")} />
           <p className="text-sm font-semibold text-foreground-900">How would you like to fill the address?</p>
           <div role="radiogroup" aria-label="How to fill the address" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([

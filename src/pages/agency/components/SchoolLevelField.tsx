@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { AppField } from "@/data/applicationForms";
 import { DEGREE_LEVELS, schoolLevelFor } from "@/pages/agency/lib/educationLevels";
 
@@ -16,6 +16,10 @@ export default function SchoolLevelField({ field, id, choice, schoolLevel, locke
 }) {
   const selectRef = useRef<HTMLSelectElement>(null);
   const hiddenRef = useRef<HTMLInputElement>(null);
+  // The saved level is written once. Given as defaultValue, React would put it back on every re-render (a hidden
+  // input's value is its default value), wiping the level this field sets and leaving the required answer blank.
+  const savedLevel = useRef(schoolLevel);
+  useLayoutEffect(() => { if (hiddenRef.current) hiddenRef.current.value = savedLevel.current; }, []);
 
   const sync = () => {
     const select = selectRef.current;
@@ -69,7 +73,7 @@ export default function SchoolLevelField({ field, id, choice, schoolLevel, locke
           {(field.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
         </optgroup>
       </select>
-      <input ref={hiddenRef} type="hidden" name={field.name} defaultValue={schoolLevel} />
+      <input ref={hiddenRef} type="hidden" name={field.name} />
     </>
   );
 }
