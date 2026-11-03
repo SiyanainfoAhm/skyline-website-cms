@@ -264,6 +264,23 @@ export async function setAgencyStatus(id: string, status: "Active" | "Inactive")
   if (error) throw new Error(error.message);
 }
 
+/** An agency already recorded with this ABN (stored with or without spaces), if any. */
+export async function findAgencyByAbn(abn: string): Promise<{ id: string; name: string } | null> {
+  const digits = normalizeAbn(abn);
+  const spaced = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3 $4");
+  const { data, error } = await supabase.from("agencies").select("id, name").in("registration_number", [digits, spaced]).limit(1);
+  if (error) throw new Error("We could not check whether this business already exists. Please try again.");
+  const row = data?.[0];
+  return row ? { id: String(row.id), name: String(row.name ?? "") } : null;
+}
+
+/** The business record behind an agency workspace. */
+export async function agencyBusinessId(agencyId: string): Promise<string | null> {
+  const { data, error } = await supabase.from("agencies").select("business_id").eq("id", agencyId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.business_id ? String(data.business_id) : null;
+}
+
 /** Delete an agency (SLIT Admin only). Blocked if it still owns applications. */
 export async function deleteAgency(id: string): Promise<void> {
   const { error } = await supabase.from("agencies").delete().eq("id", id);
