@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import AddressSearch from "@/pages/agency/components/AddressSearch";
 import type { AppField, AppSection } from "@/data/applicationForms";
 import { ApplicationFieldControl } from "@/components/feature/applicationFieldKit";
@@ -407,6 +407,7 @@ export default function ApplicationWorkspace({
   /* ------------------------------------------------ Australian address */
 
   const [licenceNote, setLicenceNote] = useState("");
+  const [addressMode, setAddressMode] = useState<"search" | "licence">("search");
   const appliedLicencesRef = useRef<Set<string>>(new Set());
   const watchLicencesRef = useRef(false);
 
@@ -672,14 +673,8 @@ export default function ApplicationWorkspace({
     const fixedAustralia = field.name in AUSTRALIAN_ADDRESS;
     const documentLocked = !readOnly && !fixedAustralia && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
-    if (field.name === "au_street" && !readOnly) {
-      return (
-        <Fragment key={field.name}>
-          <AddressSearch onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
-          {renderFieldBody(field, locked, documentLocked, fixedAustralia)}
-        </Fragment>
-      );
-    }
+    // Always "Australian Address": the two ways to fill it (search or licence) are offered above the fields instead.
+    if (field.name === "address_type") return <input key={field.name} type="hidden" name={field.name} defaultValue={AUSTRALIAN_ADDRESS.address_type} />;
     return renderFieldBody(field, locked, documentLocked, fixedAustralia);
   };
 
@@ -783,21 +778,48 @@ export default function ApplicationWorkspace({
       {section.scans?.length ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
       {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
         <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
-          <p className="text-sm font-semibold text-foreground-900">Fill the address from a driving licence (optional)</p>
-          <p className="mt-0.5 text-xs text-foreground-600">Upload the licence and the address is read from it into the empty fields below. You can also search for the address instead.</p>
-          <div className="mt-3">
-            <ApplicationAttachmentField
-              field={LICENCE_FIELD}
-              documents={attachments.filter((document) => document.category === LICENCE_CATEGORY)}
-              disabled={Boolean(documentBusy)}
-              busyDocumentId={documentBusy}
-              onUpload={uploadLicence}
-              onPreview={previewAttachment}
-              onExtract={extractAttachment}
-              onDelete={deleteAttachment}
-            />
+          <p className="text-sm font-semibold text-foreground-900">How would you like to fill the address?</p>
+          <div role="radiogroup" aria-label="How to fill the address" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {([
+              ["search", "ri-search-line", "Search address", "Find the student's address and pick it"],
+              ["licence", "ri-profile-line", "Upload driving licence", "The address is read from the licence"],
+            ] as const).map(([mode, icon, title, hint]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={addressMode === mode}
+                onClick={() => setAddressMode(mode)}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                  addressMode === mode ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500" : "border-background-300 hover:bg-background-100"
+                }`}
+              >
+                <i className={`${icon} mt-0.5 text-lg ${addressMode === mode ? "text-primary-600" : "text-foreground-500"}`} aria-hidden="true" />
+                <span>
+                  <span className="block text-sm font-semibold text-foreground-900">{title}</span>
+                  <span className="block text-xs text-foreground-600">{hint}</span>
+                </span>
+              </button>
+            ))}
           </div>
-          {licenceNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{licenceNote}</p> : null}
+          <div className="mt-4">
+            {addressMode === "search" ? (
+              <AddressSearch onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
+            ) : (
+              <ApplicationAttachmentField
+                field={LICENCE_FIELD}
+                documents={licences}
+                disabled={Boolean(documentBusy)}
+                busyDocumentId={documentBusy}
+                onUpload={uploadLicence}
+                onPreview={previewAttachment}
+                onExtract={extractAttachment}
+                onDelete={deleteAttachment}
+              />
+            )}
+          </div>
+          {addressMode === "licence" && licenceNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{licenceNote}</p> : null}
+          <p className="mt-3 text-xs text-foreground-500">The address fields below fill in automatically; check them before continuing.</p>
         </div>
       ) : null}
       <div
