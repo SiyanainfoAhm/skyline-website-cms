@@ -76,7 +76,7 @@ export const WIZARD_STEPS: WizardStep[] = [
   {
     id: "licence",
     title: "Australian driving licence",
-    short: "Licence",
+    short: "Driving Licence",
     subtitle: "Optional. Upload an Australian driving licence to fill in the student's address. Overseas licences are not accepted.",
     icon: "ri-profile-line",
     category: "Driving Licence",
