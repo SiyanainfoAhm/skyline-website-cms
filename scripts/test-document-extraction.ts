@@ -121,7 +121,8 @@ test("phone: Australian normalisation, validation and display", async () => {
   assert.deepEqual(check("61", "0412 345 678"), { e164: "+61412345678", message: "" });
   assert.deepEqual(check("61", "0291234567"), { e164: "+61291234567", message: "" });
   assert.equal(check("61", "12345").message, AU_PHONE_MESSAGE);
-  assert.equal(check("61", "0512345678").message, AU_PHONE_MESSAGE);
+  assert.deepEqual(check("61", "0505345678"), { e164: "+61505345678", message: "" });
+  assert.equal(check("61", "05053456").message, AU_PHONE_MESSAGE);
   assert.deepEqual(check("61", ""), { e164: "", message: "" });
   assert.equal(check("91", "9876543210").message, "");
   assert.equal(check("91", "+441234567890").e164, "+441234567890");

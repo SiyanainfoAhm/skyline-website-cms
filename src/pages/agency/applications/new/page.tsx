@@ -475,6 +475,11 @@ export default function NewApplicationPage() {
           ref={contactFormRef}
           noValidate
           onSubmit={(event) => { event.preventDefault(); void submitContact(); }}
+          // A field's error goes as soon as it is edited; both are checked again on Continue.
+          onInput={(event) => {
+            const name = (event.target as HTMLInputElement).name;
+            if (name === "email" || name === "mobile") setContactErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
+          }}
           className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6"
         >
           <h2 className="font-heading text-base font-semibold text-foreground-950">Student contact details</h2>

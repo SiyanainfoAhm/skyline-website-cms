@@ -45,7 +45,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
 ];
 
 export const DEFAULT_DIAL = "61";
-export const AU_PHONE_MESSAGE = "Enter a valid Australian number, e.g. 041 234 5678.";
+export const AU_PHONE_MESSAGE = "Enter a 10-digit Australian number starting with 0, e.g. 041 234 5678.";
 export const OTHER_PHONE_MESSAGE = "Enter a valid phone number for the selected country.";
 
 const digitsOf = (text: string) => String(text ?? "").replace(/\D/g, "");
@@ -70,10 +70,10 @@ export function normalizePhoneInput(dial: string, raw: string): { dial: string; 
   return { dial: useDial, national, e164: national ? `+${useDial}${national}` : "" };
 }
 
-/** "" when valid or blank, otherwise the message to show. Australian numbers: mobile 4XXXXXXXX, landline [2378]XXXXXXXX. */
+/** "" when valid or blank, otherwise the message to show. Australian numbers: any 9 digits after the trunk 0 (10 digits as written). */
 export function validatePhone(dial: string, national: string): string {
   if (!national) return "";
-  if (dial === DEFAULT_DIAL) return /^(4\d{8}|[2378]\d{8})$/.test(national) ? "" : AU_PHONE_MESSAGE;
+  if (dial === DEFAULT_DIAL) return /^[1-9]\d{8}$/.test(national) ? "" : AU_PHONE_MESSAGE;
   return /^\d{6,12}$/.test(national) && dial.length + national.length <= 15 ? "" : OTHER_PHONE_MESSAGE;
 }
 
