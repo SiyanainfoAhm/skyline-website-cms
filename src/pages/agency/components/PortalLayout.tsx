@@ -22,7 +22,6 @@ const SLIT_NAV: NavEntry[] = [
   { to: "/agency/dashboard", label: "Dashboard", icon: "ri-dashboard-3-line" },
   { to: "/agency/agencies", label: "Agencies", icon: "ri-building-2-line" },
   { to: "/agency/all-applications", label: "All Applications", icon: "ri-file-list-3-line" },
-  { to: "/agency/registrations", label: "Registrations", icon: "ri-file-shield-2-line" },
   { to: "/agency/notifications", label: "Notifications", icon: "ri-notification-3-line" },
   { to: "/agency/audit-log", label: "Audit Log", icon: "ri-history-line" },
 ];
