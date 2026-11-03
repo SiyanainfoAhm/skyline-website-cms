@@ -475,7 +475,7 @@ export default function NewApplicationPage() {
           ref={contactFormRef}
           noValidate
           onSubmit={(event) => { event.preventDefault(); void submitContact(); }}
-          // A field's error goes as soon as it is edited; both are checked again on Continue.
+          // A field's error goes as soon as it is edited; both are checked again on Next.
           onInput={(event) => {
             const name = (event.target as HTMLInputElement).name;
             if (name === "email" || name === "mobile") setContactErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
@@ -531,14 +531,9 @@ export default function NewApplicationPage() {
                   <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
                   Creating&hellip;
                 </>
-              ) : role === "agent" ? (
-                <>
-                  <i className="ri-magic-line" aria-hidden="true" />
-                  Start with document wizard
-                </>
               ) : (
                 <>
-                  Continue
+                  Next
                   <i className="ri-arrow-right-line" aria-hidden="true" />
                 </>
               )}
@@ -570,15 +565,14 @@ export default function NewApplicationPage() {
           <span className="text-xs font-semibold uppercase tracking-wide text-foreground-500">Student</span>{" "}
           <b className="font-medium text-foreground-900">{contact.email}</b> &middot; {formatPhone(contact.mobile)}
         </span>
-        <button type="button" disabled={creating} onClick={() => setPhase("student")} className="shrink-0 rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
       </div>
 
       <div className="mt-4 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
         <h2 className="font-heading text-base font-semibold text-foreground-950">Who is this application for?</h2>
         <p className="mt-1.5 text-sm text-foreground-600">
           {role === "slit_admin"
-            ? "Choose an existing business and one of its portal team members, or add them here. The document wizard opens next."
-            : `Assign the application to an active agent in ${agency?.name ?? "your agency"}, or leave it unassigned and allocate it later. The document wizard opens next.`}
+            ? "Choose an existing business and one of its portal team members, or add them here. Next opens the document wizard."
+            : `Assign the application to an active agent in ${agency?.name ?? "your agency"}, or leave it unassigned and allocate it later. Next opens the document wizard.`}
         </p>
 
         {role === "slit_admin" ? (
@@ -688,31 +682,42 @@ export default function NewApplicationPage() {
           </div>
         ) : null}
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            disabled={creating || (role === "slit_admin" && (!business || !selectedAgent))}
-            onClick={() => void handlePick()}
-            className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {creating ? (
-              <>
-                <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
-                Creating&hellip;
-              </>
-            ) : (
-              <>
-                <i className="ri-magic-line" aria-hidden="true" />
-                Start with document wizard
-              </>
-            )}
-          </button>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center">
           <Link
             to={paths.list}
             className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100"
           >
             Cancel
           </Link>
+          <div className="flex flex-col-reverse gap-3 sm:ml-auto sm:flex-row">
+            <button
+              type="button"
+              disabled={creating}
+              onClick={() => { setError(""); setPhase("student"); }}
+              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <i className="ri-arrow-left-line" aria-hidden="true" />
+              Back
+            </button>
+            <button
+              type="button"
+              disabled={creating || (role === "slit_admin" && (!business || !selectedAgent))}
+              onClick={() => void handlePick()}
+              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creating ? (
+                <>
+                  <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
+                  Creating&hellip;
+                </>
+              ) : (
+                <>
+                  Next
+                  <i className="ri-arrow-right-line" aria-hidden="true" />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       <AddStudentRecordDialog
