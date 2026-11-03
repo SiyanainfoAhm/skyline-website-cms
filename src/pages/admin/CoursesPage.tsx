@@ -11,7 +11,6 @@ import {
   EmptyState,
   Modal,
   PageHeader,
-  SectionTabs,
   Select,
   StatusBadge,
   TextInput,
@@ -21,7 +20,7 @@ import { HOME_COURSE_LIMIT } from "@/config/cmsLimits";
 import CarouselSettings from "@/pages/admin/components/CarouselSettings";
 import type { AdminCourse } from "@/pages/admin/lib/types";
 import { courseCategories } from "@/pages/admin/lib/seed";
-import { ActivateCourseModal, CatalogueBrowser, CourseCatalogueAutocomplete } from "@/pages/admin/components/CourseCatalogue";
+import { ActivateCourseModal, CourseCatalogueAutocomplete } from "@/pages/admin/components/CourseCatalogue";
 import type { CatalogueCourse } from "@/pages/admin/lib/courseCatalogue";
 
 type SortKey = "order" | "name" | "updated";
@@ -39,7 +38,6 @@ export default function CoursesPage() {
   const [featuredOnly, setFeaturedOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("order");
   const [pendingDelete, setPendingDelete] = useState<AdminCourse | null>(null);
-  const [view, setView] = useState<"skyline" | "catalogue">("skyline");
   const [selecting, setSelecting] = useState(false);
   const [activating, setActivating] = useState<CatalogueCourse | null>(null);
   const [openWhenLoaded, setOpenWhenLoaded] = useState<string | null>(null);
@@ -152,19 +150,6 @@ export default function CoursesPage() {
         }
       />
 
-      <SectionTabs
-        tabs={[
-          { id: "skyline", label: "Skyline Courses", icon: "ri-book-open-line" },
-          { id: "catalogue", label: "Australian Course Catalogue", icon: "ri-government-line" },
-        ]}
-        active={view}
-        onChange={(id) => setView(id as "skyline" | "catalogue")}
-      />
-
-      {view === "catalogue" ? (
-        <CatalogueBrowser beforeChange={persistPending} onActivated={afterActivation} onManage={manage} />
-      ) : (
-      <>
       <CarouselSettings />
 
       {/* Filters */}
@@ -325,8 +310,6 @@ export default function CoursesPage() {
         </strong>{" "}
         featured on the homepage.
       </p>
-      </>
-      )}
 
       <Modal open={selecting} title="Add Course" onClose={() => setSelecting(false)} width="max-w-2xl">
         <div className="space-y-3">
