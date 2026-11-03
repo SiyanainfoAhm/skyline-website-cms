@@ -511,6 +511,8 @@ export default function ApplicationWorkspace({
   const fieldMissing = useCallback((field: AppField): boolean => {
     const form = formRef.current;
     if (!form) return true;
+    // A hidden, never-found address does not count: it must come from a search pick or a licence first.
+    if (!addressShown && field.required && (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name)) return true;
     const documentCategory = field.type === "file" ? documentCategoryForField(field.name) : null;
     if (documentCategory) {
       return !attachments.some((document) => document.category === documentCategory);
@@ -521,7 +523,7 @@ export default function ApplicationWorkspace({
     );
     if (control && !control.checkValidity()) return true;
     return false;
-  }, [attachments]);
+  }, [attachments, addressShown]);
 
   /** A filled optional field whose format is wrong (USI, phone); it never stops a draft being saved, only final submission. */
   const fieldInvalid = useCallback((field: AppField): boolean => {
