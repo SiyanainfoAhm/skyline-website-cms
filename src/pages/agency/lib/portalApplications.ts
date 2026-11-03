@@ -420,6 +420,32 @@ export async function listApplicationDocuments(applicationId: string): Promise<D
   });
 }
 
+/**
+ * The most recently updated application, visible to the caller under RLS, whose student has this email or mobile.
+ * Mobiles are stored as E.164; older drafts may hold the national 0-prefixed form, so both are matched.
+ */
+export async function findApplicationByStudentContact(
+  email: string,
+  mobileE164: string,
+  excludeId?: string,
+): Promise<{ id: string; reference: string; studentName: string; matchedOn: "email" | "mobile" } | null> {
+  const cols = "id, reference, student_name, updated_at";
+  const nationalMobile = mobileE164.startsWith("+61") ? `0${mobileE164.slice(3)}` : "";
+  const mobiles = [mobileE164, nationalMobile].filter(Boolean);
+  const [byEmail, byMobile] = await Promise.all([
+    email ? supabase.from("enrollment_applications").select(cols).ilike("student_email", email.replace(/[\\%_]/g, "\\$&")).order("updated_at", { ascending: false }).limit(5) : null,
+    mobiles.length ? supabase.from("enrollment_applications").select(cols).in("data->values->>mobile", mobiles).order("updated_at", { ascending: false }).limit(5) : null,
+  ]);
+  if (byEmail?.error) throw new Error(byEmail.error.message);
+  if (byMobile?.error) throw new Error(byMobile.error.message);
+  const pick = (rows: Array<Record<string, unknown>> | null | undefined) => (rows ?? []).find((row) => String(row.id) !== excludeId);
+  const emailHit = pick(byEmail?.data as Array<Record<string, unknown>> | null);
+  const mobileHit = pick(byMobile?.data as Array<Record<string, unknown>> | null);
+  const hit = emailHit ?? mobileHit;
+  if (!hit) return null;
+  return { id: str(hit.id), reference: str(hit.reference), studentName: str(hit.student_name), matchedOn: emailHit ? "email" : "mobile" };
+}
+
 /* ------------------------------------------------------------ Mutation */
 
 export interface DraftPatch {

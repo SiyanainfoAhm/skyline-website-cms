@@ -271,71 +271,78 @@ export default function ApplicationDetailPage() {
         </div>
       </header>
 
-      {canManageAssignment || isSlit || !readOnly ? (
-        <div className="mt-5 flex flex-col gap-3 rounded-card border border-background-200 bg-background-50 p-4 md:flex-row md:flex-wrap md:items-end">
-          {canManageAssignment ? (
+      {/* Always has content: the status control for SLIT, the read-only status for agency users. */}
+      <div className="mt-5 flex flex-col gap-3 rounded-card border border-background-200 bg-background-50 p-4 md:flex-row md:flex-wrap md:items-end">
+        {canManageAssignment ? (
+          <label className="block md:w-60">
+            <span className="text-xs font-semibold text-foreground-700">Assigned agent</span>
+            <select
+              value={application.agentId ?? ""}
+              disabled={busy}
+              onChange={(event) => void handleReassign(event.target.value)}
+              className={CONTROL}
+            >
+              <option value="">Unassigned</option>
+              {agents.map((agent) => (
+                <option key={agent.profileId} value={agent.profileId}>
+                  {agent.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {isSlit ? (
+          <>
             <label className="block md:w-60">
-              <span className="text-xs font-semibold text-foreground-700">Assigned agent</span>
+              <span className="text-xs font-semibold text-foreground-700">Admissions status</span>
               <select
-                value={application.agentId ?? ""}
+                value=""
+                aria-label="Change status"
                 disabled={busy}
-                onChange={(event) => void handleReassign(event.target.value)}
+                onChange={(event) => void handleStatus(event.target.value)}
                 className={CONTROL}
               >
-                <option value="">Unassigned</option>
-                {agents.map((agent) => (
-                  <option key={agent.profileId} value={agent.profileId}>
-                    {agent.fullName}
+                <option value="">{nextStatusOptions(application.status).length ? "Change status to…" : "No further status changes"}</option>
+                {nextStatusOptions(application.status).map((value) => (
+                  <option key={value} value={value}>
+                    {STATUS_META[value as keyof typeof STATUS_META]?.label ?? value}
                   </option>
                 ))}
               </select>
             </label>
-          ) : null}
+            <label className="block md:min-w-[220px] md:flex-1">
+              <span className="text-xs font-semibold text-foreground-700">Note for the applicant (optional)</span>
+              <input
+                type="text"
+                value={statusNote}
+                onChange={(event) => setStatusNote(event.target.value)}
+                placeholder="Sent with the status change"
+                className={CONTROL}
+              />
+            </label>
+          </>
+        ) : null}
 
-          {isSlit ? (
-            <>
-              <label className="block md:w-60">
-                <span className="text-xs font-semibold text-foreground-700">Admissions status</span>
-                <select
-                  value=""
-                  aria-label="Change status"
-                  disabled={busy}
-                  onChange={(event) => void handleStatus(event.target.value)}
-                  className={CONTROL}
-                >
-                  <option value="">{nextStatusOptions(application.status).length ? "Change status to…" : "No further status changes"}</option>
-                  {nextStatusOptions(application.status).map((value) => (
-                    <option key={value} value={value}>
-                      {STATUS_META[value as keyof typeof STATUS_META]?.label ?? value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block md:min-w-[220px] md:flex-1">
-                <span className="text-xs font-semibold text-foreground-700">Note for the applicant (optional)</span>
-                <input
-                  type="text"
-                  value={statusNote}
-                  onChange={(event) => setStatusNote(event.target.value)}
-                  placeholder="Sent with the status change"
-                  className={CONTROL}
-                />
-              </label>
-            </>
-          ) : null}
+        {!isSlit ? (
+          <div className="md:w-60">
+            <span className="text-xs font-semibold text-foreground-700">Admissions status</span>
+            <p className="mt-1 text-sm text-foreground-800">{STATUS_META[application.status as keyof typeof STATUS_META]?.label ?? application.status}</p>
+            <p className="mt-0.5 text-xs text-foreground-500">Read-only. Status changes are made by SLIT administration.</p>
+          </div>
+        ) : null}
 
-          {!readOnly ? (
-            <button
-              type="button"
-              onClick={openWizard}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-primary-300 bg-background-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-50 md:ml-auto"
-            >
-              <i className="ri-magic-line" aria-hidden="true" />
-              Document upload wizard
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={openWizard}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-primary-300 bg-background-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-50 md:ml-auto"
+          >
+            <i className="ri-magic-line" aria-hidden="true" />
+            Document upload wizard
+          </button>
+        ) : null}
+      </div>
 
       <nav className="mt-6 flex flex-wrap gap-1.5 border-b border-background-200 pb-px">
         {(paths.area === "cms" ? [...TABS, { id: "notifications" as Tab, label: "Notifications", icon: "ri-mail-line" }] : TABS).map((item) => (

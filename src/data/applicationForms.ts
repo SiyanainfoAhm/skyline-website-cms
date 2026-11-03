@@ -97,7 +97,7 @@ export const enrolSections: AppSection[] = [
         required: true,
         options: ["Male", "Female", "Prefer not to say"],
       },
-      { name: "mobile", label: "Mobile", type: "tel", format: "phone", required: true, placeholder: "412 345 678" },
+      { name: "mobile", label: "Mobile", type: "tel", format: "phone", required: true, placeholder: "041 234 5678" },
       { name: "email", label: "Email", type: "email", required: true },
       { name: "confirm_email", label: "Confirm Email", type: "email", required: true },
       {
@@ -424,7 +424,7 @@ export const enrolSections: AppSection[] = [
       { name: "ec_name", label: "Full Name", type: "text", required: true, full: true },
       { name: "ec_relationship", label: "Relationship to You", type: "text" },
       { name: "ec_email", label: "Email", type: "email" },
-      { name: "ec_phone", label: "Contact Number", type: "tel", format: "phone", required: true, placeholder: "412 345 678" },
+      { name: "ec_phone", label: "Contact Number", type: "tel", format: "phone", required: true, placeholder: "041 234 5678" },
       {
         name: "ec_in_au",
         label: "Is your emergency contact in Australia?",

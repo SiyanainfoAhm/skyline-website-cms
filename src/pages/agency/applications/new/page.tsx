@@ -33,6 +33,7 @@ import {
   getApplication,
   listApplicationDocuments,
   listAssignableAgents,
+  findApplicationByStudentContact,
   saveApplicationDraft,
   type AgentOption,
 } from "@/pages/agency/lib/portalApplications";
@@ -226,9 +227,17 @@ export default function NewApplicationPage() {
     const next = { email, mobile };
     setContact(next);
     setError("");
-    if (!applicationId && role !== "agent") { setPhase("pick"); return; }
     setCreating(true);
     try {
+      // One application per student: a matching email or mobile opens the existing application instead.
+      const existing = await findApplicationByStudentContact(email, mobile, applicationId || undefined);
+      if (existing) {
+        if (authUser?.id) clearSession(authUser.id);
+        push(`An application for this student already exists (same ${existing.matchedOn})${existing.reference ? `: ${existing.reference}` : ""}. Opening it.`, "info");
+        navigate(paths.detail(existing.id), { replace: true });
+        return;
+      }
+      if (!applicationId && role !== "agent") { setPhase("pick"); return; }
       // A resumed draft keeps its business and agent; only the contact details are added to it.
       const id = applicationId || await startDraft(next, null);
       if (applicationId) await saveContact(applicationId, next);
@@ -495,7 +504,7 @@ export default function NewApplicationPage() {
               <label htmlFor="new-app-mobile" className="mb-1.5 block text-[13px] font-medium text-foreground-800">
                 Student mobile <span className="text-primary-600">*</span>
               </label>
-              <PhoneInput id="new-app-mobile" name="mobile" value={contact.mobile} required placeholder="412 345 678" />
+              <PhoneInput id="new-app-mobile" name="mobile" value={contact.mobile} required placeholder="041 234 5678" />
               {contactErrors.mobile ? <p className="mt-1 text-xs text-primary-800" role="alert">{contactErrors.mobile}</p> : null}
             </div>
           </div>

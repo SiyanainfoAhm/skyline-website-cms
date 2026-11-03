@@ -45,7 +45,7 @@ export const PHONE_COUNTRIES: PhoneCountry[] = [
 ];
 
 export const DEFAULT_DIAL = "61";
-export const AU_PHONE_MESSAGE = "Enter a valid Australian mobile, e.g. 0412 345 678.";
+export const AU_PHONE_MESSAGE = "Enter a valid Australian number, e.g. 041 234 5678.";
 export const OTHER_PHONE_MESSAGE = "Enter a valid phone number for the selected country.";
 
 const digitsOf = (text: string) => String(text ?? "").replace(/\D/g, "");
@@ -77,10 +77,13 @@ export function validatePhone(dial: string, national: string): string {
   return /^\d{6,12}$/.test(national) && dial.length + national.length <= 15 ? "" : OTHER_PHONE_MESSAGE;
 }
 
-/** National digits grouped for an input: 412 345 678 (mobile), 2 1234 5678 (landline), otherwise groups of three. */
+/** Australian digits always carry the trunk 0 and group 3-3-4 (041 234 5678), also while typing; otherwise groups of three. */
 export function formatNational(dial: string, national: string): string {
-  if (dial === DEFAULT_DIAL && /^4\d{8}$/.test(national)) return national.replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3");
-  if (dial === DEFAULT_DIAL && /^[2378]\d{8}$/.test(national)) return national.replace(/^(\d)(\d{4})(\d{4})$/, "$1 $2 $3");
+  if (dial === DEFAULT_DIAL) {
+    if (!national) return "";
+    const digits = `0${national}`;
+    return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)].filter(Boolean).join(" ");
+  }
   return national.replace(/(\d{3})(?=\d)/g, "$1 ");
 }
 
@@ -97,10 +100,12 @@ export function parseStoredPhone(raw: string): { dial: string; national: string 
   return /^04\d{8}$/.test(compact) ? { dial: DEFAULT_DIAL, national: compact.slice(1) } : null;
 }
 
-/** +61 412 345 678. Unrecognised stored values are returned untouched. */
+/** 041 234 5678 for Australia, +91 987 654 321 0 style otherwise. Unrecognised stored values are returned untouched. */
 export function formatPhone(raw: string): string {
   const parsed = parseStoredPhone(raw);
-  return parsed ? `+${parsed.dial} ${formatNational(parsed.dial, parsed.national)}` : String(raw ?? "");
+  if (!parsed) return String(raw ?? "");
+  // Australian numbers are shown nationally with their 0 (041 234 5678) so there is no +61 / 0 confusion.
+  return parsed.dial === DEFAULT_DIAL ? formatNational(parsed.dial, parsed.national) : `+${parsed.dial} ${formatNational(parsed.dial, parsed.national)}`;
 }
 
 /** Validation of a stored value; legacy values that are not understood are not flagged. */
