@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { expiryMessage, expiryTone, getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
 import { formatBytes, type PendingUpload, type WizardDoc, type WizardStep } from "@/pages/agency/lib/wizardConfig";
 import { getDocumentSignedUrl } from "@/pages/agency/lib/portalApplications";
@@ -53,19 +53,25 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
   const hasFile = docs.length > 0 || pending.length > 0;
 
   const [viewing, setViewing] = useState("");
+  const [preview, setPreview] = useState<{ doc: WizardDoc; url: string; isPdf: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setPreview(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   const handleView = async (doc: WizardDoc) => {
-    // Open the tab while the click still counts as a user action; popup blockers refuse one opened after the await.
-    const tab = window.open("", "_blank");
     setViewing(doc.id);
     setRemoveError("");
     try {
       if (logView) await logView(doc);
       const signedUrl = await getDocumentSignedUrl(doc.storagePath, 300);
-      if (tab) { tab.opener = null; tab.location.href = signedUrl; }
-      else window.location.assign(signedUrl);
+      const isPdf = /\.pdf$/i.test(doc.filename);
+      // View only: hide the browser PDF viewer's download and print toolbar.
+      setPreview({ doc, url: isPdf ? `${signedUrl}#toolbar=0&navpanes=0` : signedUrl, isPdf });
     } catch (error) {
-      tab?.close();
       setRemoveError(error instanceof Error ? error.message : "The document could not be opened.");
     } finally {
       setViewing("");
@@ -192,6 +198,37 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
           <i className="ri-alert-line mt-px" aria-hidden="true" />
           {removeError}
         </p>
+      ) : null}
+
+      {preview ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-foreground-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Viewing ${preview.doc.filename}`}
+          onClick={() => setPreview(null)}
+        >
+          <div className="flex h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-background-50 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-background-200 px-4 py-3">
+              <p className="truncate font-heading text-sm font-semibold text-foreground-950">{preview.doc.filename}</p>
+              <button
+                type="button"
+                onClick={() => setPreview(null)}
+                aria-label="Close preview"
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground-500 transition-colors hover:bg-background-100 hover:text-foreground-900"
+              >
+                <i className="ri-close-line text-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-background-100" onContextMenu={(event) => event.preventDefault()}>
+              {preview.isPdf ? (
+                <iframe src={preview.url} title={preview.doc.filename} className="h-full w-full border-0" />
+              ) : (
+                <img src={preview.url} alt={preview.doc.filename} draggable={false} className="max-h-full max-w-full select-none object-contain" />
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {deleteCandidate ? (
