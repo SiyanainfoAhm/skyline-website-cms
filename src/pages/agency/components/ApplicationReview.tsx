@@ -1,4 +1,5 @@
 import type { AppSection } from "@/data/applicationForms";
+import { sectionHeading } from "@/components/feature/applicationFieldHelpers";
 import type { DraftValues } from "@/lib/applicationDraft";
 import type { ApplicationDetail } from "@/pages/agency/lib/portalApplications";
 import { formatStoredValue } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -16,6 +17,8 @@ export interface ConsentState {
 interface Group {
   title: string;
   icon: string;
+  /** A field on the page that Edit opens. */
+  edit: string;
   rows: Array<[label: string, key: string]>;
 }
 
@@ -23,6 +26,7 @@ const GROUPS: Group[] = [
   {
     title: "Student details",
     icon: "ri-user-line",
+    edit: "first_name",
     rows: [
       ["Title", "title"],
       ["Given name", "first_name"],
@@ -37,6 +41,7 @@ const GROUPS: Group[] = [
   {
     title: "Passport & nationality",
     icon: "ri-id-card-line",
+    edit: "passport_number",
     rows: [
       ["Passport number", "passport_number"],
       ["Passport expiry", "passport_expiry"],
@@ -46,68 +51,113 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Address & contact",
+    title: "Address",
     icon: "ri-map-pin-2-line",
+    edit: "au_street",
     rows: [
       ["Address type", "address_type"],
       ["Street", "au_street"],
       ["Suburb", "au_suburb"],
       ["State", "au_state"],
       ["Postcode", "au_zip"],
-      ["Overseas address", "ov_street"],
-      ["Overseas suburb", "ov_suburb"],
-      ["Overseas country", "ov_country"],
     ],
   },
   {
-    title: "Visa, English & identifiers",
-    icon: "ri-translate-2",
+    title: "Australian visa",
+    icon: "ri-passport-line",
+    edit: "visa_subclass",
     rows: [
       ["Holds a valid visa", "holds_visa"],
+      ["Visa subclass", "visa_subclass"],
+      ["Visa grant number", "visa_grant_number"],
       ["Visa stay-until / expiry", "visa_stay_until"],
+    ],
+  },
+  {
+    title: "English test",
+    icon: "ri-translate-2",
+    edit: "english_type",
+    rows: [
       ["English assessment", "english_type"],
       ["English score", "english_score"],
       ["Date achieved", "english_date"],
-      ["USI", "usi_number"],
+    ],
+  },
+  {
+    title: "Student identifiers",
+    icon: "ri-fingerprint-line",
+    edit: "employment",
+    rows: [
       ["Employment", "employment"],
-      ["Prior education", "prior_ed"],
+      ["Language at home", "language_home"],
+      ["Which language", "language_other"],
+      ["Aboriginal / Torres Strait Islander", "atsi"],
+      ["Disability", "disability"],
     ],
   },
   {
     title: "Academic background",
     icon: "ri-file-text-line",
-    rows: [],
+    edit: "school_level",
+    rows: [
+      ["Highest school level", "school_level"],
+      ["Prior education", "prior_ed"],
+    ],
+  },
+  {
+    title: "USI",
+    icon: "ri-shield-user-line",
+    edit: "usi_number",
+    rows: [["USI", "usi_number"]],
   },
   {
     title: "Emergency contact",
     icon: "ri-phone-line",
+    edit: "ec_name",
     rows: [
       ["Full name", "ec_name"],
+      ["Phone number", "ec_phone"],
       ["Relationship", "ec_relationship"],
-      ["Email", "ec_email"],
-      ["Phone", "ec_phone"],
     ],
   },
   {
-    title: "Course, study reason & welfare",
+    title: "Course & intake",
     icon: "ri-graduation-cap-line",
+    edit: "courses_of_interest",
     rows: [
+      ["Course", "courses_of_interest"],
       ["Preferred intake", "preferred_intake"],
+    ],
+  },
+  {
+    title: "Study reason & course credit",
+    icon: "ri-book-open-line",
+    edit: "study_reason",
+    rows: [
       ["Reason for study", "study_reason"],
       ["Recognition of prior learning", "rpl"],
-      ["OSHC arrangement", "oshc_require"],
+    ],
+  },
+  {
+    title: "Health cover & source",
+    icon: "ri-heart-pulse-line",
+    edit: "oshc_require",
+    rows: [
+      ["SLIT to arrange OSHC", "oshc_require"],
+      ["OSHC start date", "oshc_start_date"],
       ["OSHC provider", "oshc_provider"],
       ["OSHC policy number", "oshc_policy_number"],
+      ["How they heard about SLIT", "hear_about"],
     ],
   },
   {
     title: "Declaration",
     icon: "ri-quill-pen-line",
+    edit: "declaration_name",
     rows: [
       ["Declarant name", "declaration_name"],
       ["Digital signature", "digital_signature"],
       ["Declaration date", "declaration_date"],
-      ["Checklist acknowledged", "checklist"],
     ],
   },
 ];
@@ -154,6 +204,23 @@ export default function ApplicationReview({
     return Array.isArray(v) ? v.join(", ") : formatStoredValue(key, String(v));
   };
 
+  /** Form page holding a field, or -1. */
+  const pageOf = (key: string) => sections.findIndex((section) => section.fields.some((field) => field.name === key));
+  /** Missing items read "SECTION: Field"; find the page by its heading. */
+  const pageOfMissing = (item: string) => sections.findIndex((section, index) => item.startsWith(`${sectionHeading(section.title, index)}: `));
+  const editButton = (page: number, label: string) =>
+    readOnly || page < 0 ? null : (
+      <button
+        type="button"
+        onClick={() => onEditSection(page)}
+        aria-label={`Edit ${label}`}
+        className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-background-300 bg-background-50 px-2 py-1 text-xs font-semibold text-primary-700 hover:bg-primary-50"
+      >
+        <i className="ri-pencil-line" aria-hidden="true" />
+        Edit
+      </button>
+    );
+
   const readyToSubmit = missing.length === 0 && consent.method !== "" && consent.confirmed && consent.authorised;
   const declarationName = val("declaration_name");
   const signature = val("digital_signature");
@@ -186,12 +253,24 @@ export default function ApplicationReview({
             {missing.length} required item{missing.length === 1 ? "" : "s"} still need attention
           </p>
           <ul className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {missing.map((item) => (
-              <li key={item} className="flex items-start gap-2 text-xs text-primary-900">
-                <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
-                {item}
-              </li>
-            ))}
+            {missing.map((item) => {
+              const page = pageOfMissing(item);
+              return (
+                <li key={item} className="text-xs text-primary-900">
+                  {readOnly || page < 0 ? (
+                    <span className="flex items-start gap-2">
+                      <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
+                      {item}
+                    </span>
+                  ) : (
+                    <button type="button" onClick={() => onEditSection(page)} className="flex cursor-pointer items-start gap-2 text-left underline-offset-2 hover:underline">
+                      <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
+                      {item}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : (
@@ -206,17 +285,22 @@ export default function ApplicationReview({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {GROUPS.map((group) => (
           <div key={group.title} className="rounded-card border border-background-200 bg-background-50 p-5">
-            <p className="flex items-center gap-2 font-heading text-sm font-semibold text-foreground-950">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-100 text-primary-700">
-                <i className={group.icon} aria-hidden="true" />
-              </span>
-              {group.title}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 font-heading text-sm font-semibold text-foreground-950">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-100 text-primary-700">
+                  <i className={group.icon} aria-hidden="true" />
+                </span>
+                {group.title}
+              </p>
+              {editButton(pageOf(group.edit), group.title)}
+            </div>
             <dl className="mt-3 space-y-2">
-              {(group.title === "Academic background"
-                ? submittedQualifications(qualifications, values).map((item, index): [string, string, string] => [`Qualification ${index + 1}`, `academic-${index}`, [qualificationTitle(item), qualificationDetail(item)].filter(Boolean).join(" · ")])
-                : group.rows.map(([label, key]): [string, string, string] => [label, key, val(key)])
-              ).map(([label, key, value]) => {
+              {[
+                ...(group.title === "Academic background"
+                  ? submittedQualifications(qualifications, values).map((item, index): [string, string, string] => [`Qualification ${index + 1}`, `academic-${index}`, [qualificationTitle(item), qualificationDetail(item)].filter(Boolean).join(" · ")])
+                  : []),
+                ...group.rows.map(([label, key]): [string, string, string] => [label, key, key === "courses_of_interest" ? courses.join("; ") : val(key)]),
+              ].map(([label, key, value]) => {
                 if (!value) return null;
                 return (
                   <div key={key} className="flex items-start justify-between gap-3 text-xs">
@@ -234,15 +318,9 @@ export default function ApplicationReview({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-100 text-accent-900">
               <i className="ri-graduation-cap-line" aria-hidden="true" />
             </span>
-            Courses & agency
+            Agency
           </p>
           <dl className="mt-3 space-y-2 text-xs">
-            <div className="flex items-start justify-between gap-3">
-              <dt className="text-foreground-500">Selected courses</dt>
-              <dd className="max-w-[60%] text-right font-medium text-foreground-900">
-                {courses.length === 0 ? "\u2014" : courses.join("; ")}
-              </dd>
-            </div>
             <div className="flex items-start justify-between gap-3">
               <dt className="text-foreground-500">Agency</dt>
               <dd className="text-right font-medium text-foreground-900">{agencyName || "\u2014"}</dd>

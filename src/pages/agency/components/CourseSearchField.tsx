@@ -6,13 +6,15 @@ interface Props {
   /** Every active course, as "CODE - Title" labels. */
   options: string[];
   disabled?: boolean;
+  /** Only one course may be chosen: picking another replaces it. */
+  single?: boolean;
 }
 
 /**
  * Searchable course picker. The real inputs stay hidden checkboxes (one per course), so saving, restoring a draft and
  * the required-field check keep working unchanged; this only replaces the long tick list with a search box and chips.
  */
-export default function CourseSearchField({ name, options, disabled }: Props) {
+export default function CourseSearchField({ name, options, disabled, single }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -52,6 +54,7 @@ export default function CourseSearchField({ name, options, disabled }: Props) {
   }, [options, query, selected]);
 
   const choose = (option: string) => {
+    if (single) for (const box of boxes()) if (box.checked && box.value !== option) setChecked(box.value, false);
     setChecked(option, true);
     setQuery("");
     setActive(0);
@@ -87,7 +90,7 @@ export default function CourseSearchField({ name, options, disabled }: Props) {
             // No name: the search text itself is never saved.
             autoComplete="off"
             value={query}
-            placeholder={options.length ? "Search courses by code or name, e.g. BSB50120 or Diploma of Business" : "No active courses are available"}
+            placeholder={single && selected.length ? "Search to change the course" : options.length ? "Search courses by code or name, e.g. BSB50120 or Diploma of Business" : "No active courses are available"}
             disabled={!options.length}
             role="combobox"
             aria-expanded={open && matches.length > 0}

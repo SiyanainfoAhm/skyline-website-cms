@@ -113,6 +113,34 @@ function trimEmergencyContact(section: AppSection): AppSection {
   return { ...section, fields: fields.map((field) => (field.name === "ec_phone" ? { ...field, label: "Phone Number" } : field)) };
 }
 
+/** Intakes start every month: the next twelve, from next month, as "Month YYYY". */
+export function nextIntakes(from: Date = new Date(), count = 12): string[] {
+  const out: string[] = [];
+  for (let i = 1; i <= count; i += 1) {
+    const month = new Date(from.getFullYear(), from.getMonth() + i, 1);
+    out.push(month.toLocaleString("en-AU", { month: "long", year: "numeric" }));
+  }
+  return out;
+}
+
+/**
+ * Later pages: the health-insurance upload moves below the questions, and the Application checklist page is dropped. Its
+ * required answer is kept (always ticked, out of sight) with the Student declaration, so submission rules are unchanged.
+ */
+function reshapeLaterSections(list: AppSection[]): AppSection[] {
+  const checklistSection = list.find((section) => section.fields.some((field) => field.name === "checklist"));
+  const checklist = checklistSection?.fields.find((field) => field.name === "checklist");
+  return list
+    .filter((section) => section !== checklistSection)
+    .map((section) => {
+      if (section.fields.some((field) => field.name === "oshc_docs")) {
+        return { ...section, fields: [...section.fields.filter((field) => field.name !== "oshc_docs"), ...section.fields.filter((field) => field.name === "oshc_docs")] };
+      }
+      if (checklist && section.fields.some((field) => field.name === "declaration")) return { ...section, fields: [...section.fields, checklist] };
+      return section;
+    });
+}
+
 /** Moves the education questions next to the academic documents they can be read from, and adds the language box. */
 function regroupStudentSections(list: AppSection[]): AppSection[] {
   const identifier = list.find((section) => section.fields.some((field) => field.name === "employment"));
@@ -131,18 +159,17 @@ function regroupStudentSections(list: AppSection[]): AppSection[] {
   });
 }
 
-export const portalSections: AppSection[] = regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map(trimEmergencyContact).map((section) => ({
+export const portalSections: AppSection[] = reshapeLaterSections(regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map(trimEmergencyContact)).map((section) => ({
   ...section,
-  fields: section.fields.map((field) =>
-    field.name === COURSE_FIELD
-      ? {
-          ...field,
-          options: portalCourseOptions,
-          description:
-            "Search and pick one or more courses. Only active courses open to international students are listed.",
-        }
-      : field,
-  ),
+  fields: section.fields.map((field) => {
+    if (field.name === COURSE_FIELD) {
+      return { ...field, options: portalCourseOptions, description: "Search and pick one course. Only active courses open to international students are listed." };
+    }
+    if (field.name === "preferred_intake") {
+      return { ...field, type: "select" as const, options: nextIntakes(), placeholder: "Select intake", description: "Intakes start every month." };
+    }
+    return field;
+  }),
 }));
 
 /** Human label for the whole application, used in review + confirmation screens. */

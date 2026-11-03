@@ -58,6 +58,14 @@ const IDENTIFIER_DEFAULTS: Record<string, string> = {
   employment: "Unemployed - Seeking Part-Time Work - 07",
   language_home: "Yes, language other than English",
 };
+// Later-page answers that start with a default when empty (plain, editable).
+const FORM_DEFAULTS: Record<string, string | string[]> = {
+  study_reason: "To get a job - 01",
+  rpl: "No",
+  oshc_require: "Yes",
+  oshc_self_confirm: ["I understand I must arrange and maintain my own Overseas Student Health Cover for the full duration of my student visa and provide proof when requested."],
+  hear_about: "Agent",
+};
 const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability", "usi_consent"];
 const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "year_completed", "prior_ed"] as const;
 
@@ -168,8 +176,10 @@ export default function ApplicationWorkspace({
     Object.assign(out, FIXED_VALUES);
     if (!Array.isArray(out.usi_consent) || !out.usi_consent.length) out.usi_consent = [USI_CONSENT_TEXT];
     for (const [name, value] of Object.entries(IDENTIFIER_DEFAULTS)) if (!String(out[name] ?? "").trim()) out[name] = value;
+    for (const [name, value] of Object.entries(FORM_DEFAULTS)) if (!String(out[name] ?? "").trim()) out[name] = value;
+    out.checklist = sections.flatMap((section) => section.fields).find((field) => field.name === "checklist")?.options ?? [];
     return out;
-  }, [seed, storedValues]);
+  }, [seed, storedValues, sections]);
   // Student identifier answers already filled (or defaulted) when the form opens: green, with Edit.
   const [prefilledFields] = useState<Set<string>>(() => new Set(PREFILL_LOCK_FIELDS.filter((name) => String(mergedInitial[name] ?? "").trim())));
 
@@ -1055,6 +1065,21 @@ export default function ApplicationWorkspace({
     // The visa question is answered by the choice card on the Visa page; the old file field is replaced by its upload.
     if (field.name === "holds_visa") return <input key={field.name} type="hidden" name={field.name} defaultValue={String(mergedInitial.holds_visa ?? "")} />;
     if (field.name === "visa_copy" || field.name === "english_upload") return null;
+    // The Application checklist page is gone; its required answer is always ticked and kept out of sight.
+    if (field.name === "checklist") {
+      return (
+        <span key={field.name} hidden>
+          {(field.options ?? []).map((option) => (
+            <input key={option} type="checkbox" name={`${field.name}[]`} value={option} defaultChecked tabIndex={-1} aria-hidden="true" />
+          ))}
+        </span>
+      );
+    }
+    // An intake saved before the dropdown (e.g. "03/2027") stays selectable.
+    if (field.name === "preferred_intake") {
+      const saved = String(mergedInitial.preferred_intake ?? "").trim();
+      if (saved && !(field.options ?? []).includes(saved)) field = { ...field, options: [saved, ...(field.options ?? [])] };
+    }
     // The agency and agent are chosen when the application is started; their values are kept, the questions are not shown.
     if (LOCKED_AGENT_FIELDS.has(field.name)) {
       const kept = mergedInitial[field.name];
@@ -1159,7 +1184,7 @@ export default function ApplicationWorkspace({
         ) : (
           <div className={documentLocked ? (field.type === "radio" || field.type === "checkbox" ? DOCUMENT_FILLED_GROUP : DOCUMENT_FILLED_INPUT) : undefined}>
             {field.name === COURSE_FIELD ? (
-              <CourseSearchField name={field.name} options={field.options ?? []} disabled={locked} />
+              <CourseSearchField name={field.name} options={field.options ?? []} disabled={locked} single />
             ) : (
               <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
             )}
