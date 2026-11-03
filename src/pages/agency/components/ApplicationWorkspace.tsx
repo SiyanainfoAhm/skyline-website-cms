@@ -853,7 +853,8 @@ export default function ApplicationWorkspace({
       const usi = formRef.current?.querySelector<HTMLInputElement>('[name="usi_number"]')?.value ?? "";
       const problem = usi.trim() ? validateUsi(usi) : "Enter the student's USI to continue.";
       if (problem) {
-        setUsiError(problem);
+        // A wrong USI already shows the field's own format message; this one only covers an empty field.
+        setUsiError(usi.trim() ? "" : problem);
         formRef.current?.querySelector<HTMLInputElement>('[name="usi_number"]')?.focus();
         return;
       }
