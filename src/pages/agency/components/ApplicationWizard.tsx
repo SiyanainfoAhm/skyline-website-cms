@@ -22,6 +22,7 @@ import { formatExpiryDate, getDocumentExpiryStatus } from "@/pages/agency/lib/do
 import WizardDocumentStep from "@/pages/agency/components/WizardDocumentStep";
 import { PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
+import { logAdminAccess } from "@/pages/agency/lib/applicationPdf";
 
 import { portalScopeCacheKey } from "@/lib/portalScope";
 
@@ -67,7 +68,7 @@ const isExpiredPassport = (doc: WizardDoc) =>
   getDocumentExpiryStatus("passport", doc.extracted).status === "expired";
 
 export default function ApplicationWizard({ applicationId, agencyName, onFinish, onCancel }: Props) {
-  const { profile } = usePortalAuth();
+  const { profile, role } = usePortalAuth();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -336,6 +337,11 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
         onRetryDoc={(doc) => void handleRetryDoc(doc)}
         onDismissDoc={(doc) => setDismissed((prev) => new Set(prev).add(doc.id))}
         onRemoveDoc={handleRemoveDoc}
+        logView={
+          role === "slit_admin"
+            ? (doc) => logAdminAccess(applicationId, "document_viewed", { documentId: doc.id, filename: doc.filename, category: doc.category })
+            : undefined
+        }
       />
     );
   };

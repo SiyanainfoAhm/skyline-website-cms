@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { expiryMessage, expiryTone, getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
 import { formatBytes, type PendingUpload, type WizardDoc, type WizardStep } from "@/pages/agency/lib/wizardConfig";
+import { getDocumentSignedUrl } from "@/pages/agency/lib/portalApplications";
 
 interface Props {
   step: WizardStep;
@@ -15,6 +16,8 @@ interface Props {
   onRetryDoc: (doc: WizardDoc) => void;
   onDismissDoc: (doc: WizardDoc) => void;
   onRemoveDoc: (doc: WizardDoc) => Promise<void>;
+  /** Records the view first where access is audited (SLIT staff); a failure blocks opening the file. */
+  logView?: (doc: WizardDoc) => Promise<void>;
 }
 
 const CHIP = "rounded-md border border-background-200 bg-background-50 px-3 py-2 text-xs text-foreground-700";
@@ -41,13 +44,33 @@ function ErrorActions({ message, onRetry, onManual }: { message: string; onRetry
   );
 }
 
-export default function WizardDocumentStep({ step, docs, pending, dismissed, onPickFiles, onRetryUpload, onDropUpload, onRetryDoc, onDismissDoc, onRemoveDoc }: Props) {
+export default function WizardDocumentStep({ step, docs, pending, dismissed, onPickFiles, onRetryUpload, onDropUpload, onRetryDoc, onDismissDoc, onRemoveDoc, logView }: Props) {
   const [deleteCandidate, setDeleteCandidate] = useState<WizardDoc | null>(null);
   const [removing, setRemoving] = useState("");
   const [removeError, setRemoveError] = useState("");
 
   const uploading = pending.some((item) => !item.error);
   const hasFile = docs.length > 0 || pending.length > 0;
+
+  const [viewing, setViewing] = useState("");
+
+  const handleView = async (doc: WizardDoc) => {
+    // Open the tab while the click still counts as a user action; popup blockers refuse one opened after the await.
+    const tab = window.open("", "_blank");
+    setViewing(doc.id);
+    setRemoveError("");
+    try {
+      if (logView) await logView(doc);
+      const signedUrl = await getDocumentSignedUrl(doc.storagePath, 300);
+      if (tab) { tab.opener = null; tab.location.href = signedUrl; }
+      else window.location.assign(signedUrl);
+    } catch (error) {
+      tab?.close();
+      setRemoveError(error instanceof Error ? error.message : "The document could not be opened.");
+    } finally {
+      setViewing("");
+    }
+  };
 
   const handleRemove = async (doc: WizardDoc) => {
     setRemoving(doc.id);
@@ -134,6 +157,17 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
                               : "Add details in the form"}
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => void handleView(doc)}
+                      disabled={viewing === doc.id || !doc.storagePath}
+                      aria-label={`View ${doc.filename}`}
+                      title="View"
+                      className="flex h-7 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 font-semibold text-primary-700 transition-colors hover:bg-primary-50 disabled:opacity-50"
+                    >
+                      <i className={viewing === doc.id ? "ri-loader-4-line animate-spin" : "ri-eye-line"} aria-hidden="true" />
+                      View
+                    </button>
                     <button
                       type="button"
                       onClick={() => setDeleteCandidate(doc)}
