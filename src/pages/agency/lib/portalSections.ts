@@ -104,6 +104,15 @@ const LANGUAGE_OTHER_FIELD: AppField = {
   showIf: { field: "language_home", equals: ["Yes, language other than English"] },
 };
 
+/** The portal's emergency contact is just a name, a phone number and the relationship, in that order. */
+const EMERGENCY_CONTACT_FIELDS = ["ec_name", "ec_phone", "ec_relationship"];
+
+function trimEmergencyContact(section: AppSection): AppSection {
+  if (!section.fields.some((field) => field.name === "ec_name")) return section;
+  const fields = EMERGENCY_CONTACT_FIELDS.map((name) => section.fields.find((field) => field.name === name)).filter((field): field is AppField => Boolean(field));
+  return { ...section, fields: fields.map((field) => (field.name === "ec_phone" ? { ...field, label: "Phone Number" } : field)) };
+}
+
 /** Moves the education questions next to the academic documents they can be read from, and adds the language box. */
 function regroupStudentSections(list: AppSection[]): AppSection[] {
   const identifier = list.find((section) => section.fields.some((field) => field.name === "employment"));
@@ -122,7 +131,7 @@ function regroupStudentSections(list: AppSection[]): AppSection[] {
   });
 }
 
-export const portalSections: AppSection[] = regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map((section) => ({
+export const portalSections: AppSection[] = regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map(trimEmergencyContact).map((section) => ({
   ...section,
   fields: section.fields.map((field) =>
     field.name === COURSE_FIELD
