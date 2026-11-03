@@ -26,6 +26,9 @@ interface ApplicationsTableProps {
   fixedAgencyId?: string;
   /** Status filter selected when the table first renders (for links such as "2 Draft" on the Agencies list). */
   initialStatus?: string;
+  /** Agency and assigned agent selected when the table first renders (for links from the Agents list). */
+  initialAgencyId?: string;
+  initialAgentId?: string;
   /** SLIT Admin: filter by agency. */
   agencies?: Option[];
   /** Agency Admin / SLIT Admin: filter by assigned agent. */
@@ -75,6 +78,8 @@ export default function ApplicationsTable({
   showFilters = true,
   fixedAgencyId = "",
   initialStatus = "",
+  initialAgencyId = "",
+  initialAgentId = "",
   agencies,
   agents,
   pageSize = 10,
@@ -87,9 +92,9 @@ export default function ApplicationsTable({
   const paths = useApplicationPaths();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(initialStatus);
-  const [chosenAgencyId, setAgencyId] = useState("");
+  const [chosenAgencyId, setAgencyId] = useState(initialAgencyId);
   const agencyId = fixedAgencyId || chosenAgencyId;
-  const [agentId, setAgentId] = useState("");
+  const [agentId, setAgentId] = useState(initialAgentId);
   const [courseCode, setCourseCode] = useState("");
   const [intake, setIntake] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");

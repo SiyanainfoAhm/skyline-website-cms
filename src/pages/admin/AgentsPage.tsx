@@ -1,18 +1,38 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/components/ui";
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import ActivateAgentDialog from "@/pages/admin/components/ActivateAgentDialog";
 import { toActivate, type AgentToActivate } from "@/pages/admin/lib/agentActivation";
-import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deactivateAgent, listAgentDirectory, type AgentCounts, type DirectoryAgent } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, listAgentDirectory, type AgentCounts, type AgentStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
 
-const PAGE_SIZE = 25;
-const KEYS = ["q", "status"] as const;
+const PAGE_SIZE = 100;
+const KEYS = ["q", "status", "sort", "dir"] as const;
+type SortKey = "business" | "agent" | "students" | "applications" | "status";
+const SORT_KEYS: SortKey[] = ["business", "agent", "students", "applications", "status"];
+const STATUS_RANK: Record<AgentStatus, number> = { Active: 0, Invited: 1, Inactive: 2 };
+const applicationTotal = (r: DirectoryAgent) => Object.values(r.statusCounts).reduce((sum, n) => sum + Number(n || 0), 0);
+const text = (value: string) => value.trim().toLowerCase();
+
+function compareAgents(a: DirectoryAgent, b: DirectoryAgent, key: SortKey): number {
+  switch (key) {
+    case "business": return text(a.businessName || "\uffff").localeCompare(text(b.businessName || "\uffff")) || text(a.name).localeCompare(text(b.name));
+    case "agent": return text(a.name).localeCompare(text(b.name));
+    case "students": return a.students - b.students || text(a.name).localeCompare(text(b.name));
+    case "applications": return applicationTotal(a) - applicationTotal(b) || text(a.name).localeCompare(text(b.name));
+    case "status": return STATUS_RANK[a.status] - STATUS_RANK[b.status] || text(a.name).localeCompare(text(b.name));
+  }
+}
+
+const STATUS_SELECT: Record<AgentStatus, string> = {
+  Active: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  Invited: "border-amber-200 bg-amber-50 text-amber-900",
+  Inactive: "border-background-300 bg-background-100 text-foreground-600",
+};
 
 /** Agencies > Agents: every agent on the OMARA register plus agents added by hand. Inactive until a SLIT administrator activates them. */
 export default function AgentsPage() {
@@ -29,6 +49,36 @@ export default function AgentsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirm, setConfirm] = useState<DirectoryAgent | null>(null);
   const [busyKey, setBusyKey] = useState("");
+  const sortKey = SORT_KEYS.includes(values.sort as SortKey) ? values.sort as SortKey : null;
+  const sortDir = values.dir === "desc" ? "desc" : "asc";
+  // Sorts the loaded page (up to 100 agents); without a sort the server order applies (Active, Invited, Inactive, then name).
+  const sorted = useMemo(() => {
+    if (!sortKey) return rows;
+    const out = [...rows].sort((a, b) => compareAgents(a, b, sortKey));
+    return sortDir === "desc" ? out.reverse() : out;
+  }, [rows, sortKey, sortDir]);
+  const toggleSort = (key: SortKey) => update({ sort: key, dir: sortKey === key && sortDir === "asc" ? "desc" : "asc", page: page > 1 ? String(page) : "" });
+  const sortHeader = (key: SortKey, label: string, className: string) => (
+    <th className={className} aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 hover:text-foreground-900">
+        {label}
+        <i aria-hidden="true" className={sortKey === key ? (sortDir === "asc" ? "ri-arrow-up-s-line" : "ri-arrow-down-s-line") : "ri-arrow-up-down-line text-foreground-400"} />
+      </button>
+    </th>
+  );
+  // The status menu: activating opens the Activate dialog (business, email, invitation); deactivating asks first.
+  const changeStatus = (row: DirectoryAgent, next: string) => {
+    if (next === row.status) return;
+    if (next === "Active") openActivate(toActivate(row));
+    else if (next === "Inactive") setConfirm(row);
+  };
+  const applicationsHref = (row: DirectoryAgent, status?: string) => {
+    const query = new URLSearchParams();
+    if (row.businessId) query.set("business", row.businessId);
+    if (row.profileId) query.set("agent", row.profileId);
+    if (status) query.set("status", status);
+    return `/admin/applications?${query.toString()}`;
+  };
 
   useEffect(() => {
     let active = true;
@@ -81,17 +131,20 @@ export default function AgentsPage() {
             <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr>
-                  <th className="w-[24%]">Agent</th>
-                  <th className="w-[22%]">Business</th>
-                  <th className="w-[8%]">Students</th>
-                  <th className="w-[19%]">Applications</th>
-                  <th className="w-[11%]">Status</th>
-                  <th className="w-[16%]"><span className="sr-only">Actions</span></th>
+                  {sortHeader("business", "Business", "w-[24%]")}
+                  {sortHeader("agent", "Agent", "w-[28%]")}
+                  {sortHeader("students", "Students", "w-[9%]")}
+                  {sortHeader("applications", "Applications", "w-[23%]")}
+                  {sortHeader("status", "Status", "w-[16%]")}
                 </tr>
               </thead>
               <tbody>
-                {loading && !counts ? <tr><td colSpan={6} className="py-10 text-center text-foreground-500">Loading agents…</td></tr> : rows.map((r) => (
+                {loading && !counts ? <tr><td colSpan={5} className="py-10 text-center text-foreground-500">Loading agents…</td></tr> : sorted.map((r) => (
                   <tr key={r.key}>
+                    <td>
+                      {r.businessId ? <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link> : <span className="text-xs text-foreground-500">No business</span>}
+                      {r.businessId && r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
+                    </td>
                     <td>
                       <Link to={`/admin/agents/${r.key}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link>
                       <p className="mt-0.5 text-xs text-foreground-500">
@@ -99,19 +152,23 @@ export default function AgentsPage() {
                       </p>
                       {r.registered === false ? <p className="text-xs font-medium text-amber-700">No longer registered with OMARA</p> : null}
                     </td>
-                    <td>
-                      {r.businessId ? <Link to={`/admin/businesses/${r.businessId}`} className="text-foreground-800 hover:text-primary-700">{r.businessName}</Link> : <span className="text-xs text-foreground-500">No business</span>}
-                      {r.businessId && r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
-                    </td>
                     <td>{r.profileId ? <b className="text-foreground-900">{r.students}</b> : <span className="text-xs text-foreground-500">None</span>}</td>
-                    <td>{Object.keys(r.statusCounts).length ? <ApplicationStatusPills counts={r.statusCounts} limit={3} /> : <span className="text-xs text-foreground-500">None</span>}</td>
-                    <td><AgentStatusBadge status={r.status} /></td>
                     <td>
-                      <div className="flex flex-wrap justify-end gap-1.5">
+                      {applicationTotal(r) > 0 && r.profileId ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <Link to={applicationsHref(r)} className="text-xs font-semibold text-primary-700 hover:underline">{applicationTotal(r)} application{applicationTotal(r) === 1 ? "" : "s"}</Link>
+                          <ApplicationStatusPills counts={r.statusCounts} limit={3} hrefFor={(status) => applicationsHref(r, status)} />
+                        </div>
+                      ) : <span className="text-xs text-foreground-500">None</span>}
+                    </td>
+                    <td>
+                      <label className="sr-only" htmlFor={`status-${r.key}`}>Status for {r.name}</label>
+                      <select id={`status-${r.key}`} value={r.status} disabled={busyKey === r.key} onChange={(e) => changeStatus(r, e.target.value)}
+                        className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${STATUS_SELECT[r.status]}`}>
                         {r.status === "Inactive"
-                          ? <Button size="sm" onClick={() => openActivate(toActivate(r))}>Activate</Button>
-                          : <Button size="sm" variant="ghost" disabled={busyKey === r.key} onClick={() => setConfirm(r)}>Deactivate</Button>}
-                      </div>
+                          ? <><option value="Inactive">Inactive</option><option value="Active">Activate…</option></>
+                          : <><option value={r.status}>{r.status}</option><option value="Inactive">Deactivate…</option></>}
+                      </select>
                     </td>
                   </tr>
                 ))}

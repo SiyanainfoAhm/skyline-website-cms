@@ -281,6 +281,13 @@ export async function agencyBusinessId(agencyId: string): Promise<string | null>
   return data?.business_id ? String(data.business_id) : null;
 }
 
+/** The agency workspace of a business, if it has one. */
+export async function agencyIdForBusiness(businessId: string): Promise<string | null> {
+  const { data, error } = await supabase.from("agencies").select("id").eq("business_id", businessId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ? String(data.id) : null;
+}
+
 /** Delete an agency (SLIT Admin only). Blocked if it still owns applications. */
 export async function deleteAgency(id: string): Promise<void> {
   const { error } = await supabase.from("agencies").delete().eq("id", id);
