@@ -48,6 +48,8 @@ const VISA_UPLOAD_FIELD: AppField = { name: "visa_upload", label: "Visa grant no
 const ENGLISH_CATEGORY = "English Test";
 // Student identifier answers that start with a default when empty (shown pre-filled, green, with Edit).
 const IDENTIFIER_DEFAULTS: Record<string, string> = {
+  atsi: "No",
+  disability: "No",
   employment: "Unemployed - Seeking Part-Time Work - 07",
   language_home: "Yes, language other than English",
 };
