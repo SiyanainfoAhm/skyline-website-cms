@@ -65,6 +65,9 @@ function schoolLevelOf(text: string): string {
   return "";
 }
 const SCHOOL_RANK = ["Year 10 or equivalent - 10", "Year 11 or equivalent - 11", "Year 12 or equivalent - 12"];
+const ACADEMIC_CATEGORY = "Academic";
+const ACADEMIC_RECORD_FIELDS = ["academic_institution", "academic_qualification", "academic_year"] as const;
+const ACADEMIC_FIELDS: readonly string[] = [...EDUCATION_FIELDS, ...ACADEMIC_RECORD_FIELDS];
 const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
 const ENGLISH_UPLOAD_FIELD: AppField = { name: "english_results", label: "English test result", type: "file" };
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
@@ -663,6 +666,51 @@ export default function ApplicationWorkspace({
     scheduleSave(true);
   }, [attachments, attachmentsLoaded, qualifications, readOnly, computeProgress, scheduleSave]);
 
+  /* -------------------------------------------------- academic choice */
+
+  const academicDocuments = useMemo(() => attachments.filter((document) => document.category === ACADEMIC_CATEGORY), [attachments]);
+  const academicReading = academicDocuments.some((document) => ["queued", "processing"].includes(extractionStatus(document.metadata)));
+  // Nothing on the Academic page shows until the agent chooses: documents (read into the answers) or manual entry.
+  const [academicMode, setAcademicMode] = useState<"" | "upload" | "manual">(() =>
+    ACADEMIC_FIELDS.some((name) => String(storedValues[name] ?? "").trim()) ? "manual" : "");
+  useEffect(() => {
+    if (attachmentsLoaded && academicDocuments.length && academicMode !== "upload") setAcademicMode("upload");
+    // Only when documents first appear; choosing "manual" later stays possible.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachmentsLoaded, academicDocuments.length]);
+  const academicShown = academicMode === "manual" || (academicMode === "upload" && academicDocuments.some((document) => !["queued", "processing"].includes(extractionStatus(document.metadata))));
+
+  useEffect(() => {
+    if (academicMode !== "upload" || !academicReading) return undefined;
+    const timer = window.setInterval(() => { void refreshAttachments().catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [academicMode, academicReading, refreshAttachments]);
+
+  // Once a document is read, its institution, qualification and year fill the fields that are still empty.
+  const checkedAcademicRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form || readOnly) return;
+    const updates: Record<string, string> = {};
+    for (const document of academicDocuments) {
+      const status = extractionStatus(document.metadata);
+      if (checkedAcademicRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
+      checkedAcademicRef.current.add(document.id);
+      const extracted = ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {};
+      for (const name of ACADEMIC_RECORD_FIELDS) {
+        const value = String(extracted[name] ?? "").trim();
+        const control = form.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
+        if (value && control && !control.value.trim() && !updates[name]) updates[name] = name === "academic_year" ? (value.match(/\d{4}/)?.[0] ?? value) : value;
+      }
+    }
+    const names = Object.keys(updates);
+    if (!names.length) return;
+    applyFormValues(form, updates);
+    setDerivedFields((prev) => new Set([...prev, ...names]));
+    window.requestAnimationFrame(() => computeProgress());
+    scheduleSave(true);
+  }, [academicDocuments, readOnly, computeProgress, scheduleSave]);
+
   /* ---------------------------------------------------------- English */
 
   const [englishNote, setEnglishNote] = useState("");
@@ -947,7 +995,9 @@ export default function ApplicationWorkspace({
       return <input key={field.name} type="hidden" name={field.name} defaultValue={Array.isArray(kept) ? kept.join(", ") : String(kept ?? "")} />;
     }
     const hidden = (!addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name)))
-      || (!visaShown && (VISA_DETAIL_FIELDS as readonly string[]).includes(field.name));
+      || (!visaShown && (VISA_DETAIL_FIELDS as readonly string[]).includes(field.name))
+      || (!academicShown && ACADEMIC_FIELDS.includes(field.name))
+      || (field.name === "academic_upload" && academicMode !== "upload");
     return renderFieldBody(field, locked, documentLocked, fixedAustralia, hidden);
   };
 
@@ -1131,6 +1181,49 @@ export default function ApplicationWorkspace({
             >
               Enter the address manually
             </button>
+          ) : null}
+        </div>
+      ) : null}
+      {section.fields.some((field) => field.name === "academic_upload") && !readOnly ? (
+        <div className="mb-4 rounded-md border border-background-200 bg-background-50 p-4">
+          <p className="text-sm font-semibold text-foreground-900">How would you like to fill in the academic details?</p>
+          <div role="radiogroup" aria-label="How to fill in the academic details" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {([
+              ["upload", "ri-upload-cloud-2-line", "Upload academic documents", "Certificates or transcripts; the answers are read from them"],
+              ["manual", "ri-edit-line", "Enter manually", "Answer the questions yourself"],
+            ] as const).map(([mode, icon, title, hint]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={academicMode === mode}
+                onClick={() => setAcademicMode(mode)}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                  academicMode === mode ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500" : "border-background-300 hover:bg-background-100"
+                }`}
+              >
+                <i className={`${icon} mt-0.5 text-lg ${academicMode === mode ? "text-primary-600" : "text-foreground-500"}`} aria-hidden="true" />
+                <span>
+                  <span className="block text-sm font-semibold text-foreground-900">{title}</span>
+                  <span className="block text-xs text-foreground-600">{hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {academicMode === "upload" && academicReading ? (
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-foreground-700" role="status">
+              <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
+              Reading the academic documents…
+            </p>
+          ) : null}
+          {academicMode === "upload" && !academicDocuments.length ? (
+            <p className="mt-3 text-xs text-foreground-600">Upload the documents below; the questions appear, filled in, once they are read.</p>
+          ) : null}
+          {showErrors && !academicShown ? (
+            <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
+              <i className="ri-error-warning-line" aria-hidden="true" />
+              Upload academic documents or choose Enter manually to answer the academic questions.
+            </p>
           ) : null}
         </div>
       ) : null}
