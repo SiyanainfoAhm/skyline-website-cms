@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import AddressSearch from "@/pages/agency/components/AddressSearch";
 import type { AppField, AppSection } from "@/data/applicationForms";
 import { ApplicationFieldControl } from "@/components/feature/applicationFieldKit";
 import { isConditionMet, isFieldFilled, sectionHeading, sectionIcon } from "@/components/feature/applicationFieldHelpers";
@@ -37,6 +38,10 @@ import { PortalError } from "@/pages/agency/components/PortalUI";
 
 const FORM_ID = "portal-application-form";
 const STUDENT_CONTACT_FIELDS = new Set(["mobile", "email", "confirm_email", "email_note"]);
+const AUSTRALIAN_ADDRESS: Record<string, string> = { address_type: "Australian Address", au_country: "Australia" };
+const AU_ADDRESS_FIELDS = ["au_street", "au_line2", "au_suburb", "au_state", "au_zip"] as const;
+const LICENCE_CATEGORY = "Driving Licence";
+const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
 
 // A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
 // "done, leave as is" next to the white fields that still need filling in. Applied to the control's own elements.
@@ -121,6 +126,8 @@ export default function ApplicationWorkspace({
   const mergedInitial = useMemo<DraftValues>(() => {
     const out: DraftValues = { ...storedValues };
     for (const [name, value] of Object.entries(seed)) if (!String(out[name] ?? "").trim()) out[name] = value;
+    // The student's address is always an Australian one (fixed and greyed out on the form).
+    Object.assign(out, AUSTRALIAN_ADDRESS);
     return out;
   }, [seed, storedValues]);
 
@@ -397,6 +404,78 @@ export default function ApplicationWorkspace({
     } finally { setDocumentBusy(""); }
   }, [onSaved, refreshAttachments]);
 
+  /* ------------------------------------------------ Australian address */
+
+  const [licenceNote, setLicenceNote] = useState("");
+  const appliedLicencesRef = useRef<Set<string>>(new Set());
+  const watchLicencesRef = useRef(false);
+
+  /**
+   * Writes Australian address values into the form. A search pick replaces the address; a licence only fills fields that
+   * are still empty. Written fields lose any document lock so they show as ordinary, editable values.
+   */
+  const fillAustralianAddress = useCallback((picked: Record<string, string>, replace: boolean): number => {
+    const form = formRef.current;
+    if (!form) return 0;
+    const updates: Record<string, string> = {};
+    for (const name of AU_ADDRESS_FIELDS) {
+      const value = String(picked[name] ?? "").trim();
+      const control = form.querySelector<HTMLInputElement>(`[name="${name}"]`);
+      if (!control || (!value && !replace) || (!replace && control.value.trim())) continue;
+      updates[name] = value;
+    }
+    const names = Object.keys(updates);
+    if (!names.length) return 0;
+    setUnlockedFields((prev) => new Set([...prev, ...names]));
+    setEditedFields((prev) => new Set([...prev, ...names]));
+    applyFormValues(form, { ...updates, ...AUSTRALIAN_ADDRESS });
+    window.requestAnimationFrame(() => computeProgress());
+    scheduleSave(true);
+    return names.length;
+  }, [computeProgress, scheduleSave]);
+
+  const uploadLicence = useCallback(async (files: FileList | null) => {
+    if (!files?.length) return;
+    setDocumentBusy("upload");
+    setLicenceNote("Uploading the licence…");
+    try {
+      for (const file of Array.from(files)) {
+        await uploadApplicationDocument({ applicationId: application.id, category: LICENCE_CATEGORY, file, metadata: { kind: "licence" } });
+      }
+      watchLicencesRef.current = true;
+      await refreshAttachments();
+      onSaved?.();
+      setLicenceNote("Reading the address from the licence…");
+    } catch (error) {
+      setLicenceNote(error instanceof Error ? error.message : "The licence could not be uploaded.");
+    } finally { setDocumentBusy(""); }
+  }, [application.id, onSaved, refreshAttachments]);
+
+  // While a licence uploaded here is being read, check every few seconds; once it is read, copy its Australian address in.
+  const licences = useMemo(() => attachments.filter((document) => document.category === LICENCE_CATEGORY), [attachments]);
+  const licenceReading = licences.some((document) => ["queued", "processing"].includes(extractionStatus(document.metadata)));
+  useEffect(() => {
+    if (!watchLicencesRef.current || !licenceReading) return undefined;
+    const timer = window.setInterval(() => { void refreshAttachments().catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [licenceReading, refreshAttachments]);
+  useEffect(() => {
+    if (!watchLicencesRef.current) return;
+    for (const document of licences) {
+      const status = extractionStatus(document.metadata);
+      if (appliedLicencesRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
+      appliedLicencesRef.current.add(document.id);
+      const extracted = ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {};
+      if (status === "failed") { setLicenceNote("The licence could not be read. Search for the address or enter it below."); continue; }
+      if (extracted.address_type === "Overseas Address" || (!extracted.au_street && extracted.ov_street)) {
+        setLicenceNote("The licence shows an overseas address. Only an Australian address can be used here; search for it or enter it below.");
+        continue;
+      }
+      const filled = fillAustralianAddress(extracted, false);
+      setLicenceNote(filled ? `Filled ${filled} address field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.` : `No new address details were found on ${document.filename}; fields already filled were left as they were.`);
+    }
+  }, [licences, fillAustralianAddress]);
+
   const deleteAttachment = useCallback(async (document: DocumentRow) => {
     setDocumentBusy(document.id);
     setDocumentMessage("");
@@ -590,8 +669,21 @@ export default function ApplicationWorkspace({
       const saved = String(mergedInitial[field.name] ?? (field.name === "confirm_email" ? mergedInitial.email ?? "" : ""));
       return <input key={field.name} type="hidden" name={field.name} defaultValue={saved} />;
     }
-    const documentLocked = !readOnly && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
-    const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked;
+    const fixedAustralia = field.name in AUSTRALIAN_ADDRESS;
+    const documentLocked = !readOnly && !fixedAustralia && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
+    const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
+    if (field.name === "au_street" && !readOnly) {
+      return (
+        <Fragment key={field.name}>
+          <AddressSearch onPick={(pick) => fillAustralianAddress({ au_street: pick.line, au_line2: pick.line2, au_suburb: pick.suburb, au_state: pick.state, au_zip: pick.postcode }, true)} />
+          {renderFieldBody(field, locked, documentLocked, fixedAustralia)}
+        </Fragment>
+      );
+    }
+    return renderFieldBody(field, locked, documentLocked, fixedAustralia);
+  };
+
+  const renderFieldBody = (field: AppField, locked: boolean, documentLocked: boolean, fixedAustralia: boolean) => {
     if (field.type === "static") {
       return (
         <div key={field.name} className="md:col-span-2">
@@ -626,6 +718,12 @@ export default function ApplicationWorkspace({
             </span>
           ) : null}
           {renderExpiryWarning(field.name)}
+          {fixedAustralia ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-background-200 px-2 py-0.5 text-[10px] font-semibold normal-case text-foreground-700">
+              <i className="ri-lock-line" aria-hidden="true" />
+              Australia only
+            </span>
+          ) : null}
           {documentLocked ? (
             <button
               type="button"
@@ -683,6 +781,25 @@ export default function ApplicationWorkspace({
         <p className="text-xs leading-relaxed text-foreground-500">{section.description}</p>
       ) : null}
       {section.scans?.length ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
+      {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
+        <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
+          <p className="text-sm font-semibold text-foreground-900">Fill the address from a driving licence (optional)</p>
+          <p className="mt-0.5 text-xs text-foreground-600">Upload the licence and the address is read from it into the empty fields below. You can also search for the address instead.</p>
+          <div className="mt-3">
+            <ApplicationAttachmentField
+              field={LICENCE_FIELD}
+              documents={attachments.filter((document) => document.category === LICENCE_CATEGORY)}
+              disabled={Boolean(documentBusy)}
+              busyDocumentId={documentBusy}
+              onUpload={uploadLicence}
+              onPreview={previewAttachment}
+              onExtract={extractAttachment}
+              onDelete={deleteAttachment}
+            />
+          </div>
+          {licenceNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{licenceNote}</p> : null}
+        </div>
+      ) : null}
       <div
         className={`grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-x-5 ${
           section.description || section.scans?.length ? "mt-4" : ""
