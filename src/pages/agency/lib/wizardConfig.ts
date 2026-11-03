@@ -98,6 +98,8 @@ export interface WizardDoc {
   error?: string;
   /** Values read from the document, for the expiry warning. */
   extracted?: Record<string, string>;
+  /** The reader classified the file as a different kind of document than this step asks for. */
+  mismatch?: boolean;
 }
 
 /** A file that has been picked but is not yet a stored document, or failed to upload. */

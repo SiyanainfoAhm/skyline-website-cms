@@ -54,8 +54,11 @@ function savedWizardStep(applicationId: string): number {
 
 function toWizardDoc(row: DocumentRow): WizardDoc {
   const { state, error } = wizardExtractionState(row.metadata);
-  const extracted = (row.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted;
-  return { id: row.id, category: row.category, filename: row.filename, fileSize: row.fileSize, storagePath: row.storagePath, extraction: state, error, extracted: formatExtractionCandidates(extracted) };
+  const extraction = row.metadata.extraction as { extracted?: Record<string, string>; source?: { categoryMismatch?: boolean } } | undefined;
+  return {
+    id: row.id, category: row.category, filename: row.filename, fileSize: row.fileSize, storagePath: row.storagePath, extraction: state, error,
+    extracted: formatExtractionCandidates(extraction?.extracted), mismatch: Boolean(extraction?.source?.categoryMismatch),
+  };
 }
 
 function wizardDocs(rows: DocumentRow[]): WizardDoc[] {
@@ -66,6 +69,27 @@ const isReading = (doc: WizardDoc) => doc.extraction === "queued" || doc.extract
 const isExpiredPassport = (doc: WizardDoc) =>
   doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && doc.extraction === "done" && !!doc.extracted &&
   getDocumentExpiryStatus("passport", doc.extracted).status === "expired";
+
+/**
+ * Visa, English test and academic files must be that kind of document. Once read, a file classified as something else,
+ * or with none of the step's key details, is the wrong document: it is removed and the agent asked for the proper one.
+ */
+const STEP_CHECKS: Record<string, { what: string; keys: readonly string[] }> = {
+  Visa: { what: "an Australian visa grant notice or VEVO record", keys: ["visa_subclass", "visa_grant_number"] },
+  "English Test": { what: "an English test result (IELTS, PTE, TOEFL or Cambridge)", keys: ["english_type", "english_score"] },
+  Academic: { what: "an academic transcript, certificate or degree", keys: [] },
+};
+const isWrongDocument = (doc: WizardDoc) => {
+  const check = STEP_CHECKS[doc.category];
+  if (!check) return false;
+  // An academic file with nothing to read (a marksheet page, say) is kept; only one read as another kind is wrong.
+  if (doc.extraction === "empty") return check.keys.length > 0 || Boolean(doc.mismatch);
+  if (doc.extraction === "failed") return Boolean(doc.mismatch);
+  if (doc.extraction !== "done") return false;
+  return Boolean(doc.mismatch) || (check.keys.length > 0 && !check.keys.some((key) => String(doc.extracted?.[key] ?? "").trim()));
+};
+// A file still being read after this long no longer locks the wizard; the step says so and Next waits for the result.
+const SLOW_READ_MS = 90_000;
 
 // Only an Australian licence is kept: its single purpose is the student's Australian address.
 const isOverseasLicence = (doc: WizardDoc) =>
@@ -86,6 +110,11 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   // Set when an uploaded passport was read as expired and removed; cleared by the next passport upload.
   const [expiredPassport, setExpiredPassport] = useState<{ filename: string; date: string; error?: string } | null>(null);
   const [rejectedLicence, setRejectedLicence] = useState<{ filename: string; error?: string } | null>(null);
+  // The wrong document last removed from each step (by category); cleared by the next upload on that step.
+  const [rejectedDocs, setRejectedDocs] = useState<Record<string, { filename: string; error?: string }>>({});
+  // When each file was first seen being read here, and the ones that have taken longer than SLOW_READ_MS.
+  const readingSinceRef = useRef(new Map<string, number>());
+  const [slowDocs, setSlowDocs] = useState<Set<string>>(new Set());
   const discardingRef = useRef(new Set<string>());
 
   const documentsRef = useRef<WizardDoc[]>([]);
@@ -211,6 +240,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     if (!list || list.length === 0) return;
     if (target.id === "passport") setExpiredPassport(null);
     if (target.id === "licence") setRejectedLicence(null);
+    setRejectedDocs((prev) => { if (!prev[target.category]) return prev; const next = { ...prev }; delete next[target.category]; return next; });
     const items = Array.from(list).map((file) => ({ key: crypto.randomUUID(), category: target.category, file }));
     setPending((prev) => [...prev, ...items]);
     items.forEach((item) => void startUpload(item));
@@ -247,6 +277,34 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
       );
     });
   }, [documents]);
+
+  // A wrong visa, English test or academic file is removed as soon as it is read, like an overseas licence.
+  useEffect(() => {
+    documents.filter((doc) => isWrongDocument(doc) && !discardingRef.current.has(doc.id)).forEach((doc) => {
+      discardingRef.current.add(doc.id);
+      setRejectedDocs((prev) => ({ ...prev, [doc.category]: { filename: doc.filename } }));
+      void deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).then(
+        () => setDocuments((prev) => prev.filter((item) => item.id !== doc.id)),
+        (error) => setRejectedDocs((prev) => ({ ...prev, [doc.category]: { filename: doc.filename, error: error instanceof Error ? error.message : "The file could not be removed." } })),
+      );
+    });
+  }, [documents]);
+
+  // Notice files that stay in reading too long, so the wizard does not spin without end.
+  const readingIds = documents.filter(isReading).map((doc) => doc.id).join(",");
+  useEffect(() => {
+    if (!readingIds) return undefined;
+    const ids = readingIds.split(",");
+    const now = Date.now();
+    for (const id of ids) if (!readingSinceRef.current.has(id)) readingSinceRef.current.set(id, now);
+    const check = () => {
+      const late = ids.filter((id) => Date.now() - (readingSinceRef.current.get(id) ?? Date.now()) >= SLOW_READ_MS);
+      if (late.length) setSlowDocs((prev) => (late.every((id) => prev.has(id)) ? prev : new Set([...prev, ...late])));
+    };
+    check();
+    const timer = window.setInterval(check, 5000);
+    return () => window.clearInterval(timer);
+  }, [readingIds]);
 
   // An overseas licence is removed as soon as it is read, like an expired passport.
   useEffect(() => {
@@ -289,7 +347,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     }
   }, [applicationId, onFinish]);
 
-  const busy = pending.some((item) => !item.error) || documents.some((doc) => isReading(doc) && !dismissed.has(doc.id));
+  const busy = pending.some((item) => !item.error) || documents.some((doc) => isReading(doc) && !dismissed.has(doc.id) && !slowDocs.has(doc.id));
   useEffect(() => {
     if (finishing && !busy) void complete();
   }, [finishing, busy, complete]);
@@ -301,7 +359,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const hasPassport = documents.some((doc) => doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && !isExpiredPassport(doc));
   const passportRequired = PASSPORT_STEP >= 0 && (passportExpired || !hasPassport);
   // Every required document must be uploaded before the agent can move past its step.
-  const stepHasDoc = (item: WizardStep) => documents.some((doc) => doc.category === item.category && !isExpiredPassport(doc) && !isOverseasLicence(doc));
+  const stepHasDoc = (item: WizardStep) => documents.some((doc) => doc.category === item.category && !isExpiredPassport(doc) && !isOverseasLicence(doc) && !isWrongDocument(doc));
   const firstMissingBefore = (target: number) => WIZARD_STEPS.findIndex((item, index) => index < target && item.required && !stepHasDoc(item));
   const goTo = (index: number) => {
     const target = Math.max(0, Math.min(index, LAST_STEP));
@@ -324,10 +382,15 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
   const stepBusy = (target: WizardStep) =>
     pending.some((item) => item.category === target.category && !item.error) ||
-    documents.some((doc) => doc.category === target.category && isReading(doc) && !dismissed.has(doc.id));
+    documents.some((doc) => doc.category === target.category && isReading(doc) && !dismissed.has(doc.id) && !slowDocs.has(doc.id));
   // While this step's file uploads or is read, the wizard is locked so nothing else can be clicked.
   const removingExpired = !expiredPassport?.error && stepDocs.some(isExpiredPassport);
-  const locked = ready && (stepBusy(current) || removingExpired);
+  const removingWrong = !rejectedDocs[current.category]?.error && stepDocs.some(isWrongDocument);
+  const locked = ready && (stepBusy(current) || removingExpired || removingWrong);
+  // A file read too slowly unlocks the wizard but still holds Next until its result is in (or it is deleted).
+  const slowHere = stepDocs.filter((doc) => isReading(doc) && slowDocs.has(doc.id));
+  const rejectedHere = rejectedDocs[current.category];
+  const stepCheck = STEP_CHECKS[current.category];
   const blockedByPassport = passportRequired && step === PASSPORT_STEP;
 
   const primaryClass =
@@ -494,7 +557,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
                   </button>
                 </>
               ) : (
-                <button type="button" onClick={() => goTo(step + 1)} disabled={!hasFile || locked || blockedByPassport} className={primaryClass}>
+                <button type="button" onClick={() => goTo(step + 1)} disabled={!hasFile || locked || blockedByPassport || slowHere.length > 0} className={primaryClass}>
                   Next
                   <i className="ri-arrow-right-line" aria-hidden="true" />
                 </button>
@@ -517,6 +580,26 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
             <p className="flex items-start gap-2 text-sm text-foreground-600">
               <i className="ri-information-line mt-0.5" aria-hidden="true" />
               {current.title} is required. Upload it to continue.
+            </p>
+          </div>
+        ) : null}
+
+        {rejectedHere && stepCheck ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
+              {rejectedHere.error
+                ? `${rejectedHere.filename} is not ${stepCheck.what} but could not be removed (${rejectedHere.error}). Delete it, then upload the proper document.`
+                : `${rejectedHere.filename} is not ${stepCheck.what}, so it was not kept. Please upload the proper document.`}
+            </p>
+          </div>
+        ) : null}
+
+        {slowHere.length > 0 && !locked ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p role="status" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <i className="ri-time-line mt-0.5" aria-hidden="true" />
+              {`${slowHere[0].filename} is taking longer than usual to read. If it is not ${stepCheck?.what ?? `your ${current.noun}`}, delete it and upload the proper document; otherwise wait, and Next unlocks once it is read.`}
             </p>
           </div>
         ) : null}
@@ -562,7 +645,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           <div className="absolute inset-0 z-10 flex cursor-wait items-center justify-center rounded-xl bg-background-50/70" role="status" aria-live="polite">
             <span className="flex items-center gap-2 rounded-md border border-background-200 bg-background-50 px-4 py-2.5 text-sm font-semibold text-foreground-800 shadow-sm">
               <i className="ri-loader-4-line animate-spin text-primary-600" aria-hidden="true" />
-              {stepPending.some((item) => !item.error) ? `Uploading your ${current.noun}…` : removingExpired ? "Passport expired, removing it…" : `Reading your ${current.noun}…`}
+              {stepPending.some((item) => !item.error) ? `Uploading your ${current.noun}…` : removingExpired ? "Passport expired, removing it…" : removingWrong ? `This is not ${stepCheck?.what ?? `your ${current.noun}`}, removing it…` : `Reading your ${current.noun}…`}
             </span>
           </div>
         ) : null}
