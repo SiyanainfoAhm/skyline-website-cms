@@ -570,8 +570,11 @@ export default function ApplicationWorkspace({
         void deleteApplicationDocument({ id: document.id, storagePath: document.storagePath })
           .catch(() => undefined)
           .then(() => refreshAttachments().catch(() => undefined));
-        setVisaRead(false);
-        setHoldsVisa("");
+        // A rejected replacement leaves an earlier, readable visa document and its details in place.
+        if (!visas.some((other) => other.id !== document.id)) {
+          setVisaRead(false);
+          setHoldsVisa("");
+        }
         setVisaNote(`${document.filename} was rejected: it could not be read as an Australian visa grant notice or VEVO record. Upload the correct document, or enter the visa details manually.`);
         continue;
       }
@@ -586,6 +589,9 @@ export default function ApplicationWorkspace({
     }
   }, [visas, refreshAttachments, setHoldsVisa]);
 
+  const deleteVisaRef = useRef<(document: DocumentRow) => Promise<void>>(async () => undefined);
+  const deleteVisa = useCallback((document: DocumentRow) => deleteVisaRef.current(document), []);
+
   const deleteAttachment = useCallback(async (document: DocumentRow) => {
     setDocumentBusy(document.id);
     setDocumentMessage("");
@@ -596,6 +602,17 @@ export default function ApplicationWorkspace({
       setDocumentMessage(`${document.filename} was deleted.`);
     } finally { setDocumentBusy(""); }
   }, [onSaved, refreshAttachments]);
+
+  deleteVisaRef.current = async (document: DocumentRow) => {
+    await deleteAttachment(document);
+    if (visas.some((other) => other.id !== document.id)) return;
+    const form = formRef.current;
+    if (form) applyFormValues(form, Object.fromEntries(VISA_DETAIL_FIELDS.map((name) => [name, ""])));
+    setVisaRead(false);
+    setVisaMode("");
+    setHoldsVisa("");
+    setVisaNote(`${document.filename} was deleted. Choose how to add the visa.`);
+  };
 
   const goTo = (index: number) => {
     void flushSave().catch(() => undefined);
@@ -967,7 +984,7 @@ export default function ApplicationWorkspace({
           ) : null}
         </div>
       ) : null}
-      {section.fields.some((field) => field.name === "visa_subclass") && !readOnly && !(visaFromDocument && visaRead) ? (
+      {section.fields.some((field) => field.name === "visa_subclass") && !readOnly && !(visaMode === "upload" && visaRead) ? (
         <div className="mb-4 rounded-md border border-background-200 bg-background-50 p-4">
           <p className="text-sm font-semibold text-foreground-900">How would you like to add the student&apos;s Australian visa?</p>
           <div role="radiogroup" aria-label="How to add the visa" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -1017,10 +1034,26 @@ export default function ApplicationWorkspace({
           ) : null}
         </div>
       ) : null}
-      {section.fields.some((field) => field.name === "visa_subclass") && visaFromDocument && visaRead ? (
-        <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-          The visa details below were read from the uploaded visa document. Use Edit to correct a field.
-        </p>
+      {section.fields.some((field) => field.name === "visa_subclass") && visaMode === "upload" && visaRead ? (
+        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-xs text-emerald-900">
+            The visa details below were read from the visa document. Use Edit to correct a field, upload a newer document to replace them,
+            or delete the document to choose again.
+          </p>
+          <div className="mt-3">
+            <ApplicationAttachmentField
+              field={VISA_UPLOAD_FIELD}
+              documents={visas}
+              disabled={readOnly || Boolean(documentBusy) || visaReading}
+              busyDocumentId={documentBusy}
+              onUpload={uploadVisa}
+              onPreview={previewAttachment}
+              onExtract={extractAttachment}
+              onDelete={deleteVisa}
+            />
+          </div>
+          {visaNote ? <p className="mt-2 text-xs text-emerald-900" role="status">{visaNote}</p> : null}
+        </div>
       ) : null}
       <div
         className={`grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-x-5 ${
