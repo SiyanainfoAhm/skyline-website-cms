@@ -98,6 +98,9 @@ export default function ApplicationWorkspace({
     return new Map(Object.entries(provenance).filter(([name, entry]) => entry?.kind === "ai_unverified" && String(storedValues[name] ?? "").trim() !== "").map(([name, entry]) => [name, entry.documentId ?? ""]));
   }, [application.data, storedValues]);
   const [editedFields, setEditedFields] = useState<Set<string>>(() => new Set());
+  // Values read from a document start greyed out and read-only, so they are clearly told apart from what still needs
+  // filling in; Edit opens one for changes. Empty fields are never locked.
+  const [unlockedFields, setUnlockedFields] = useState<Set<string>>(() => new Set());
   // Current dates behind the expiry warnings, kept live as the form is edited.
   const [expiryDates, setExpiryDates] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.values(EXPIRY_FIELDS).map((name) => [name, String(storedValues[name] ?? "")])),
@@ -570,7 +573,8 @@ export default function ApplicationWorkspace({
   };
 
   const renderField = (field: AppField) => {
-    const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name);
+    const documentLocked = !readOnly && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
+    const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked;
     if (field.type === "static") {
       return (
         <div key={field.name} className="md:col-span-2">
@@ -605,6 +609,21 @@ export default function ApplicationWorkspace({
             </span>
           ) : null}
           {renderExpiryWarning(field.name)}
+          {documentLocked ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                setUnlockedFields((prev) => new Set(prev).add(field.name));
+                window.setTimeout(() => document.getElementById(`${FORM_ID}-${field.name}`)?.focus(), 0);
+              }}
+              aria-label={`Edit ${field.label}`}
+              className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-primary-700 hover:bg-primary-50"
+            >
+              <i className="ri-edit-line" aria-hidden="true" />
+              Edit
+            </button>
+          ) : null}
           {locked && LOCKED_AGENT_FIELDS.has(field.name) ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-secondary-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-secondary-900">
               <i className="ri-lock-line" aria-hidden="true" />
