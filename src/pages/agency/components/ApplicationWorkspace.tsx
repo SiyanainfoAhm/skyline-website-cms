@@ -36,6 +36,7 @@ import ApplicationAttachmentField from "@/pages/agency/components/ApplicationAtt
 import { PortalError } from "@/pages/agency/components/PortalUI";
 
 const FORM_ID = "portal-application-form";
+const STUDENT_CONTACT_FIELDS = new Set(["mobile", "email", "confirm_email", "email_note"]);
 
 // A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
 // "done, leave as is" next to the white fields that still need filling in. Applied to the control's own elements.
@@ -108,6 +109,8 @@ export default function ApplicationWorkspace({
   // Values read from a document start greyed out and read-only, so they are clearly told apart from what still needs
   // filling in; Edit opens one for changes. Empty fields are never locked.
   const [unlockedFields, setUnlockedFields] = useState<Set<string>>(() => new Set());
+  // Applications started with the contact step already hold the student's unique email and mobile.
+  const [contactFixed] = useState(() => Boolean(String(storedValues.email ?? "").trim() && String(storedValues.mobile ?? "").trim()));
   // Current dates behind the expiry warnings, kept live as the form is edited.
   const [expiryDates, setExpiryDates] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.values(EXPIRY_FIELDS).map((name) => [name, String(storedValues[name] ?? "")])),
@@ -580,6 +583,13 @@ export default function ApplicationWorkspace({
   };
 
   const renderField = (field: AppField) => {
+    // The student's email and mobile are set once, uniquely, when the application is started; they are kept with the
+    // form (saved, counted as filled) but not shown or editable here.
+    if (contactFixed && STUDENT_CONTACT_FIELDS.has(field.name)) {
+      if (field.type === "static") return null;
+      const saved = String(mergedInitial[field.name] ?? (field.name === "confirm_email" ? mergedInitial.email ?? "" : ""));
+      return <input key={field.name} type="hidden" name={field.name} defaultValue={saved} />;
+    }
     const documentLocked = !readOnly && field.type !== "file" && documentFields.has(field.name) && !unlockedFields.has(field.name);
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked;
     if (field.type === "static") {
