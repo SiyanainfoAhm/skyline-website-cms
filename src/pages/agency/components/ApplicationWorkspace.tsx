@@ -110,7 +110,7 @@ export default function ApplicationWorkspace({
   );
 
   // Fields the document wizard filled in; the badge goes away once the agent edits one.
-  const documentFields = useMemo(() => {
+  const recordedDocumentFields = useMemo(() => {
     const provenance = ((application.data ?? {}) as { fieldProvenance?: Record<string, { kind?: string; documentId?: string }> }).fieldProvenance ?? {};
     return new Map(Object.entries(provenance).filter(([name, entry]) => entry?.kind === "ai_unverified" && String(storedValues[name] ?? "").trim() !== "").map(([name, entry]) => [name, entry.documentId ?? ""]));
   }, [application.data, storedValues]);
@@ -165,6 +165,14 @@ export default function ApplicationWorkspace({
   const [submittedRef, setSubmittedRef] = useState<string | null>(null);
   const [documentMessage, setDocumentMessage] = useState("");
   const [attachments, setAttachments] = useState<DocumentRow[]>([]);
+  const [attachmentsLoaded, setAttachmentsLoaded] = useState(false);
+  // A field only counts as "from document" while that document is still attached; once it is deleted the value
+  // stays but becomes an ordinary, editable field.
+  const documentFields = useMemo(() => {
+    if (!attachmentsLoaded) return recordedDocumentFields;
+    const attached = new Set(attachments.map((document) => document.id));
+    return new Map([...recordedDocumentFields].filter(([, documentId]) => !documentId || attached.has(documentId)));
+  }, [recordedDocumentFields, attachments, attachmentsLoaded]);
   const [documentBusy, setDocumentBusy] = useState("");
   const [qualifications, setQualifications] = useState(() => readQualifications(application.data));
 
@@ -190,6 +198,7 @@ export default function ApplicationWorkspace({
   const refreshAttachments = useCallback(async () => {
     const [rows, detail] = await Promise.all([listApplicationDocuments(application.id), getApplication(application.id, false)]);
     setAttachments(rows.filter((document) => document.isCurrent));
+    setAttachmentsLoaded(true);
     if (detail) setQualifications(readQualifications(detail.data));
   }, [application.id]);
 
@@ -588,6 +597,13 @@ export default function ApplicationWorkspace({
       setVisaNote(`Filled ${filled} visa field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.`);
     }
   }, [visas, refreshAttachments, setHoldsVisa]);
+
+  useEffect(() => {
+    if (!attachmentsLoaded || visaMode !== "upload" || !visaRead || visas.length > 0) return;
+    setVisaMode("manual");
+    setVisaRead(false);
+    setVisaNote("The visa document these details were read from is no longer attached. Check the details below, or upload the visa document again.");
+  }, [attachmentsLoaded, visaMode, visaRead, visas.length]);
 
   const deleteVisaRef = useRef<(document: DocumentRow) => Promise<void>>(async () => undefined);
   const deleteVisa = useCallback((document: DocumentRow) => deleteVisaRef.current(document), []);
