@@ -104,6 +104,17 @@ type AgentSelection =
   | { kind: "existing"; row: PortalTeamMember }
   | { kind: "new"; details: NewStudentAgent };
 
+/** The student's contact details are the first thing on every application; the form shows them prefilled. */
+function saveContact(id: string, student: StudentContact): Promise<void> {
+  return saveApplicationDraft(id, {
+    data: { values: { email: student.email, confirm_email: student.email, mobile: student.mobile } },
+    studentName: "",
+    studentEmail: student.email,
+    intake: "",
+    completion: 0,
+  });
+}
+
 export default function NewApplicationPage() {
   const paths = useApplicationPaths();
   const { role, agency, authUser, authLoading, identityLoading } = usePortalAuth();
@@ -196,14 +207,7 @@ export default function NewApplicationPage() {
       const { id } = await createApplication(clientKeyRef.current, assignedAgentId, selectedAgencyId);
       clientKeyRef.current = newClientKey();
       if (authUser?.id) writeSession(authUser.id, id);
-      // The student's contact details are the first thing on every application; the form shows them prefilled.
-      await saveApplicationDraft(id, {
-        data: { values: { email: student.email, confirm_email: student.email, mobile: student.mobile } },
-        studentName: "",
-        studentEmail: student.email,
-        intake: "",
-        completion: 0,
-      });
+      await saveContact(id, student);
       return id;
     },
     [authUser?.id],
@@ -222,10 +226,12 @@ export default function NewApplicationPage() {
     const next = { email, mobile };
     setContact(next);
     setError("");
-    if (role !== "agent") { setPhase("pick"); return; }
+    if (!applicationId && role !== "agent") { setPhase("pick"); return; }
     setCreating(true);
     try {
-      const id = await startDraft(next, null);
+      // A resumed draft keeps its business and agent; only the contact details are added to it.
+      const id = applicationId || await startDraft(next, null);
+      if (applicationId) await saveContact(applicationId, next);
       setApplicationId(id);
       setPhase("wizard");
     } catch (e) {
@@ -250,7 +256,11 @@ export default function NewApplicationPage() {
           const app = await getApplication(existing).catch(() => null);
           if (app && isEditableApplicationStatus(app.status)) {
             setApplicationId(app.id);
-            setPhase("wizard");
+            // Drafts started before the contact step existed must still collect it before the wizard.
+            const values = (app.data?.values ?? {}) as Record<string, unknown>;
+            const saved = { email: String(values.email ?? ""), mobile: String(values.mobile ?? "") };
+            setContact(saved);
+            setPhase(saved.email && saved.mobile ? "wizard" : "student");
             return;
           }
           clearSession(authUser.id);
