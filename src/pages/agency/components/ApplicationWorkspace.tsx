@@ -45,6 +45,9 @@ const ADDRESS_SOURCES = ["search", "licence", "manual"];
 const VISA_CATEGORY = "Visa";
 const VISA_DETAIL_FIELDS = ["visa_subclass", "visa_grant_date", "visa_stay_until", "visa_grant_number"] as const;
 const VISA_UPLOAD_FIELD: AppField = { name: "visa_upload", label: "Visa grant notice or VEVO record", type: "file" };
+const ENGLISH_CATEGORY = "English Test";
+const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
+const ENGLISH_UPLOAD_FIELD: AppField = { name: "english_results", label: "English test result", type: "file" };
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
 
 // A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
@@ -605,6 +608,64 @@ export default function ApplicationWorkspace({
     setVisaNote("The visa document these details were read from is no longer attached. Check the details below, or upload the visa document again.");
   }, [attachmentsLoaded, visaMode, visaRead, visas.length]);
 
+  /* ---------------------------------------------------------- English */
+
+  const [englishNote, setEnglishNote] = useState("");
+  const watchEnglishRef = useRef(false);
+  const checkedEnglishRef = useRef<Set<string>>(new Set());
+  const englishDocuments = useMemo(() => attachments.filter((document) => document.category === ENGLISH_CATEGORY), [attachments]);
+  const englishReading = englishDocuments.some((document) => ["queued", "processing"].includes(extractionStatus(document.metadata)));
+
+  const uploadEnglish = useCallback(async (files: FileList | null) => {
+    if (!files?.length) return;
+    setDocumentBusy("upload");
+    setEnglishNote("Uploading the English test result…");
+    try {
+      for (const file of Array.from(files)) {
+        await uploadApplicationDocument({ applicationId: application.id, category: ENGLISH_CATEGORY, file, metadata: { kind: "english" } });
+      }
+      watchEnglishRef.current = true;
+      await refreshAttachments();
+      onSaved?.();
+      setEnglishNote("Reading the English test result…");
+    } catch (error) {
+      setEnglishNote(error instanceof Error ? error.message : "The English test result could not be uploaded.");
+    } finally { setDocumentBusy(""); }
+  }, [application.id, onSaved, refreshAttachments]);
+
+  useEffect(() => {
+    if (!watchEnglishRef.current || !englishReading) return undefined;
+    const timer = window.setInterval(() => { void refreshAttachments().catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [englishReading, refreshAttachments]);
+  useEffect(() => {
+    if (!watchEnglishRef.current) return;
+    for (const document of englishDocuments) {
+      const status = extractionStatus(document.metadata);
+      if (checkedEnglishRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
+      checkedEnglishRef.current.add(document.id);
+      const extraction = document.metadata.extraction as { extracted?: Record<string, string>; source?: { categoryMismatch?: boolean } } | undefined;
+      const extracted = extraction?.extracted ?? {};
+      const usable = status !== "failed" && !extraction?.source?.categoryMismatch && Boolean(extracted.english_type || extracted.english_score);
+      if (!usable) {
+        // Not an English test result that can be read: remove it so the right document can be uploaded.
+        void deleteApplicationDocument({ id: document.id, storagePath: document.storagePath })
+          .catch(() => undefined)
+          .then(() => refreshAttachments().catch(() => undefined));
+        setEnglishNote(`${document.filename} was rejected: it could not be read as an English test result (IELTS, PTE, TOEFL or Cambridge). Upload the correct document, or fill in the details below.`);
+        continue;
+      }
+      const updates = Object.fromEntries(ENGLISH_DETAIL_FIELDS.map((name) => [name, String(extracted[name] ?? "").trim()]).filter(([, value]) => value));
+      setUnlockedFields((prev) => new Set([...prev, ...Object.keys(updates)]));
+      setEditedFields((prev) => new Set([...prev, ...Object.keys(updates)]));
+      if (formRef.current) applyFormValues(formRef.current, updates);
+      window.requestAnimationFrame(() => computeProgress());
+      scheduleSave(true);
+      const filled = Object.keys(updates).length;
+      setEnglishNote(`Filled ${filled} English field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.`);
+    }
+  }, [englishDocuments, refreshAttachments, computeProgress, scheduleSave]);
+
   const deleteVisaRef = useRef<(document: DocumentRow) => Promise<void>>(async () => undefined);
   const deleteVisa = useCallback((document: DocumentRow) => deleteVisaRef.current(document), []);
 
@@ -823,7 +884,12 @@ export default function ApplicationWorkspace({
     // the element tree: rebuilding the inputs would reset them to their saved values and undo a search pick.
     // The visa question is answered by the choice card on the Visa page; the old file field is replaced by its upload.
     if (field.name === "holds_visa") return <input key={field.name} type="hidden" name={field.name} defaultValue={String(mergedInitial.holds_visa ?? "")} />;
-    if (field.name === "visa_copy") return null;
+    if (field.name === "visa_copy" || field.name === "english_upload") return null;
+    // The agency and agent are chosen when the application is started; their values are kept, the questions are not shown.
+    if (LOCKED_AGENT_FIELDS.has(field.name)) {
+      const kept = mergedInitial[field.name];
+      return <input key={field.name} type="hidden" name={field.name} defaultValue={Array.isArray(kept) ? kept.join(", ") : String(kept ?? "")} />;
+    }
     const hidden = (!addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name)))
       || (!visaShown && (VISA_DETAIL_FIELDS as readonly string[]).includes(field.name));
     return renderFieldBody(field, locked, documentLocked, fixedAustralia, hidden);
@@ -926,7 +992,7 @@ export default function ApplicationWorkspace({
       {section.description ? (
         <p className="text-xs leading-relaxed text-foreground-500">{section.description}</p>
       ) : null}
-      {section.scans?.length ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
+      {section.scans?.length && !section.fields.some((field) => field.name === "english_type") ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
       {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
         <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
           <input type="hidden" name="address_source" defaultValue={String(storedValues.address_source ?? "") || (addressFromWizardLicence ? "licence" : "")} />
@@ -998,6 +1064,29 @@ export default function ApplicationWorkspace({
               Enter the address manually
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {section.fields.some((field) => field.name === "english_type") ? (
+        <div className="mb-4 rounded-md border border-background-200 bg-background-50 p-4">
+          <p className="text-sm font-semibold text-foreground-900">English test result</p>
+          <p className="mt-0.5 text-xs text-foreground-600">
+            {englishDocuments.length
+              ? "The details below were read from this document. Use Edit to correct a field, view or delete the document, or upload a newer result."
+              : "Upload the IELTS, PTE, TOEFL or Cambridge result and the details below are filled in from it. You can also fill them in yourself."}
+          </p>
+          <div className="mt-3">
+            <ApplicationAttachmentField
+              field={ENGLISH_UPLOAD_FIELD}
+              documents={englishDocuments}
+              disabled={readOnly || Boolean(documentBusy) || englishReading}
+              busyDocumentId={documentBusy}
+              onUpload={uploadEnglish}
+              onPreview={previewAttachment}
+              onExtract={extractAttachment}
+              onDelete={deleteAttachment}
+            />
+          </div>
+          {englishNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{englishNote}</p> : null}
         </div>
       ) : null}
       {section.fields.some((field) => field.name === "visa_subclass") && !readOnly && !(visaMode === "upload" && visaRead) ? (

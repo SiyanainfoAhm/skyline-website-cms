@@ -86,7 +86,7 @@ function splitVisaSection(section: AppSection): AppSection[] {
   if (!section.fields.some((field) => field.name === "visa_subclass")) return [section];
   return [
     { title: "AUSTRALIAN VISA", fields: section.fields.filter((field) => VISA_FIELD_NAMES.has(field.name)) },
-    { ...section, title: "ENGLISH & AGENT DETAILS", fields: section.fields.filter((field) => !VISA_FIELD_NAMES.has(field.name)) },
+    { ...section, title: "ENGLISH TEST", fields: section.fields.filter((field) => !VISA_FIELD_NAMES.has(field.name)) },
   ];
 }
 
