@@ -146,7 +146,7 @@ function regroupStudentSections(list: AppSection[]): AppSection[] {
   const identifier = list.find((section) => section.fields.some((field) => field.name === "employment"));
   // Year completed is asked once, with the qualification read from the documents, not again under the school level.
   const education = (identifier?.fields.filter((field) => EDUCATION_FIELD_NAMES.has(field.name) && field.name !== "year_completed") ?? []).map((field) =>
-    field.name === "school_level" ? { ...field, description: "A bachelor's, master's or other university degree counts as Year 12 or equivalent; the degree itself is recorded below." } : field);
+    field.name === "school_level" ? { ...field, label: "Highest completed education level", description: "Choose the highest level completed. A university degree is reported as Year 12 or equivalent for the school level." } : field);
   return list.map((section) => {
     if (section === identifier) {
       const fields = section.fields.filter((field) => !EDUCATION_FIELD_NAMES.has(field.name));

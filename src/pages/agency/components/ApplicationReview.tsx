@@ -100,7 +100,8 @@ const GROUPS: Group[] = [
     icon: "ri-file-text-line",
     edit: "school_level",
     rows: [
-      ["Highest school level", "school_level"],
+      ["Highest education", "highest_education"],
+      ["School level (reported)", "school_level"],
       ["Prior education", "prior_ed"],
     ],
   },

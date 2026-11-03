@@ -36,6 +36,8 @@ import { qualificationDetail, qualificationTitle, readQualifications } from "@/p
 import { canSubmitApplicationStatus } from "@/pages/agency/lib/applicationAccess";
 import ApplicationReview, { type ConsentState } from "@/pages/agency/components/ApplicationReview";
 import ApplicationAttachmentField from "@/pages/agency/components/ApplicationAttachmentField";
+import SchoolLevelField from "@/pages/agency/components/SchoolLevelField";
+import { DEGREE_LEVELS } from "@/pages/agency/lib/educationLevels";
 import { PortalError } from "@/pages/agency/components/PortalUI";
 
 const FORM_ID = "portal-application-form";
@@ -67,7 +69,16 @@ const FORM_DEFAULTS: Record<string, string | string[]> = {
   hear_about: "Agent",
 };
 const PREFILL_LOCK_FIELDS = ["atsi", "employment", "language_home", "disability", "usi_consent"];
-const EDUCATION_FIELDS = ["secondary_enrolled", "school_level", "prior_ed"] as const;
+const EDUCATION_FIELDS = ["secondary_enrolled", "highest_education", "school_level", "prior_ed"] as const;
+
+/** Highest university level a qualification shows (PhD, Master's, Bachelor's); "" when it shows none. */
+function degreeOf(text: string): string {
+  const t = ` ${text.toLowerCase()} `;
+  if (/(\bph\.?\s?d\b|doctor)/.test(t)) return "Doctorate (PhD)";
+  if (/(master|\bmba\b|\bm\.\s?(e|tech|sc|com|a|phil)\b|\bm(tech|sc|com|phil)\b)/.test(t)) return "Master's degree";
+  if (/(bachelor|degree|engineering|university|\bb\.\s?(e|tech|sc|com|a|ba|ca|pharm|arch)\b|\bb(tech|sc|com|ba|ca|pharm|arch)\b)/.test(t)) return "Bachelor's degree";
+  return "";
+}
 
 /** Best reading of the highest school level a qualification shows; "" when it says nothing about school. */
 function schoolLevelOf(text: string): string {
@@ -722,23 +733,31 @@ export default function ApplicationWorkspace({
     const fromDocuments = qualifications.filter((item) => item.documentIds.some((id) => attached.has(id)));
     if (!fromDocuments.length) return;
     let level = "";
+    let degree = "";
     for (const item of fromDocuments) {
-      const found = schoolLevelOf(`${item.qualification} ${item.program}`);
+      const text = `${item.qualification} ${item.program}`;
+      const found = schoolLevelOf(text);
       if (found && SCHOOL_RANK.indexOf(found) >= SCHOOL_RANK.indexOf(level)) level = found;
+      const foundDegree = degreeOf(text);
+      // DEGREE_LEVELS runs highest first.
+      if (foundDegree && (!degree || DEGREE_LEVELS.indexOf(foundDegree) < DEGREE_LEVELS.indexOf(degree))) degree = foundDegree;
     }
-    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level };
+    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level, highest_education: degree || level };
     const updates: Record<string, string> = {};
     for (const name of EDUCATION_FIELDS) {
       const value = answers[name];
       if (!value) continue;
       const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`));
-      const current = controls.some((control) => (control instanceof HTMLInputElement && control.type === "radio" ? control.checked : control.value.trim() !== ""));
+      let current = controls.some((control) => (control instanceof HTMLInputElement && control.type === "radio" ? control.checked : control.value.trim() !== ""));
+      // A degree read from the documents replaces a plain school level shown before degrees could be chosen.
+      if (name === "highest_education" && degree && !controls.some((control) => DEGREE_LEVELS.includes(control.value)) && !unlockedFieldsRef.current.has("school_level")) current = false;
       if (!current) updates[name] = value;
     }
     const names = Object.keys(updates);
     if (!names.length) return;
     applyFormValues(form, updates);
-    setDerivedFields((prev) => new Set([...prev, ...names]));
+    // The dropdown shown is the school-level field, so it carries the "From document" mark.
+    setDerivedFields((prev) => new Set([...prev, ...names, ...(names.includes("highest_education") ? ["school_level"] : [])]));
     window.requestAnimationFrame(() => computeProgress());
     scheduleSave(true);
   }, [attachments, attachmentsLoaded, qualifications, readOnly, computeProgress, scheduleSave]);
@@ -1263,6 +1282,9 @@ export default function ApplicationWorkspace({
           <div className={documentLocked ? (field.type === "radio" || field.type === "checkbox" ? DOCUMENT_FILLED_GROUP : DOCUMENT_FILLED_INPUT) : undefined}>
             {field.name === COURSE_FIELD ? (
               <CourseSearchField name={field.name} options={field.options ?? []} disabled={locked} single />
+            ) : field.name === "school_level" ? (
+              <SchoolLevelField field={field} id={`${FORM_ID}-${field.name}`} locked={locked}
+                choice={String(mergedInitial.highest_education ?? "")} schoolLevel={String(mergedInitial.school_level ?? "")} />
             ) : (
               <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
             )}
