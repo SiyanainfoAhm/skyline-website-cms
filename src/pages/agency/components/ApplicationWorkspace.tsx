@@ -42,6 +42,9 @@ const AUSTRALIAN_ADDRESS: Record<string, string> = { address_type: "Australian A
 const AU_ADDRESS_FIELDS = ["au_street", "au_line2", "au_suburb", "au_state", "au_zip"] as const;
 const LICENCE_CATEGORY = "Driving Licence";
 const ADDRESS_SOURCES = ["search", "licence", "manual"];
+const VISA_CATEGORY = "Visa";
+const VISA_DETAIL_FIELDS = ["visa_subclass", "visa_grant_date", "visa_stay_until", "visa_grant_number"] as const;
+const VISA_UPLOAD_FIELD: AppField = { name: "visa_upload", label: "Visa grant notice or VEVO record", type: "file" };
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
 
 // A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
@@ -499,6 +502,90 @@ export default function ApplicationWorkspace({
     }
   }, [licences, fillAustralianAddress]);
 
+  /* ------------------------------------------------------------- visa */
+
+  // A visa already read from a document answers the visa question: its fields show filled (green, with Edit).
+  const visaFromDocument = VISA_DETAIL_FIELDS.some((name) => documentFields.has(name));
+  const [visaMode, setVisaMode] = useState<"" | "upload" | "manual" | "none">(() => {
+    const holds = String(storedValues.holds_visa ?? "");
+    if (visaFromDocument) return "upload";
+    if (holds === "No") return "none";
+    return holds === "Yes" && VISA_DETAIL_FIELDS.some((name) => String(storedValues[name] ?? "").trim()) ? "manual" : "";
+  });
+  const [visaRead, setVisaRead] = useState(visaFromDocument);
+  const [visaNote, setVisaNote] = useState("");
+  const watchVisasRef = useRef(false);
+  const checkedVisasRef = useRef<Set<string>>(new Set());
+  const visaShown = visaMode === "manual" || (visaMode === "upload" && visaRead);
+  const visas = useMemo(() => attachments.filter((document) => document.category === VISA_CATEGORY), [attachments]);
+
+  /** Sets the (hidden) visa answer; it also decides whether the visa fields exist in the form at all. */
+  const setHoldsVisa = useCallback((answer: "" | "Yes" | "No") => {
+    setValues((prev) => ({ ...prev, holds_visa: answer }));
+    if (formRef.current) applyFormValues(formRef.current, { holds_visa: answer });
+    scheduleSave(true);
+  }, [scheduleSave]);
+
+  const chooseVisaMode = (mode: "upload" | "manual" | "none") => {
+    setVisaMode(mode);
+    setVisaNote("");
+    setHoldsVisa(mode === "none" ? "No" : mode === "manual" || visaRead ? "Yes" : "");
+  };
+
+  const uploadVisa = useCallback(async (files: FileList | null) => {
+    if (!files?.length) return;
+    setDocumentBusy("upload");
+    setVisaNote("Uploading the visa document…");
+    try {
+      for (const file of Array.from(files)) {
+        await uploadApplicationDocument({ applicationId: application.id, category: VISA_CATEGORY, file, metadata: { kind: "visa" } });
+      }
+      watchVisasRef.current = true;
+      await refreshAttachments();
+      onSaved?.();
+      setVisaNote("Reading the visa details…");
+    } catch (error) {
+      setVisaNote(error instanceof Error ? error.message : "The visa document could not be uploaded.");
+    } finally { setDocumentBusy(""); }
+  }, [application.id, onSaved, refreshAttachments]);
+
+  // While a visa uploaded here is being read, check every few seconds; then fill all four fields, or reject the document.
+  const visaReading = visas.some((document) => ["queued", "processing"].includes(extractionStatus(document.metadata)));
+  useEffect(() => {
+    if (!watchVisasRef.current || !visaReading) return undefined;
+    const timer = window.setInterval(() => { void refreshAttachments().catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [visaReading, refreshAttachments]);
+  useEffect(() => {
+    if (!watchVisasRef.current) return;
+    for (const document of visas) {
+      const status = extractionStatus(document.metadata);
+      if (checkedVisasRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
+      checkedVisasRef.current.add(document.id);
+      const extraction = document.metadata.extraction as { extracted?: Record<string, string>; source?: { categoryMismatch?: boolean } } | undefined;
+      const extracted = extraction?.extracted ?? {};
+      const usable = status !== "failed" && !extraction?.source?.categoryMismatch && Boolean(extracted.visa_subclass || extracted.visa_grant_number);
+      if (!usable) {
+        // Not an Australian visa grant notice or VEVO record that can be read: remove it and offer the choice again.
+        void deleteApplicationDocument({ id: document.id, storagePath: document.storagePath })
+          .catch(() => undefined)
+          .then(() => refreshAttachments().catch(() => undefined));
+        setVisaRead(false);
+        setHoldsVisa("");
+        setVisaNote(`${document.filename} was rejected: it could not be read as an Australian visa grant notice or VEVO record. Upload the correct document, or enter the visa details manually.`);
+        continue;
+      }
+      const form = formRef.current;
+      const updates = Object.fromEntries(VISA_DETAIL_FIELDS.map((name) => [name, String(extracted[name] ?? "").trim()]));
+      setVisaRead(true);
+      setHoldsVisa("Yes");
+      setUnlockedFields((prev) => new Set([...prev, ...VISA_DETAIL_FIELDS]));
+      if (form) applyFormValues(form, updates); // retried shortly if the fields are still being added
+      const filled = Object.values(updates).filter(Boolean).length;
+      setVisaNote(`Filled ${filled} visa field${filled === 1 ? "" : "s"} from ${document.filename}. Check them before continuing.`);
+    }
+  }, [visas, refreshAttachments, setHoldsVisa]);
+
   const deleteAttachment = useCallback(async (document: DocumentRow) => {
     setDocumentBusy(document.id);
     setDocumentMessage("");
@@ -701,7 +788,11 @@ export default function ApplicationWorkspace({
     if (field.name === "address_type") return <input key={field.name} type="hidden" name={field.name} defaultValue={AUSTRALIAN_ADDRESS.address_type} />;
     // Kept in the form (saved, fillable) but out of sight until the address has been found. Only visibility changes, never
     // the element tree: rebuilding the inputs would reset them to their saved values and undo a search pick.
-    const hidden = !addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name));
+    // The visa question is answered by the choice card on the Visa page; the old file field is replaced by its upload.
+    if (field.name === "holds_visa") return <input key={field.name} type="hidden" name={field.name} defaultValue={String(mergedInitial.holds_visa ?? "")} />;
+    if (field.name === "visa_copy") return null;
+    const hidden = (!addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name)))
+      || (!visaShown && (VISA_DETAIL_FIELDS as readonly string[]).includes(field.name));
     return renderFieldBody(field, locked, documentLocked, fixedAustralia, hidden);
   };
 
@@ -875,6 +966,61 @@ export default function ApplicationWorkspace({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {section.fields.some((field) => field.name === "visa_subclass") && !readOnly && !(visaFromDocument && visaRead) ? (
+        <div className="mb-4 rounded-md border border-background-200 bg-background-50 p-4">
+          <p className="text-sm font-semibold text-foreground-900">How would you like to add the student&apos;s Australian visa?</p>
+          <div role="radiogroup" aria-label="How to add the visa" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {([
+              ["upload", "ri-upload-cloud-2-line", "Upload visa document", "Details are read from the grant notice or VEVO"],
+              ["manual", "ri-edit-line", "Enter manually", "Type the four visa details"],
+              ["none", "ri-close-circle-line", "No Australian visa", "The student does not hold one"],
+            ] as const).map(([mode, icon, title, hint]) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={visaMode === mode}
+                onClick={() => chooseVisaMode(mode)}
+                className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                  visaMode === mode ? "border-primary-500 bg-primary-50 ring-1 ring-primary-500" : "border-background-300 hover:bg-background-100"
+                }`}
+              >
+                <i className={`${icon} mt-0.5 text-lg ${visaMode === mode ? "text-primary-600" : "text-foreground-500"}`} aria-hidden="true" />
+                <span>
+                  <span className="block text-sm font-semibold text-foreground-900">{title}</span>
+                  <span className="block text-xs text-foreground-600">{hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {visaMode === "upload" && !visaRead ? (
+            <div className="mt-4">
+              <ApplicationAttachmentField
+                field={VISA_UPLOAD_FIELD}
+                documents={visas}
+                disabled={Boolean(documentBusy) || visaReading}
+                busyDocumentId={documentBusy}
+                onUpload={uploadVisa}
+                onPreview={previewAttachment}
+                onExtract={extractAttachment}
+                onDelete={deleteAttachment}
+              />
+            </div>
+          ) : null}
+          {visaNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{visaNote}</p> : null}
+          {showErrors && !visaMode ? (
+            <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
+              <i className="ri-error-warning-line" aria-hidden="true" />
+              Choose how to add the visa, or select No Australian visa.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {section.fields.some((field) => field.name === "visa_subclass") && visaFromDocument && visaRead ? (
+        <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          The visa details below were read from the uploaded visa document. Use Edit to correct a field.
+        </p>
       ) : null}
       <div
         className={`grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-x-5 ${

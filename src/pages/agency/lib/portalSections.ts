@@ -78,7 +78,19 @@ export function resolveCourseOption(label: string): ResolvedCourse {
  * surfaced for review as-is rather than overwritten with invented thresholds —
  * see the implementation report.
  */
-export const portalSections: AppSection[] = enrolSections.map((section) => ({
+/** Visa fields that get their own portal page (filled from an uploaded visa document or entered manually). */
+export const VISA_FIELD_NAMES = new Set(["holds_visa", "visa_copy", "visa_subclass", "visa_grant_date", "visa_stay_until", "visa_grant_number"]);
+
+/** In the portal the shared "Visa, English & Agent details" section is split into a Visa page and an English & agent page. */
+function splitVisaSection(section: AppSection): AppSection[] {
+  if (!section.fields.some((field) => field.name === "visa_subclass")) return [section];
+  return [
+    { title: "AUSTRALIAN VISA", fields: section.fields.filter((field) => VISA_FIELD_NAMES.has(field.name)) },
+    { ...section, title: "ENGLISH & AGENT DETAILS", fields: section.fields.filter((field) => !VISA_FIELD_NAMES.has(field.name)) },
+  ];
+}
+
+export const portalSections: AppSection[] = enrolSections.flatMap(splitVisaSection).map((section) => ({
   ...section,
   fields: section.fields.map((field) =>
     field.name === COURSE_FIELD
