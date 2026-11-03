@@ -36,6 +36,13 @@ import ApplicationAttachmentField from "@/pages/agency/components/ApplicationAtt
 import { PortalError } from "@/pages/agency/components/PortalUI";
 
 const FORM_ID = "portal-application-form";
+
+// A fixed green (not the institution's theme colours) marks values already read from a document, so they read as
+// "done, leave as is" next to the white fields that still need filling in. Applied to the control's own elements.
+const DOCUMENT_FILLED_INPUT =
+  "[&_input:not([type=radio]):not([type=checkbox])]:!border-emerald-300 [&_input:not([type=radio]):not([type=checkbox])]:!bg-emerald-50 [&_input]:!text-emerald-950 " +
+  "[&_select]:!border-emerald-300 [&_select]:!bg-emerald-50 [&_select]:!text-emerald-950 [&_textarea]:!border-emerald-300 [&_textarea]:!bg-emerald-50 [&_textarea]:!text-emerald-950";
+const DOCUMENT_FILLED_GROUP = "rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-950";
 const DEBOUNCE_MS = 1200;
 const DECLARATION_VERSION = "1.0";
 
@@ -601,7 +608,7 @@ export default function ApplicationWorkspace({
           {field.required ? <span className="text-primary-600">*</span> : null}
           {documentFields.has(field.name) && !editedFields.has(field.name) ? (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-secondary-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-secondary-900"
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900"
               title={`From document: ${attachments.find((document) => document.id === documentFields.get(field.name))?.filename ?? "uploaded document"}. Check it; you can edit it.`}
             >
               <i className="ri-file-text-line" aria-hidden="true" />
@@ -645,7 +652,11 @@ export default function ApplicationWorkspace({
             onExtract={extractAttachment}
             onDelete={deleteAttachment}
           />
-        ) : <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />}
+        ) : (
+          <div className={documentLocked ? (field.type === "radio" || field.type === "checkbox" ? DOCUMENT_FILLED_GROUP : DOCUMENT_FILLED_INPUT) : undefined}>
+            <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
+          </div>
+        )}
         {missing ? (
           <p className="mt-1.5 flex items-center gap-1 text-xs text-primary-700">
             <i className="ri-error-warning-line" aria-hidden="true" />
