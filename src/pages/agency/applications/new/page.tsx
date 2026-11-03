@@ -28,7 +28,10 @@ import type { AgencyFormState } from "@/pages/admin/lib/agencyForm";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 import {
   createApplication,
+  deleteApplicationDocument,
+  deleteApplicationDraft,
   getApplication,
+  listApplicationDocuments,
   listAssignableAgents,
   type AgentOption,
 } from "@/pages/agency/lib/portalApplications";
@@ -340,12 +343,34 @@ export default function NewApplicationPage() {
     navigate(paths.detail(applicationId), { replace: true });
   };
 
+  // Cancelling discards the unfinished draft and its uploads, then starts a fresh application.
   const handleCancel = async () => {
     const uid = authUser?.id;
     if (uid) clearSession(uid);
-    // A new draft has a real reference and must remain available even if the
-    // document wizard is closed before any field is filled.
-    navigate(paths.detail(applicationId), { replace: true });
+    const abandoned = applicationId;
+    setApplicationId("");
+    setPhase("checking");
+    setCreating(true);
+    setError("");
+    try {
+      const docs = await listApplicationDocuments(abandoned).catch(() => []);
+      await Promise.all(docs.map((doc) => deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).catch(() => undefined)));
+      await deleteApplicationDraft(abandoned).catch(() => undefined);
+      if (role === "agent") {
+        const id = await startDraft(null);
+        setApplicationId(id);
+        setPhase("wizard");
+      } else {
+        setBusiness(null);
+        setSelectedAgent(null);
+        setAgentId("");
+        setPhase("pick");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "We could not start a new application.");
+    } finally {
+      setCreating(false);
+    }
   };
 
   if (authLoading || identityLoading || phase === "checking") {

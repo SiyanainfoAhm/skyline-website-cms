@@ -277,19 +277,17 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
   /* ------------------------------------------------------------ navigate */
 
-  // An expired passport keeps the agent on the passport step until a current one is uploaded.
+  // The passport is mandatory: the agent stays on the passport step until a current one is uploaded.
   const passportExpired = expiredPassport !== null || documents.some(isExpiredPassport);
+  const hasPassport = documents.some((doc) => doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && !isExpiredPassport(doc));
+  const passportRequired = PASSPORT_STEP >= 0 && (passportExpired || !hasPassport);
   const goTo = (index: number) => {
     const target = Math.max(0, Math.min(index, LAST_STEP));
-    if (passportExpired && PASSPORT_STEP >= 0 && target > PASSPORT_STEP) {
-      setStep(PASSPORT_STEP);
-      return;
-    }
-    setStep(target);
+    setStep(passportRequired && target > PASSPORT_STEP ? PASSPORT_STEP : target);
   };
   useEffect(() => {
-    if (passportExpired && PASSPORT_STEP >= 0 && step > PASSPORT_STEP) setStep(PASSPORT_STEP);
-  }, [passportExpired, step]);
+    if (!loading && passportRequired && step > PASSPORT_STEP) setStep(PASSPORT_STEP);
+  }, [loading, passportRequired, step]);
 
   const stepDocs = documents.filter((doc) => doc.category === current.category);
   const stepPending = pending.filter((item) => item.category === current.category);
@@ -303,7 +301,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   // While this step's file uploads or is read, the wizard is locked so nothing else can be clicked.
   const removingExpired = !expiredPassport?.error && stepDocs.some(isExpiredPassport);
   const locked = ready && (stepBusy(current) || removingExpired);
-  const blockedByPassport = passportExpired && step === PASSPORT_STEP;
+  const blockedByPassport = passportRequired && step === PASSPORT_STEP;
 
   const primaryClass =
     "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-5 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60";
@@ -473,7 +471,16 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           ) : null}
         </div>
 
-        {blockedByPassport && !locked ? (
+        {blockedByPassport && !passportExpired && !locked ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p className="flex items-start gap-2 text-sm text-foreground-600">
+              <i className="ri-information-line mt-0.5" aria-hidden="true" />
+              A current passport is required. Upload it to continue.
+            </p>
+          </div>
+        ) : null}
+
+        {blockedByPassport && passportExpired && !locked ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
