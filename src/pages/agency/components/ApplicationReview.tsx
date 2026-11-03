@@ -342,8 +342,8 @@ export default function ApplicationReview({
           Student declaration & consent
         </h4>
         <p className="mt-2 text-xs leading-relaxed text-foreground-600">
-          The student declaration above is a statement made by the <strong>student</strong>, not the agent. Record how the
-          student&rsquo;s consent was collected, and upload the signed form if one was used.
+          The student declaration above is a statement made by the <strong>student</strong>, not the agent. Confirm below that
+          the student reviewed and authorised it.
         </p>
         {!studentSignatureMatches && (declarationName || signature) ? (
           <p className="mt-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-900">
@@ -371,54 +371,10 @@ export default function ApplicationReview({
             )}
           </div>
         ) : (
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-700">
-              Consent collection method <span className="text-primary-600">*</span>
-            </p>
-            <div className="space-y-2">
-              {[
-                { value: "electronic", label: "Electronic declaration completed by the student" },
-                { value: "document", label: "Signed declaration document uploaded" },
-              ].map((option) => (
-                <label key={option.value} className="flex cursor-pointer items-start gap-2 text-sm text-foreground-700">
-                  <input
-                    type="radio"
-                    name="consent_method"
-                    checked={consent.method === option.value}
-                    onChange={() => onConsentChange({ method: option.value })}
-                    className="mt-0.5 h-4 w-4 accent-primary-500"
-                  />
-                  <span className="leading-snug">{option.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-700">
-              Signed declaration document (optional)
-            </p>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                onConsentChange({ file, fileName: file?.name ?? "" });
-              }}
-              className="w-full cursor-pointer rounded-md border border-dashed border-background-300 bg-background-50 px-3.5 py-2.5 text-xs text-foreground-700 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-primary-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-700"
-            />
-            {consent.fileName ? (
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground-600">
-                <i className="ri-attachment-2" aria-hidden="true" />
-                {consent.fileName}
-              </p>
-            ) : (
-              <p className="mt-2 text-xs text-foreground-400">
-                Stored privately against this application. Only your agency and SLIT can access it.
-              </p>
-            )}
-          </div>
-        </div>
+        <p className="mt-4 flex items-center gap-2 text-sm text-foreground-700">
+          <i className="ri-shield-check-line text-accent-700" aria-hidden="true" />
+          Consent is recorded as the student&rsquo;s electronic declaration in the form above.
+        </p>
         )}
 
         {!readOnly ? (

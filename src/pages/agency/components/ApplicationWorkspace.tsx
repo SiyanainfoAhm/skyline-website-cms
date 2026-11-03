@@ -200,9 +200,11 @@ export default function ApplicationWorkspace({
     sections: sections.map(() => ({ done: 0, total: 0 })),
   });
   const [showErrors, setShowErrors] = useState(false);
+  // The page whose Next was refused: its missing answers are marked even before a submit attempt.
+  const [errorStep, setErrorStep] = useState<number | null>(null);
   const [reviewValues, setReviewValues] = useState<DraftValues | null>(null);
   const [consent, setConsent] = useState<ConsentState>({
-    method: "",
+    method: "electronic",
     confirmed: false,
     authorised: false,
     fileName: "",
@@ -859,7 +861,24 @@ export default function ApplicationWorkspace({
   };
 
   const [usiError, setUsiError] = useState("");
+  /** Required answers still missing on one form page. */
+  const pageMissing = (index: number): boolean => {
+    const section = sections[index];
+    if (!section || !isConditionMet(section.showIf, values)) return false;
+    return section.fields.some((field) =>
+      // The agency/agent answers are set at the start and not shown, so they never hold a page back.
+      field.required && !LOCKED_AGENT_FIELDS.has(field.name) && field.type !== "static" && field.type !== "table" && field.type !== "terms" && isConditionMet(field.showIf, values) && fieldMissing(field));
+  };
+  /** Stops leaving the current page forward until its required answers are filled; shows what is missing. */
+  const blockedHere = (index: number): boolean => {
+    if (readOnly || index <= step || step >= reviewIndex || !pageMissing(step)) return false;
+    setErrorStep(step);
+    window.requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[data-step-missing="true"]')?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    return true;
+  };
+
   const goTo = (index: number) => {
+    if (blockedHere(index)) return;
     if (index > step && sections[step]?.fields.some((field) => field.name === "usi_number") && !readOnly) {
       const usi = formRef.current?.querySelector<HTMLInputElement>('[name="usi_number"]')?.value ?? "";
       const problem = usi.trim() ? validateUsi(usi) : "Enter the student's USI to continue.";
@@ -921,7 +940,7 @@ export default function ApplicationWorkspace({
 
   const openReview = () => {
     const form = formRef.current;
-    if (!form) return;
+    if (!form || blockedHere(reviewIndex)) return;
     const collected = collectFormValues(form);
     setReviewValues(collected);
     setStep(reviewIndex);
@@ -1108,7 +1127,7 @@ export default function ApplicationWorkspace({
       );
     }
     const spanFull = field.full || field.type === "textarea" || field.type === "checkbox";
-    const missing = showErrors && field.required && fieldMissing(field);
+    const missing = (showErrors || errorStep === step) && field.required && fieldMissing(field);
     return (
       <div key={field.name} data-scan-field hidden={hidden} className={spanFull ? "md:col-span-2" : ""}>
         <label
@@ -1264,7 +1283,7 @@ export default function ApplicationWorkspace({
           ) : null}
           {addressShown ? (
             <p className="mt-3 text-xs text-foreground-500">The address fields below were filled in automatically; check them before continuing.</p>
-          ) : showErrors ? (
+          ) : showErrors || errorStep === step ? (
             <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
               <i className="ri-error-warning-line" aria-hidden="true" />
               Search for the address or upload a driving licence to fill it.
@@ -1320,7 +1339,7 @@ export default function ApplicationWorkspace({
           {academicMode === "upload" && !academicDocuments.length ? (
             <p className="mt-3 text-xs text-foreground-600">Upload the documents below; the questions appear, filled in, once they are read.</p>
           ) : null}
-          {showErrors && !academicShown ? (
+          {(showErrors || errorStep === step) && !academicShown ? (
             <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
               <i className="ri-error-warning-line" aria-hidden="true" />
               Upload academic documents or choose Enter manually to answer the academic questions.
@@ -1393,7 +1412,7 @@ export default function ApplicationWorkspace({
             </div>
           ) : null}
           {visaNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{visaNote}</p> : null}
-          {showErrors && !visaMode ? (
+          {(showErrors || errorStep === step) && !visaMode ? (
             <p className="mt-3 flex items-center gap-1 text-xs text-primary-700" role="alert">
               <i className="ri-error-warning-line" aria-hidden="true" />
               Choose how to add the visa, or select No Australian visa.
@@ -1595,9 +1614,16 @@ export default function ApplicationWorkspace({
                 <i className="ri-arrow-left-line" aria-hidden="true" />
                 Previous
               </button>
-              <span className="flex items-center gap-2 text-xs text-foreground-500">
-                Section {step + 1} of {sections.length}
-              </span>
+              {errorStep === step && pageMissing(step) ? (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-primary-700" role="alert" data-step-missing="true">
+                  <i className="ri-error-warning-line" aria-hidden="true" />
+                  Fill in the required fields marked on this page to continue.
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 text-xs text-foreground-500">
+                  Section {step + 1} of {sections.length}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => (step >= sections.length - 1 ? openReview() : goTo(step + 1))}
