@@ -8,6 +8,7 @@ import {
   type ApplicationListRow,
 } from "@/pages/agency/lib/portalApplications";
 import ApplicationsTable from "@/pages/agency/components/ApplicationsTable";
+import SubmittedBanner from "@/pages/agency/components/SubmittedBanner";
 import { PageHeading } from "@/pages/agency/components/PortalUI";
 
 export default function PortalApplicationsPage() {
@@ -43,6 +44,7 @@ export default function PortalApplicationsPage() {
 
   return (
     <div>
+      <SubmittedBanner />
       <PageHeading
         eyebrow="Applications"
         title="Student applications"

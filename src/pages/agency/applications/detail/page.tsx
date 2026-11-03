@@ -1,7 +1,7 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useState } from "react";
 import { formatPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_META, formatDate } from "@/pages/agency/lib/portalData";
 import { isEditableApplicationStatus, nextStatusOptions } from "@/pages/agency/lib/applicationAccess";
@@ -55,6 +55,7 @@ function wasWizardOpen(applicationId: string): boolean {
 export default function ApplicationDetailPage() {
   const { id = "" } = useParams();
   const paths = useApplicationPaths();
+  const navigate = useNavigate();
   const { role, profile, agency } = usePortalAuth();
 
   const [application, setApplication] = useState<ApplicationDetail | null>(null);
@@ -397,6 +398,8 @@ export default function ApplicationDetailPage() {
             readOnly={readOnly}
             auditAccess={isSlit}
             onSaved={refreshAfterSave}
+            onSubmitted={(reference, studentName) =>
+              navigate(isSlit && paths.area === "portal" ? "/agency/all-applications" : paths.list, { state: { submittedReference: reference, submittedName: studentName } })}
           />
         ) : null}
 

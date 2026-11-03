@@ -8,6 +8,7 @@ import {
   type ApplicationListRow,
 } from "@/pages/agency/lib/portalApplications";
 import ApplicationsTable from "@/pages/agency/components/ApplicationsTable";
+import SubmittedBanner from "@/pages/agency/components/SubmittedBanner";
 import { cmsPaths, useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
@@ -66,6 +67,7 @@ export default function AllApplicationsPage() {
 
   return (
     <div>
+      <SubmittedBanner />
       <PageHeading
         eyebrow="All Applications"
         title="All applications"

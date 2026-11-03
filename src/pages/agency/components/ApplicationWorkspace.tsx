@@ -104,6 +104,8 @@ interface WorkspaceProps {
   /** Administrators: opening a document is written to the audit log. */
   auditAccess?: boolean;
   onSaved?: () => void;
+  /** Called once the application is submitted (e.g. to go back to the list). */
+  onSubmitted?: (reference: string, studentName: string) => void;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -118,6 +120,7 @@ export default function ApplicationWorkspace({
   readOnly,
   auditAccess = false,
   onSaved,
+  onSubmitted,
 }: WorkspaceProps) {
   const [courseOptions, setCourseOptions] = useState<ApplicationCourseRow[]>([]);
   const sections = useMemo(() => application.tenantId ? portalSections.map(section => ({ ...section, fields: section.fields.map(field => field.name === COURSE_FIELD ? { ...field, options: courseOptions.map(course => course.code + " - " + course.title) } : field) })) : portalSections, [application.tenantId, courseOptions]);
@@ -991,6 +994,7 @@ export default function ApplicationWorkspace({
         },
       });
       setSubmittedRef(reference || application.reference);
+      onSubmitted?.(reference || application.reference, `${String(snapshot?.values.first_name ?? "")} ${String(snapshot?.values.last_name ?? "")}`.trim());
       onSaved?.();
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Submission failed. Please try again.");
