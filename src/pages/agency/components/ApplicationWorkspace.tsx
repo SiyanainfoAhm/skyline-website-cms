@@ -66,17 +66,6 @@ function schoolLevelOf(text: string): string {
 }
 const SCHOOL_RANK = ["Year 10 or equivalent - 10", "Year 11 or equivalent - 11", "Year 12 or equivalent - 12"];
 const ACADEMIC_CATEGORY = "Academic";
-
-/** How high a qualification is, from its wording: higher numbers win when several documents are attached. */
-function qualificationRank(text: string): number {
-  const t = ` ${text.toLowerCase()} `;
-  if (/(master|m\.?\s?tech|m\.?\s?e\.|mba|m\.?\s?sc|postgraduate|post graduate|doctor|ph\.?d)/.test(t)) return 6;
-  if (/(bachelor|b\.?\s?tech|b\.?\s?e\.|\bbe\b|b\.?\s?sc|b\.?\s?com|\bba\b|degree|engineering|undergraduate)/.test(t)) return 5;
-  if (/(advanced diploma|associate degree)/.test(t)) return 4;
-  if (/(diploma|certificate iv|certificate 4)/.test(t)) return 3;
-  const school = schoolLevelOf(text);
-  return school ? SCHOOL_RANK.indexOf(school) : -1;
-}
 const ACADEMIC_RECORD_FIELDS = ["academic_institution", "academic_qualification", "academic_year"] as const;
 const ACADEMIC_FIELDS: readonly string[] = [...EDUCATION_FIELDS, ...ACADEMIC_RECORD_FIELDS];
 const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
@@ -699,30 +688,38 @@ export default function ApplicationWorkspace({
     return () => window.clearInterval(timer);
   }, [academicMode, academicReading, refreshAttachments]);
 
-  // Institution, qualification and year come from the highest qualification among the attached documents. They replace
-  // values from older documents, but never a field the agent opened with Edit to type in.
+  // Institution, qualification and year come from the newest attached document that has them. A value is replaced only
+  // when it is empty or was itself read from another document; anything typed by hand (now or earlier) is kept.
   const appliedAcademicRef = useRef("");
+  const recordedFieldsRef = useRef(recordedDocumentFields);
+  const derivedFieldsRef = useRef(derivedFields);
+  const editedFieldsRef = useRef(editedFields);
+  useEffect(() => { recordedFieldsRef.current = recordedDocumentFields; derivedFieldsRef.current = derivedFields; editedFieldsRef.current = editedFields; }, [recordedDocumentFields, derivedFields, editedFields]);
   useEffect(() => {
     const form = formRef.current;
     if (!form || readOnly) return;
-    let best: { id: string; extracted: Record<string, string>; rank: number; at: string } | null = null;
-    for (const document of academicDocuments) {
-      const status = extractionStatus(document.metadata);
-      if (["queued", "processing", "Not requested", "failed"].includes(status)) continue;
-      const extracted = ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {};
-      if (!ACADEMIC_RECORD_FIELDS.some((name) => String(extracted[name] ?? "").trim())) continue;
-      const rank = qualificationRank(`${extracted.academic_qualification ?? ""} ${extracted.academic_program ?? ""}`);
-      if (!best || rank > best.rank || (rank === best.rank && document.createdAt > best.at)) best = { id: document.id, extracted, rank, at: document.createdAt };
-    }
-    if (!best || appliedAcademicRef.current === best.id) return;
-    appliedAcademicRef.current = best.id;
+    const read = academicDocuments
+      .filter((document) => !["queued", "processing", "Not requested", "failed"].includes(extractionStatus(document.metadata)))
+      .map((document) => ({ id: document.id, at: document.createdAt, extracted: ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {} }))
+      .filter((entry) => ACADEMIC_RECORD_FIELDS.some((name) => String(entry.extracted[name] ?? "").trim()));
+    if (!read.length) return;
+    const newest = read.reduce((latest, entry) => (entry.at > latest.at ? entry : latest));
+    if (appliedAcademicRef.current === newest.id) return;
+    // When the page opens only empty fields are filled; replacing starts with a document read while the page is open,
+    // so a value corrected by hand in an earlier session is never overwritten on reload.
+    const opening = appliedAcademicRef.current === "";
+    appliedAcademicRef.current = newest.id;
+    const asSaved = (name: string, value: string) => (name === "academic_year" ? (value.match(/\d{4}/)?.[0] ?? value) : value).trim();
     const updates: Record<string, string> = {};
     for (const name of ACADEMIC_RECORD_FIELDS) {
-      const value = String(best.extracted[name] ?? "").trim();
+      const wanted = asSaved(name, String(newest.extracted[name] ?? ""));
       const control = form.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
-      if (!value || !control || unlockedFieldsRef.current.has(name)) continue;
-      const wanted = name === "academic_year" ? (value.match(/\d{4}/)?.[0] ?? value) : value;
-      if (control.value.trim() !== wanted) updates[name] = wanted;
+      if (!wanted || !control || unlockedFieldsRef.current.has(name)) continue;
+      const current = control.value.trim();
+      const fromAnotherDocument = read.some((entry) => entry.id !== newest.id && asSaved(name, String(entry.extracted[name] ?? "")).toLowerCase() === current.toLowerCase());
+      // Also replaceable: values the form knows came from a document (even one since deleted) and never edited by hand.
+      const documentValue = (recordedFieldsRef.current.has(name) || derivedFieldsRef.current.has(name)) && !editedFieldsRef.current.has(name);
+      if (current !== wanted && (!current || (!opening && (fromAnotherDocument || documentValue)))) updates[name] = wanted;
     }
     const names = Object.keys(updates);
     if (!names.length) return;
