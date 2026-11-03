@@ -23,6 +23,8 @@ export interface WizardStep {
   /** Label of the button that skips this step. */
   skipLabel: string;
   multiple?: boolean;
+  /** The agent cannot move past this step without uploading the document. */
+  required?: boolean;
 }
 
 export const WIZARD_STEPS: WizardStep[] = [
@@ -30,52 +32,56 @@ export const WIZARD_STEPS: WizardStep[] = [
     id: "passport",
     title: "Passport",
     short: "Passport",
-    subtitle: "Upload the biodata page (PDF, JPG or PNG).",
+    subtitle: "Required. Upload the biodata page (PDF, JPG or PNG).",
     icon: "ri-id-card-line",
     category: "Passport",
     noun: "passport",
     skipLabel: "Continue without passport",
-  },
-  {
-    id: "licence",
-    title: "Driving licence",
-    short: "Licence",
-    subtitle: "Optional. Upload a driving licence or other address evidence.",
-    icon: "ri-profile-line",
-    category: "Driving Licence",
-    noun: "licence",
-    skipLabel: "Continue without licence",
+    required: true,
   },
   {
     id: "visa",
     title: "Australian visa",
     short: "Visa",
-    subtitle: "Optional. Upload a visa grant notice or VEVO record.",
+    subtitle: "Required. Upload the visa grant notice or VEVO record.",
     icon: "ri-passport-line",
     category: "Visa",
     noun: "visa",
     skipLabel: "Continue without visa",
+    required: true,
   },
   {
     id: "english",
     title: "English language test",
     short: "English",
-    subtitle: "Optional. Upload an IELTS, PTE, TOEFL or other accepted result.",
+    subtitle: "Required. Upload the IELTS, PTE, TOEFL or other accepted result.",
     icon: "ri-translate-2",
     category: "English Test",
     noun: "English test",
     skipLabel: "Continue without English test",
+    required: true,
   },
   {
     id: "academic",
     title: "Academic results",
     short: "Academic",
-    subtitle: "Optional. Upload transcripts, certificates or diplomas; several files are fine.",
+    subtitle: "Required. Upload transcripts, certificates or diplomas; several files are fine.",
     icon: "ri-file-paper-2-line",
     category: "Academic",
     noun: "academic transcript",
     skipLabel: "Continue without academic results",
     multiple: true,
+    required: true,
+  },
+  {
+    id: "licence",
+    title: "Australian driving licence",
+    short: "Licence",
+    subtitle: "Optional. Upload an Australian driving licence to fill in the student's address. Overseas licences are not accepted.",
+    icon: "ri-profile-line",
+    category: "Driving Licence",
+    noun: "licence",
+    skipLabel: "Continue without licence",
   },
 ];
 

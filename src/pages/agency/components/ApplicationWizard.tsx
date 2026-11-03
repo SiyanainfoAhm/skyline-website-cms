@@ -67,6 +67,11 @@ const isExpiredPassport = (doc: WizardDoc) =>
   doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && doc.extraction === "done" && !!doc.extracted &&
   getDocumentExpiryStatus("passport", doc.extracted).status === "expired";
 
+// Only an Australian licence is kept: its single purpose is the student's Australian address.
+const isOverseasLicence = (doc: WizardDoc) =>
+  doc.category === "Driving Licence" && doc.extraction === "done" && !!doc.extracted &&
+  (doc.extracted.address_type === "Overseas Address" || (!doc.extracted.au_street && Boolean(doc.extracted.ov_street)));
+
 export default function ApplicationWizard({ applicationId, agencyName, onFinish, onCancel }: Props) {
   const { profile, role } = usePortalAuth();
 
@@ -80,6 +85,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const [finishError, setFinishError] = useState("");
   // Set when an uploaded passport was read as expired and removed; cleared by the next passport upload.
   const [expiredPassport, setExpiredPassport] = useState<{ filename: string; date: string; error?: string } | null>(null);
+  const [rejectedLicence, setRejectedLicence] = useState<{ filename: string; error?: string } | null>(null);
   const discardingRef = useRef(new Set<string>());
 
   const documentsRef = useRef<WizardDoc[]>([]);
@@ -204,6 +210,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const handlePickFiles = (target: WizardStep, list: FileList | null) => {
     if (!list || list.length === 0) return;
     if (target.id === "passport") setExpiredPassport(null);
+    if (target.id === "licence") setRejectedLicence(null);
     const items = Array.from(list).map((file) => ({ key: crypto.randomUUID(), category: target.category, file }));
     setPending((prev) => [...prev, ...items]);
     items.forEach((item) => void startUpload(item));
@@ -241,6 +248,18 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     });
   }, [documents]);
 
+  // An overseas licence is removed as soon as it is read, like an expired passport.
+  useEffect(() => {
+    documents.filter((doc) => isOverseasLicence(doc) && !discardingRef.current.has(doc.id)).forEach((doc) => {
+      discardingRef.current.add(doc.id);
+      setRejectedLicence({ filename: doc.filename });
+      void deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).then(
+        () => setDocuments((prev) => prev.filter((item) => item.id !== doc.id)),
+        (error) => setRejectedLicence({ filename: doc.filename, error: error instanceof Error ? error.message : "The licence could not be removed." }),
+      );
+    });
+  }, [documents]);
+
   /* ------------------------------------------------------------- finish */
 
   // Extraction fills empty fields of the draft on the server and never replaces
@@ -257,9 +276,8 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
       const studentName = [values.first_name, values.last_name].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" ").trim();
       const meta: WizardMeta = {
         completedSteps: WIZARD_STEPS.map((item) => item.id),
-        outstanding: documentsRef.current.some((doc) => doc.category === "Passport")
-          ? []
-          : ["Passport copy not provided — required before the student's identity can be verified."],
+        outstanding: WIZARD_STEPS.filter((item) => item.required && !documentsRef.current.some((doc) => doc.category === item.category))
+          .map((item) => `${item.title} not provided. It is required.`),
         updatedAt: new Date().toISOString(),
       };
       await saveDocumentReview({ applicationId, values: {}, provenance: {}, confirmed: [], wizard: meta as unknown as Record<string, unknown>, studentName: studentName || undefined });
@@ -282,13 +300,21 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const passportExpired = expiredPassport !== null || documents.some(isExpiredPassport);
   const hasPassport = documents.some((doc) => doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && !isExpiredPassport(doc));
   const passportRequired = PASSPORT_STEP >= 0 && (passportExpired || !hasPassport);
+  // Every required document must be uploaded before the agent can move past its step.
+  const stepHasDoc = (item: WizardStep) => documents.some((doc) => doc.category === item.category && !isExpiredPassport(doc) && !isOverseasLicence(doc));
+  const firstMissingBefore = (target: number) => WIZARD_STEPS.findIndex((item, index) => index < target && item.required && !stepHasDoc(item));
   const goTo = (index: number) => {
     const target = Math.max(0, Math.min(index, LAST_STEP));
-    setStep(passportRequired && target > PASSPORT_STEP ? PASSPORT_STEP : target);
+    if (passportRequired && target > PASSPORT_STEP) { setStep(PASSPORT_STEP); return; }
+    const missing = firstMissingBefore(target);
+    setStep(missing >= 0 ? missing : target);
   };
   useEffect(() => {
-    if (!loading && passportRequired && step > PASSPORT_STEP) setStep(PASSPORT_STEP);
-  }, [loading, passportRequired, step]);
+    if (loading) return;
+    if (passportRequired && step > PASSPORT_STEP) { setStep(PASSPORT_STEP); return; }
+    const missing = WIZARD_STEPS.findIndex((item, index) => index < step && item.required && !documents.some((doc) => doc.category === item.category));
+    if (missing >= 0) setStep(missing);
+  }, [loading, passportRequired, step, documents]);
 
   const stepDocs = documents.filter((doc) => doc.category === current.category);
   const stepPending = pending.filter((item) => item.category === current.category);
@@ -437,7 +463,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
           {ready ? (
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-              {!isLast && !hasFile && !blockedByPassport ? (
+              {!isLast && !hasFile && !blockedByPassport && !current.required ? (
                 <button
                   type="button"
                   onClick={() => goTo(step + 1)}
@@ -482,6 +508,26 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
             <p className="flex items-start gap-2 text-sm text-foreground-600">
               <i className="ri-information-line mt-0.5" aria-hidden="true" />
               A current passport is required. Upload it to continue.
+            </p>
+          </div>
+        ) : null}
+
+        {current.required && step !== PASSPORT_STEP && !hasFile && !locked ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p className="flex items-start gap-2 text-sm text-foreground-600">
+              <i className="ri-information-line mt-0.5" aria-hidden="true" />
+              {current.title} is required. Upload it to continue.
+            </p>
+          </div>
+        ) : null}
+
+        {current.id === "licence" && rejectedLicence ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
+              {rejectedLicence.error
+                ? `${rejectedLicence.filename} is not an Australian licence but could not be removed (${rejectedLicence.error}). Delete it.`
+                : `${rejectedLicence.filename} is not an Australian driving licence, so it was not kept. Only an Australian licence is accepted; or finish without one and search the address on the form.`}
             </p>
           </div>
         ) : null}
