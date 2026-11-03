@@ -66,6 +66,17 @@ function schoolLevelOf(text: string): string {
 }
 const SCHOOL_RANK = ["Year 10 or equivalent - 10", "Year 11 or equivalent - 11", "Year 12 or equivalent - 12"];
 const ACADEMIC_CATEGORY = "Academic";
+
+/** How high a qualification is, from its wording: higher numbers win when several documents are attached. */
+function qualificationRank(text: string): number {
+  const t = ` ${text.toLowerCase()} `;
+  if (/(master|m\.?\s?tech|m\.?\s?e\.|mba|m\.?\s?sc|postgraduate|post graduate|doctor|ph\.?d)/.test(t)) return 6;
+  if (/(bachelor|b\.?\s?tech|b\.?\s?e\.|\bbe\b|b\.?\s?sc|b\.?\s?com|\bba\b|degree|engineering|undergraduate)/.test(t)) return 5;
+  if (/(advanced diploma|associate degree)/.test(t)) return 4;
+  if (/(diploma|certificate iv|certificate 4)/.test(t)) return 3;
+  const school = schoolLevelOf(text);
+  return school ? SCHOOL_RANK.indexOf(school) : -1;
+}
 const ACADEMIC_RECORD_FIELDS = ["academic_institution", "academic_qualification", "academic_year"] as const;
 const ACADEMIC_FIELDS: readonly string[] = [...EDUCATION_FIELDS, ...ACADEMIC_RECORD_FIELDS];
 const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
@@ -143,6 +154,8 @@ export default function ApplicationWorkspace({
   // Values read from a document start greyed out and read-only, so they are clearly told apart from what still needs
   // filling in; Edit opens one for changes. Empty fields are never locked.
   const [unlockedFields, setUnlockedFields] = useState<Set<string>>(() => new Set());
+  const unlockedFieldsRef = useRef(unlockedFields);
+  useEffect(() => { unlockedFieldsRef.current = unlockedFields; }, [unlockedFields]);
   // Education answers worked out from the academic documents: shown as "From document", green, with Edit.
   const [derivedFields, setDerivedFields] = useState<Set<string>>(() => new Set());
   // Applications started with the contact step already hold the student's unique email and mobile.
@@ -686,22 +699,30 @@ export default function ApplicationWorkspace({
     return () => window.clearInterval(timer);
   }, [academicMode, academicReading, refreshAttachments]);
 
-  // Once a document is read, its institution, qualification and year fill the fields that are still empty.
-  const checkedAcademicRef = useRef<Set<string>>(new Set());
+  // Institution, qualification and year come from the highest qualification among the attached documents. They replace
+  // values from older documents, but never a field the agent opened with Edit to type in.
+  const appliedAcademicRef = useRef("");
   useEffect(() => {
     const form = formRef.current;
     if (!form || readOnly) return;
-    const updates: Record<string, string> = {};
+    let best: { id: string; extracted: Record<string, string>; rank: number; at: string } | null = null;
     for (const document of academicDocuments) {
       const status = extractionStatus(document.metadata);
-      if (checkedAcademicRef.current.has(document.id) || ["queued", "processing", "Not requested"].includes(status)) continue;
-      checkedAcademicRef.current.add(document.id);
+      if (["queued", "processing", "Not requested", "failed"].includes(status)) continue;
       const extracted = ((document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted) ?? {};
-      for (const name of ACADEMIC_RECORD_FIELDS) {
-        const value = String(extracted[name] ?? "").trim();
-        const control = form.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
-        if (value && control && !control.value.trim() && !updates[name]) updates[name] = name === "academic_year" ? (value.match(/\d{4}/)?.[0] ?? value) : value;
-      }
+      if (!ACADEMIC_RECORD_FIELDS.some((name) => String(extracted[name] ?? "").trim())) continue;
+      const rank = qualificationRank(`${extracted.academic_qualification ?? ""} ${extracted.academic_program ?? ""}`);
+      if (!best || rank > best.rank || (rank === best.rank && document.createdAt > best.at)) best = { id: document.id, extracted, rank, at: document.createdAt };
+    }
+    if (!best || appliedAcademicRef.current === best.id) return;
+    appliedAcademicRef.current = best.id;
+    const updates: Record<string, string> = {};
+    for (const name of ACADEMIC_RECORD_FIELDS) {
+      const value = String(best.extracted[name] ?? "").trim();
+      const control = form.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`);
+      if (!value || !control || unlockedFieldsRef.current.has(name)) continue;
+      const wanted = name === "academic_year" ? (value.match(/\d{4}/)?.[0] ?? value) : value;
+      if (control.value.trim() !== wanted) updates[name] = wanted;
     }
     const names = Object.keys(updates);
     if (!names.length) return;
