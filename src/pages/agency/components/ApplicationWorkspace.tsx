@@ -469,6 +469,11 @@ export default function ApplicationWorkspace({
 
   // While a licence uploaded here is being read, check every few seconds; once it is read, copy its Australian address in.
   const licences = useMemo(() => attachments.filter((document) => document.category === LICENCE_CATEGORY), [attachments]);
+  // A licence (from the wizard or uploaded here) whose address is overseas cannot fill this Australian-only address.
+  const overseasLicence = useMemo(() => licences.find((document) => {
+    const extracted = (document.metadata.extraction as { extracted?: Record<string, string> } | undefined)?.extracted ?? {};
+    return extracted.address_type === "Overseas Address" || (!extracted.au_street && Boolean(extracted.ov_street));
+  }), [licences]);
   const licenceReading = licences.some((document) => ["queued", "processing"].includes(extractionStatus(document.metadata)));
   useEffect(() => {
     if (!watchLicencesRef.current || !licenceReading) return undefined;
@@ -694,14 +699,13 @@ export default function ApplicationWorkspace({
     const locked = readOnly || LOCKED_AGENT_FIELDS.has(field.name) || documentLocked || fixedAustralia;
     // Always "Australian Address": the two ways to fill it (search or licence) are offered above the fields instead.
     if (field.name === "address_type") return <input key={field.name} type="hidden" name={field.name} defaultValue={AUSTRALIAN_ADDRESS.address_type} />;
-    // Kept in the form (saved, fillable) but out of sight until the address has been found.
-    if (!addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name))) {
-      return <div key={field.name} hidden>{renderFieldBody(field, locked, documentLocked, fixedAustralia)}</div>;
-    }
-    return renderFieldBody(field, locked, documentLocked, fixedAustralia);
+    // Kept in the form (saved, fillable) but out of sight until the address has been found. Only visibility changes, never
+    // the element tree: rebuilding the inputs would reset them to their saved values and undo a search pick.
+    const hidden = !addressShown && (field.name === "au_country" || (AU_ADDRESS_FIELDS as readonly string[]).includes(field.name));
+    return renderFieldBody(field, locked, documentLocked, fixedAustralia, hidden);
   };
 
-  const renderFieldBody = (field: AppField, locked: boolean, documentLocked: boolean, fixedAustralia: boolean) => {
+  const renderFieldBody = (field: AppField, locked: boolean, documentLocked: boolean, fixedAustralia: boolean, hidden = false) => {
     if (field.type === "static") {
       return (
         <div key={field.name} className="md:col-span-2">
@@ -719,7 +723,7 @@ export default function ApplicationWorkspace({
     const spanFull = field.full || field.type === "textarea" || field.type === "checkbox";
     const missing = showErrors && field.required && fieldMissing(field);
     return (
-      <div key={field.name} data-scan-field className={spanFull ? "md:col-span-2" : ""}>
+      <div key={field.name} data-scan-field hidden={hidden} className={spanFull ? "md:col-span-2" : ""}>
         <label
           htmlFor={`${FORM_ID}-${field.name}`}
           className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-foreground-700"
@@ -843,6 +847,12 @@ export default function ApplicationWorkspace({
             )}
           </div>
           {addressMode === "licence" && licenceNote ? <p className="mt-2 text-xs text-foreground-700" role="status">{licenceNote}</p> : null}
+          {overseasLicence && !(addressMode === "licence" && licenceNote) ? (
+            <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
+              <i className="ri-information-line mt-px" aria-hidden="true" />
+              The driving licence on file ({overseasLicence.filename}) has an overseas address, so it can&apos;t be used here. Only an Australian address is accepted: search for the student&apos;s Australian address.
+            </p>
+          ) : null}
           {addressShown ? (
             <p className="mt-3 text-xs text-foreground-500">The address fields below were filled in automatically; check them before continuing.</p>
           ) : showErrors ? (
