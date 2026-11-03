@@ -428,7 +428,7 @@ export async function findApplicationByStudentContact(
   email: string,
   mobileE164: string,
   excludeId?: string,
-): Promise<{ id: string; reference: string; studentName: string; matchedOn: "email" | "mobile" } | null> {
+): Promise<{ id: string; reference: string; studentName: string; emailMatch: boolean; mobileMatch: boolean } | null> {
   const cols = "id, reference, student_name, updated_at";
   const nationalMobile = mobileE164.startsWith("+61") ? `0${mobileE164.slice(3)}` : "";
   const mobiles = [mobileE164, nationalMobile].filter(Boolean);
@@ -443,7 +443,7 @@ export async function findApplicationByStudentContact(
   const mobileHit = pick(byMobile?.data as Array<Record<string, unknown>> | null);
   const hit = emailHit ?? mobileHit;
   if (!hit) return null;
-  return { id: str(hit.id), reference: str(hit.reference), studentName: str(hit.student_name), matchedOn: emailHit ? "email" : "mobile" };
+  return { id: str(hit.id), reference: str(hit.reference), studentName: str(hit.student_name), emailMatch: Boolean(emailHit), mobileMatch: Boolean(mobileHit) };
 }
 
 /* ------------------------------------------------------------ Mutation */

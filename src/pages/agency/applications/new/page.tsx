@@ -229,12 +229,13 @@ export default function NewApplicationPage() {
     setError("");
     setCreating(true);
     try {
-      // One application per student: a matching email or mobile opens the existing application instead.
+      // One application per student: a matching email or mobile stops here; nothing is created or skipped.
       const existing = await findApplicationByStudentContact(email, mobile, applicationId || undefined);
       if (existing) {
-        if (authUser?.id) clearSession(authUser.id);
-        push(`An application for this student already exists (same ${existing.matchedOn})${existing.reference ? `: ${existing.reference}` : ""}. Opening it.`, "info");
-        navigate(paths.detail(existing.id), { replace: true });
+        setContactErrors({
+          email: existing.emailMatch ? "Student already exists with this email." : undefined,
+          mobile: existing.mobileMatch ? "Student already exists with this mobile number." : undefined,
+        });
         return;
       }
       if (!applicationId && role !== "agent") { setPhase("pick"); return; }
