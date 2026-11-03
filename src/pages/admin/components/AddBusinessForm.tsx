@@ -1,6 +1,8 @@
 import { normalizeAbn, validateAbn, type AgencyAbnDetails } from "../../../../supabase/functions/_shared/validation/abn";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { PhoneInput } from "@/components/feature/applicationInputs";
+import { parseStoredPhone, validateStoredPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 import { Button, Card, Field, TextInput } from "@/pages/admin/components/ui";
 import { EMPTY_AGENCY_FORM, suggestAgencyCode, validateAgencyForm, type AgencyFormErrors, type AgencyFormState } from "@/pages/admin/lib/agencyForm";
 import { setBusinessStatus } from "@/pages/admin/lib/businessData";
@@ -102,7 +104,9 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
     const next: Errors = { ...checked.errors };
     const contactName = validateName(form.primaryContact);
     if (contactName) next.primaryContact = contactName;
-    if (!form.phone.trim()) next.phone = "Enter the contact's phone number.";
+    // The same check as every other phone field: a country code plus a number valid for that country.
+    if (!parseStoredPhone(form.phone)?.national) next.phone = "Enter the contact's phone number.";
+    else { const phoneProblem = validateStoredPhone(form.phone); if (phoneProblem) next.phone = phoneProblem; else delete next.phone; }
     setErrors(next);
     if (Object.keys(next).some(key => next[key as keyof Errors])) {
       if (next.name || next.code || next.address || next.country) setEditing(true);
@@ -229,7 +233,15 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             {input("primaryContact", "Name", "The person at the business we deal with.", { required: true, autoComplete: "name" })}
             {input("businessEmail", "Email", "Receives the administrator invitation.", { required: true, type: "email", autoComplete: "email" })}
-            {input("phone", "Phone", "Australian numbers as 0412 345 678 or 02 9123 4567; otherwise start with + and the country code.", { required: true, type: "tel", placeholder: "0412 345 678", autoComplete: "tel" })}
+            <div>
+              {/* The shared phone control (country code + number, formatted as typed); it writes the E.164 value to a hidden input. */}
+              <Field label="Phone" required hint={errors.phone ? undefined : "Choose the country code, then the number, for example 041 234 5678."}>
+                <div onInput={(e) => { const target = e.target as HTMLInputElement; if (target.name === "poc_phone") patch({ phone: target.value }); }}>
+                  <PhoneInput id="add-business-phone" name="poc_phone" value={form.phone} required locked={saving} placeholder="041 234 5678" />
+                </div>
+              </Field>
+              {error("phone")}
+            </div>
           </div>
       </>, inDialog ? "mt-5 border-t border-background-200 pt-4" : "mt-5") : null}
 
