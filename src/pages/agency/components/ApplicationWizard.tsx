@@ -18,6 +18,7 @@ import {
   type WizardStep,
 } from "@/pages/agency/lib/wizardConfig";
 import { formatExtractionCandidates } from "@/pages/agency/lib/documentExtraction";
+import { getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
 import WizardDocumentStep from "@/pages/agency/components/WizardDocumentStep";
 import { PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
@@ -35,6 +36,7 @@ interface Props {
 
 const WIZARD_CATEGORIES = new Set(WIZARD_STEPS.map((step) => step.category));
 const LAST_STEP = WIZARD_STEPS.length - 1;
+const PASSPORT_STEP = WIZARD_STEPS.findIndex((step) => step.id === "passport");
 
 function wizardStepKey(applicationId: string): string {
   return `slit-portal-wizard-step:${portalScopeCacheKey()}:${applicationId}`;
@@ -60,6 +62,9 @@ function wizardDocs(rows: DocumentRow[]): WizardDoc[] {
 }
 
 const isReading = (doc: WizardDoc) => doc.extraction === "queued" || doc.extraction === "processing";
+const isExpiredPassport = (doc: WizardDoc) =>
+  doc.category === WIZARD_STEPS[PASSPORT_STEP]?.category && doc.extraction === "done" && !!doc.extracted &&
+  getDocumentExpiryStatus("passport", doc.extracted).status === "expired";
 
 export default function ApplicationWizard({ applicationId, agencyName, onFinish, onCancel }: Props) {
   const { profile } = usePortalAuth();
@@ -255,9 +260,19 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
   /* ------------------------------------------------------------ navigate */
 
+  // An expired passport keeps the agent on the passport step until a current one is uploaded.
+  const passportExpired = documents.some(isExpiredPassport);
   const goTo = (index: number) => {
-    setStep(Math.max(0, Math.min(index, LAST_STEP)));
+    const target = Math.max(0, Math.min(index, LAST_STEP));
+    if (passportExpired && PASSPORT_STEP >= 0 && target > PASSPORT_STEP) {
+      setStep(PASSPORT_STEP);
+      return;
+    }
+    setStep(target);
   };
+  useEffect(() => {
+    if (passportExpired && PASSPORT_STEP >= 0 && step > PASSPORT_STEP) setStep(PASSPORT_STEP);
+  }, [passportExpired, step]);
 
   const stepDocs = documents.filter((doc) => doc.category === current.category);
   const stepPending = pending.filter((item) => item.category === current.category);
@@ -268,6 +283,9 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const stepBusy = (target: WizardStep) =>
     pending.some((item) => item.category === target.category && !item.error) ||
     documents.some((doc) => doc.category === target.category && isReading(doc) && !dismissed.has(doc.id));
+  // While this step's file uploads or is read, the wizard is locked so nothing else can be clicked.
+  const locked = ready && stepBusy(current);
+  const blockedByPassport = passportExpired && step === PASSPORT_STEP;
 
   const primaryClass =
     "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-5 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60";
@@ -428,7 +446,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
                   </button>
                 </>
               ) : (
-                <button type="button" onClick={() => goTo(step + 1)} disabled={!hasFile} className={primaryClass}>
+                <button type="button" onClick={() => goTo(step + 1)} disabled={!hasFile || locked || blockedByPassport} className={primaryClass}>
                   Next
                   <i className="ri-arrow-right-line" aria-hidden="true" />
                 </button>
@@ -436,6 +454,15 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
             </div>
           ) : null}
         </div>
+
+        {blockedByPassport && !locked ? (
+          <div className="border-t border-background-200 px-5 py-3 md:px-6">
+            <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
+              This passport has expired. Upload the student&rsquo;s current passport to continue.
+            </p>
+          </div>
+        ) : null}
 
         {finishError ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
@@ -449,6 +476,15 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
               Nothing is submitted from this wizard. Documents are stored privately against this draft; the student
               application is submitted only from the full form after review.
             </p>
+          </div>
+        ) : null}
+
+        {locked ? (
+          <div className="absolute inset-0 z-10 flex cursor-wait items-center justify-center rounded-xl bg-background-50/70" role="status" aria-live="polite">
+            <span className="flex items-center gap-2 rounded-md border border-background-200 bg-background-50 px-4 py-2.5 text-sm font-semibold text-foreground-800 shadow-sm">
+              <i className="ri-loader-4-line animate-spin text-primary-600" aria-hidden="true" />
+              {stepPending.some((item) => !item.error) ? `Uploading your ${current.noun}…` : `Reading your ${current.noun}…`}
+            </span>
           </div>
         ) : null}
       </div>
