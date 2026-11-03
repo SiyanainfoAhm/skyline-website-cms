@@ -700,6 +700,17 @@ export default function ApplicationWorkspace({
     setVisaNote("The visa document these details were read from is no longer attached. Check the details below, or upload the visa document again.");
   }, [attachmentsLoaded, visaMode, visaRead, visas.length]);
 
+  // The visa choice is the page's required answer: a visa read from a document or entered by hand answers "Yes",
+  // "No visa" answers "No". A draft whose details came from a document before this answer was kept would otherwise
+  // show every visa field filled and still say required fields are missing.
+  useEffect(() => {
+    if (readOnly) return;
+    const answer = visaShown ? "Yes" : visaMode === "none" ? "No" : "";
+    if (!answer) return;
+    const kept = formRef.current?.querySelector<HTMLInputElement>('input[name="holds_visa"]')?.value ?? "";
+    if (values.holds_visa !== answer || kept !== answer) setHoldsVisa(answer);
+  }, [readOnly, visaShown, visaMode, values.holds_visa, setHoldsVisa]);
+
   /* ------------------------------------------------- education answers */
 
   useEffect(() => {
