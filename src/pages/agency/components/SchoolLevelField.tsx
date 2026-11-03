@@ -17,28 +17,39 @@ export default function SchoolLevelField({ field, id, choice, schoolLevel, locke
   const selectRef = useRef<HTMLSelectElement>(null);
   const hiddenRef = useRef<HTMLInputElement>(null);
 
-  // A school level written straight into the hidden input (restored draft) shows in the dropdown when no degree is chosen.
-  useEffect(() => {
-    const hidden = hiddenRef.current;
-    const select = selectRef.current;
-    if (!hidden || !select) return undefined;
-    const follow = () => {
-      if (!DEGREE_LEVELS.includes(select.value) && select.value !== hidden.value) select.value = hidden.value;
-    };
-    hidden.addEventListener("input", follow);
-    return () => hidden.removeEventListener("input", follow);
-  }, []);
-
   const sync = () => {
     const select = selectRef.current;
     const hidden = hiddenRef.current;
-    if (!select || !hidden) return;
+    if (!select || !hidden || !select.value) return;
     const next = schoolLevelFor(select.value);
     if (hidden.value === next) return;
     hidden.value = next;
     hidden.dispatchEvent(new Event("input", { bubbles: true }));
     hidden.dispatchEvent(new Event("change", { bubbles: true }));
   };
+
+  useEffect(() => {
+    const hidden = hiddenRef.current;
+    const select = selectRef.current;
+    if (!hidden || !select) return undefined;
+    // A school level written straight into the hidden input (restored draft) shows in the dropdown when no degree is
+    // chosen; with a degree chosen, the hidden level stays "Year 12 or equivalent".
+    const follow = () => {
+      if (DEGREE_LEVELS.includes(select.value)) { sync(); return; }
+      if (select.value !== hidden.value) select.value = hidden.value;
+    };
+    // Native listeners as well as React's: values applied from documents (even to a locked, disabled dropdown) and
+    // drafts saved before the two were kept together must still fill the required school level.
+    select.addEventListener("input", sync);
+    select.addEventListener("change", sync);
+    hidden.addEventListener("input", follow);
+    sync();
+    return () => {
+      select.removeEventListener("input", sync);
+      select.removeEventListener("change", sync);
+      hidden.removeEventListener("input", follow);
+    };
+  }, []);
 
   return (
     <>
@@ -48,9 +59,6 @@ export default function SchoolLevelField({ field, id, choice, schoolLevel, locke
         name="highest_education"
         disabled={locked}
         defaultValue={choice || schoolLevel}
-        onChange={sync}
-        // Applied values (from documents) arrive as input events.
-        onInput={sync}
         className={`w-full rounded-md border border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-950 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40${locked ? " bg-background-100 text-foreground-600" : ""}`}
       >
         <option value="" disabled>{field.placeholder ?? "Select"}</option>

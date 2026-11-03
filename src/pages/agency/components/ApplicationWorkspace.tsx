@@ -37,7 +37,7 @@ import { canSubmitApplicationStatus } from "@/pages/agency/lib/applicationAccess
 import ApplicationReview, { type ConsentState } from "@/pages/agency/components/ApplicationReview";
 import ApplicationAttachmentField from "@/pages/agency/components/ApplicationAttachmentField";
 import SchoolLevelField from "@/pages/agency/components/SchoolLevelField";
-import { DEGREE_LEVELS } from "@/pages/agency/lib/educationLevels";
+import { DEGREE_LEVELS, schoolLevelFor } from "@/pages/agency/lib/educationLevels";
 import { PortalError } from "@/pages/agency/components/PortalUI";
 
 const FORM_ID = "portal-application-form";
@@ -752,7 +752,7 @@ export default function ApplicationWorkspace({
       // DEGREE_LEVELS runs highest first.
       if (foundDegree && (!degree || DEGREE_LEVELS.indexOf(foundDegree) < DEGREE_LEVELS.indexOf(degree))) degree = foundDegree;
     }
-    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level, highest_education: degree || level };
+    const answers: Record<string, string> = { prior_ed: "Yes", secondary_enrolled: "No", school_level: level || (degree ? schoolLevelFor(degree) : ""), highest_education: degree || level };
     const updates: Record<string, string> = {};
     for (const name of EDUCATION_FIELDS) {
       const value = answers[name];
