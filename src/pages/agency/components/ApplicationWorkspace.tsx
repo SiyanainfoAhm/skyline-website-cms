@@ -731,6 +731,35 @@ export default function ApplicationWorkspace({
     scheduleSave(true);
   }, [attachments, attachmentsLoaded, qualifications, readOnly, computeProgress, scheduleSave]);
 
+  /* ------------------------------------------ passport-derived answers */
+
+  // Title follows the passport gender (Male: Mr, Female: Miss) and country of birth follows citizenship. Each is only
+  // filled when empty or still holding the value worked out earlier, and is shown green with Edit.
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form || readOnly) return;
+    const wanted: Record<string, string> = {
+      title: values.gender === "Male" ? "Mr" : values.gender === "Female" ? "Miss" : "",
+      birth_country: String(values.citizenship ?? "").trim(),
+    };
+    const updates: Record<string, string> = {};
+    for (const [name, value] of Object.entries(wanted)) {
+      if (!value || unlockedFieldsRef.current.has(name)) continue;
+      const control = form.querySelector<HTMLSelectElement>(`[name="${name}"]`);
+      if (!control || !Array.from(control.options).some((option) => option.value === value)) continue;
+      const current = control.value.trim();
+      if (current === value) continue;
+      if (current && !derivedFieldsRef.current.has(name)) continue;
+      updates[name] = value;
+    }
+    const names = Object.keys(updates);
+    if (!names.length) return;
+    applyFormValues(form, updates);
+    setDerivedFields((prev) => new Set([...prev, ...names]));
+    window.requestAnimationFrame(() => computeProgress());
+    scheduleSave(true);
+  }, [values.gender, values.citizenship, readOnly, computeProgress, scheduleSave]);
+
   /* -------------------------------------------------- academic choice */
 
   const academicDocuments = useMemo(() => attachments.filter((document) => document.category === ACADEMIC_CATEGORY), [attachments]);
@@ -1155,7 +1184,7 @@ export default function ApplicationWorkspace({
           {field.label}
           {field.required ? <span className="text-primary-600">*</span> : null}
           {derivedFields.has(field.name) && !documentFields.has(field.name) && !unlockedFields.has(field.name) ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900" title="Worked out from the uploaded academic documents. Check it; you can edit it.">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold normal-case text-emerald-900" title="Worked out from the uploaded documents. Check it; you can edit it.">
               <i className="ri-file-text-line" aria-hidden="true" />
               From document
             </span>
