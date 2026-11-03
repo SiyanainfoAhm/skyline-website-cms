@@ -94,6 +94,16 @@ const ACADEMIC_CATEGORY = "Academic";
 const ACADEMIC_RECORD_FIELDS = ["academic_institution", "academic_qualification", "academic_year"] as const;
 const ACADEMIC_FIELDS: readonly string[] = [...EDUCATION_FIELDS, ...ACADEMIC_RECORD_FIELDS];
 const ENGLISH_DETAIL_FIELDS = ["english_type", "english_score", "english_date"] as const;
+/**
+ * The document each page reads, found by a field only that page has. A finished read that failed, was classified as a
+ * different kind of document, or found none of the key answers means the wrong file was uploaded; the page cannot be
+ * left forward (or the application submitted) until it is deleted, and not while a file is still being read.
+ */
+const PAGE_DOCUMENTS: ReadonlyArray<{ marker: string; category: string; noun: string; keys: readonly string[] }> = [
+  { marker: "visa_subclass", category: VISA_CATEGORY, noun: "an Australian visa grant notice or VEVO record", keys: ["visa_subclass", "visa_grant_number"] },
+  { marker: "english_type", category: ENGLISH_CATEGORY, noun: "an English test result (IELTS, PTE, TOEFL or Cambridge)", keys: ["english_type", "english_score"] },
+  { marker: "academic_upload", category: ACADEMIC_CATEGORY, noun: "an academic transcript, certificate or degree", keys: [] },
+];
 const ENGLISH_UPLOAD_FIELD: AppField = { name: "english_results", label: "English test result", type: "file" };
 const LICENCE_FIELD: AppField = { name: "licence_copy", label: "Driving licence", type: "file" };
 
@@ -944,9 +954,36 @@ export default function ApplicationWorkspace({
       // The agency/agent answers are set at the start and not shown, so they never hold a page back.
       field.required && !LOCKED_AGENT_FIELDS.has(field.name) && field.type !== "static" && field.type !== "table" && field.type !== "terms" && isConditionMet(field.showIf, values) && fieldMissing(field));
   };
-  /** Stops leaving the current page forward until its required answers are filled; shows what is missing. */
+  /** A wrong or still-unread document on one page, as the message to show; "" when its documents are fine. */
+  const documentProblem = (index: number): string => {
+    const section = sections[index];
+    if (!section || !isConditionMet(section.showIf, values)) return "";
+    for (const page of PAGE_DOCUMENTS) {
+      if (!section.fields.some((field) => field.name === page.marker)) continue;
+      for (const document of attachments) {
+        if (document.category !== page.category) continue;
+        const status = extractionStatus(document.metadata);
+        if (status === "Not requested") continue;
+        if (["queued", "processing"].includes(status)) return `${document.filename} is still being read. Wait a moment, or delete it to continue.`;
+        const extraction = document.metadata.extraction as { extracted?: Record<string, string>; source?: { categoryMismatch?: boolean } } | undefined;
+        const extracted = extraction?.extracted ?? {};
+        const wrong = status === "failed" || Boolean(extraction?.source?.categoryMismatch)
+          || (page.keys.length > 0 && !page.keys.some((key) => String(extracted[key] ?? "").trim()));
+        if (wrong) return `${document.filename} is not ${page.noun}. Delete it and upload the correct document.`;
+      }
+    }
+    return "";
+  };
+  // Keep checking a file on the open page until it has been read, so its result (or rejection) shows without a reload.
+  const stepReading = documentProblem(step).includes("is still being read");
+  useEffect(() => {
+    if (!stepReading) return undefined;
+    const timer = window.setInterval(() => { void refreshAttachments().catch(() => undefined); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [stepReading, refreshAttachments]);
+  /** Stops leaving the current page forward until its required answers are filled and its documents are right. */
   const blockedHere = (index: number): boolean => {
-    if (readOnly || index <= step || step >= reviewIndex || !pageMissing(step)) return false;
+    if (readOnly || index <= step || step >= reviewIndex || (!pageMissing(step) && !documentProblem(step))) return false;
     setErrorStep(step);
     window.requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[data-step-missing="true"]')?.scrollIntoView({ behavior: "smooth", block: "center" }));
     return true;
@@ -1029,6 +1066,12 @@ export default function ApplicationWorkspace({
     setShowErrors(true);
     if (missing.length > 0) {
       setStep(firstIndex >= 0 ? firstIndex : 0);
+      return;
+    }
+    const wrongDocumentPage = sections.findIndex((_, index) => documentProblem(index));
+    if (wrongDocumentPage >= 0) {
+      setStep(wrongDocumentPage);
+      setErrorStep(wrongDocumentPage);
       return;
     }
     if (!consent.method || !consent.confirmed || !consent.authorised) {
@@ -1695,7 +1738,12 @@ export default function ApplicationWorkspace({
                 <i className="ri-arrow-left-line" aria-hidden="true" />
                 Previous
               </button>
-              {errorStep === step && pageMissing(step) ? (
+              {index === step && documentProblem(step) ? (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-primary-700" role="alert" data-step-missing="true">
+                  <i className="ri-error-warning-line" aria-hidden="true" />
+                  {documentProblem(step)}
+                </span>
+              ) : errorStep === step && pageMissing(step) ? (
                 <span className="flex items-center gap-1.5 text-xs font-medium text-primary-700" role="alert" data-step-missing="true">
                   <i className="ri-error-warning-line" aria-hidden="true" />
                   Fill in the required fields marked on this page to continue.
