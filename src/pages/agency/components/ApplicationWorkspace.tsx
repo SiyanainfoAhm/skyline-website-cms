@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import AddressSearch from "@/pages/agency/components/AddressSearch";
+import CourseSearchField from "@/pages/agency/components/CourseSearchField";
 import { validateUsi } from "../../../../supabase/functions/_shared/validation/identifiers";
 import type { AppField, AppSection } from "@/data/applicationForms";
 import { ApplicationFieldControl } from "@/components/feature/applicationFieldKit";
@@ -1157,7 +1158,11 @@ export default function ApplicationWorkspace({
           />
         ) : (
           <div className={documentLocked ? (field.type === "radio" || field.type === "checkbox" ? DOCUMENT_FILLED_GROUP : DOCUMENT_FILLED_INPUT) : undefined}>
-            <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
+            {field.name === COURSE_FIELD ? (
+              <CourseSearchField name={field.name} options={field.options ?? []} disabled={locked} />
+            ) : (
+              <ApplicationFieldControl field={field.name === "agent_agency" ? { ...field, options: [seed.agent_agency] } : field} formId={FORM_ID} value={mergedInitial[field.name] as string | undefined} locked={locked} />
+            )}
           </div>
         )}
         {field.name === "usi_number" && usiError ? (

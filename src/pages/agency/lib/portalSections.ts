@@ -139,7 +139,7 @@ export const portalSections: AppSection[] = regroupStudentSections(enrolSections
           ...field,
           options: portalCourseOptions,
           description:
-            "Tick one or more courses below. Only courses open to international students are shown. Each option lists the course code, title and duration.",
+            "Search and pick one or more courses. Only active courses open to international students are listed.",
         }
       : field,
   ),
