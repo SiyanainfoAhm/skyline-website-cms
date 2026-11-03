@@ -6,20 +6,32 @@ import SearchPick, { type PickOption } from "@/pages/admin/components/SearchPick
 import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import AddStudentRecordDialog, { type AddStudentRecordValue, type NewStudentAgent } from "@/pages/admin/components/AddStudentRecordDialog";
 import {
-  activateAgent, listAgentDirectory, listBusinesses, setBusinessStatus,
-  type BusinessStatus, type DirectoryAgent,
+  activateAgent, listBusinesses, setBusinessStatus,
+  type AgentStatus, type BusinessStatus,
 } from "@/pages/admin/lib/businessData";
 import type { AgencyFormState } from "@/pages/admin/lib/agencyForm";
 import { createApplication } from "@/pages/agency/lib/portalApplications";
-import { createAgencyRecordWithBusiness, invokePortalUsers, logAgencyChange } from "@/pages/agency/lib/portalData";
+import {
+  createAgencyRecordWithBusiness, invokePortalUsers, listAgencyInvitations, listAgencyMembers, logAgencyChange,
+  type AgencyMemberRow, type InvitationRow,
+} from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 
 type Business =
   | { kind: "existing"; id: string; name: string; status: BusinessStatus; agencyId: string | null }
   | { kind: "new"; name: string; details: AgencyFormState };
 
+type PortalTeamMember = {
+  id: string;
+  profileId: string | null;
+  name: string;
+  email: string;
+  role: "agent" | "agency_admin";
+  status: AgentStatus;
+};
+
 type Agent =
-  | { kind: "existing"; row: DirectoryAgent }
+  | { kind: "existing"; row: PortalTeamMember }
   | { kind: "new"; details: NewStudentAgent };
 
 function newKey(): string {
@@ -58,47 +70,51 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
 
   // Each business's team is loaded once and kept, so the agent list is ready by the time a business is picked:
   // loading starts while the business is highlighted in the list, and typing filters it on this device.
-  const teams = useRef(new Map<string, Promise<DirectoryAgent[]>>());
-  const loadTeam = useCallback((id: string): Promise<DirectoryAgent[]> => {
+  const teams = useRef(new Map<string, Promise<PortalTeamMember[]>>());
+  const loadTeam = useCallback((id: string, agencyId: string): Promise<PortalTeamMember[]> => {
     const cached = teams.current.get(id);
     if (cached) return cached;
     const request = (async () => {
-      const members: DirectoryAgent[] = [];
-      let offset = 0;
-      let total = 0;
-      let pageSize = 0;
-      do {
-        const result = await listAgentDirectory({ search: "", businessId: id, limit: 100, offset });
-        members.push(...result.rows.filter((row) => row.agentId !== null));
-        total = result.total;
-        pageSize = result.rows.length;
-        offset += pageSize;
-      } while (offset < total && pageSize > 0);
-      return members;
+      const [agencyMembers, invitations] = await Promise.all([
+        listAgencyMembers(agencyId), listAgencyInvitations(agencyId),
+      ]);
+      return [
+        ...agencyMembers.map((member: AgencyMemberRow): PortalTeamMember => ({
+          id: member.profileId, profileId: member.profileId, name: member.fullName || member.email,
+          email: member.email, role: member.role, status: member.status === "Active" ? "Active" : "Inactive",
+        })),
+        ...invitations.filter((invitation: InvitationRow) => invitation.status === "pending").map((invitation): PortalTeamMember => ({
+          id: `invitation:${invitation.id}`, profileId: null, name: invitation.fullName || invitation.email,
+          email: invitation.email, role: invitation.role, status: "Invited",
+        })),
+      ];
     })();
     teams.current.set(id, request);
     request.catch(() => teams.current.delete(id));
     return request;
   }, []);
-  const prefetchTeam = useCallback((o: PickOption) => { void loadTeam(o.id).catch(() => undefined); }, [loadTeam]);
+  const prefetchTeam = useCallback((o: PickOption) => {
+    const agencyId = (o as PickOption & { raw?: { agencyId: string | null } }).raw?.agencyId;
+    if (agencyId) void loadTeam(o.id, agencyId).catch(() => undefined);
+  }, [loadTeam]);
   useEffect(() => { if (open) teams.current.clear(); }, [open]);
 
   const businessId = business?.kind === "existing" ? business.id : null;
+  const agencyId = business?.kind === "existing" ? business.agencyId : null;
   const searchAgents = useCallback(async (q: string): Promise<PickOption[]> => {
-    if (!businessId) return [];
+    if (!businessId || !agencyId) return [];
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const members = (await loadTeam(businessId)).filter((a) => {
-      const text = `${a.name} ${a.email} ${a.marn} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase();
+    const members = (await loadTeam(businessId, agencyId)).filter((a) => {
+      const text = `${a.name} ${a.email} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase();
       return words.every((w) => text.includes(w));
     });
     return members.map((a) => ({
-      id: a.key, label: a.name || a.email,
+      id: a.id, label: a.name,
       meta: [a.email, a.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "),
       tag: <AgentStatusBadge status={a.status} />, raw: a,
     }));
-  }, [businessId, loadTeam]);
+  }, [agencyId, businessId, loadTeam]);
 
-  const needsActivation = agent?.kind === "new" || (agent?.kind === "existing" && agent.row.status === "Inactive") || business?.kind === "new";
   const businessWillActivate = business?.kind === "new" || (business?.kind === "existing" && business.status !== "Active");
 
   const openNewBusiness = (name: string) => {
@@ -145,17 +161,20 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
         await logAgencyChange(created.agencyId, "agency_created", { code: business.details.code });
       }
 
-      if (needsActivation) {
-        const result = await activateAgent({
-          agentId: existingAgent?.agentId ?? null, omaraId: existingAgent?.omaraId ?? null,
-          businessId: selectedBusinessId,
-          name: existingAgent?.name ?? newAgent?.name ?? "",
-          email: existingAgent?.email ?? cleanEmail,
-          role: existingAgent?.role ?? newAgent?.role ?? "agent",
-        });
+      if (selectedBusinessId && (business.kind === "new" || business.status !== "Active" || !agencyId)) {
+        const result = await setBusinessStatus(selectedBusinessId, "Active");
         agencyId = result.agencyId;
-        if (business.kind === "new") notes.push(`${result.businessName} was created and activated.`);
-        else if (result.businessActivated) notes.push(`${result.businessName} was activated.`);
+        notes.push(business.kind === "new" ? `${business.name} was created and activated.` : `${business.name} was activated.`);
+      }
+
+      if (newAgent) {
+        const result = await activateAgent({
+          businessId: selectedBusinessId,
+          name: newAgent.name,
+          email: cleanEmail,
+          role: newAgent.role,
+        });
+        agencyId = result.agencyId ?? agencyId;
         if (!result.hasLogin && result.email && agencyId) {
           try {
             const sent = await invokePortalUsers({ action: "invite", email: result.email, name: result.name, role: result.role, agencyId, redirectTo: portalPasswordResetUrl() });
@@ -165,10 +184,9 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
             notes.push(/already been invited/i.test(reason) ? "An invitation is already waiting for this agent." : "The agent invitation was not sent; send it from the business’s Portal team tab.");
           }
         }
-      } else if (business.kind === "existing" && (business.status !== "Active" || !agencyId)) {
-        const r = await setBusinessStatus(business.id, "Active");
-        agencyId = r.agencyId;
-        notes.push(`${business.name} was activated.`);
+      } else if (existingAgent?.status === "Inactive" && profileId) {
+        await invokePortalUsers({ action: "update", profileId, status: "Active" });
+        notes.push(`${agentLabel} was reactivated.`);
       }
 
       if (!agencyId) throw new Error("This business has no workspace yet, so the student could not be added. Activate the business and try again.");
@@ -251,7 +269,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
             ) : (
               <SearchPick label="Agent" addNoun="agent" placeholder={`Search or pick an agent at ${business.name}`} resetKey={business.id} autoFocus searchWhenEmpty openOnMount
                 search={searchAgents}
-                onPick={(o) => setAgent({ kind: "existing", row: (o as PickOption & { raw: DirectoryAgent }).raw })}
+                onPick={(o) => setAgent({ kind: "existing", row: (o as PickOption & { raw: PortalTeamMember }).raw })}
                 onAddNew={openNewAgent} />
             )}
           </div>
