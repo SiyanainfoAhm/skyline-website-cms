@@ -412,7 +412,10 @@ export default function ApplicationWorkspace({
   // The address fields stay hidden until a search pick or a licence fills them (or an address is already saved).
   // An address only counts once it came from a search pick or a licence (or the manual fallback); the saved
   // address_source records which, so an address typed in before this step existed has to be found again.
-  const [addressShown, setAddressShown] = useState(() => ADDRESS_SOURCES.includes(String(storedValues.address_source ?? "")));
+  // A licence read in the document wizard counts too: its address fields carry document provenance and are shown
+  // filled (green, with Edit) straight away.
+  const addressFromWizardLicence = AU_ADDRESS_FIELDS.some((name) => documentFields.has(name));
+  const [addressShown, setAddressShown] = useState(() => ADDRESS_SOURCES.includes(String(storedValues.address_source ?? "")) || addressFromWizardLicence);
   const addressShownRef = useRef(addressShown);
   useEffect(() => { addressShownRef.current = addressShown; }, [addressShown]);
   const [searchUnavailable, setSearchUnavailable] = useState(false);
@@ -798,7 +801,7 @@ export default function ApplicationWorkspace({
       {section.scans?.length ? <p className={`rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2 text-xs text-secondary-900 ${section.description ? "mt-4" : ""}`}>Attached identity documents are securely processed in the background. Use the Documents tab to review suggestions before relying on them.</p> : null}
       {section.scans?.some((scan) => scan.type === "licence") && !readOnly ? (
         <div className="mt-4 rounded-md border border-background-200 bg-background-50 p-4">
-          <input type="hidden" name="address_source" defaultValue={String(storedValues.address_source ?? "")} />
+          <input type="hidden" name="address_source" defaultValue={String(storedValues.address_source ?? "") || (addressFromWizardLicence ? "licence" : "")} />
           <p className="text-sm font-semibold text-foreground-900">How would you like to fill the address?</p>
           <div role="radiogroup" aria-label="How to fill the address" className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([
