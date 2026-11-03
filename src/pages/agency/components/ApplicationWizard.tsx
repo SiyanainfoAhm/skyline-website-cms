@@ -18,7 +18,7 @@ import {
   type WizardStep,
 } from "@/pages/agency/lib/wizardConfig";
 import { formatExtractionCandidates } from "@/pages/agency/lib/documentExtraction";
-import { getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
+import { formatExpiryDate, getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
 import WizardDocumentStep from "@/pages/agency/components/WizardDocumentStep";
 import { PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
@@ -77,6 +77,9 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState("");
+  // Set when an uploaded passport was read as expired and removed; cleared by the next passport upload.
+  const [expiredPassport, setExpiredPassport] = useState<{ filename: string; date: string; error?: string } | null>(null);
+  const discardingRef = useRef(new Set<string>());
 
   const documentsRef = useRef<WizardDoc[]>([]);
   const refreshSequenceRef = useRef(0);
@@ -199,6 +202,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   // The loader starts here, synchronously, before any hashing or network call.
   const handlePickFiles = (target: WizardStep, list: FileList | null) => {
     if (!list || list.length === 0) return;
+    if (target.id === "passport") setExpiredPassport(null);
     const items = Array.from(list).map((file) => ({ key: crypto.randomUUID(), category: target.category, file }));
     setPending((prev) => [...prev, ...items]);
     items.forEach((item) => void startUpload(item));
@@ -222,6 +226,19 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     await deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath });
     setDocuments((prev) => prev.filter((item) => item.id !== doc.id));
   }, []);
+
+  // An expired passport is not kept: once it is read as expired the file is deleted straight away, no confirmation.
+  useEffect(() => {
+    documents.filter((doc) => isExpiredPassport(doc) && !discardingRef.current.has(doc.id)).forEach((doc) => {
+      discardingRef.current.add(doc.id);
+      const date = getDocumentExpiryStatus("passport", doc.extracted ?? {}).date ?? "";
+      setExpiredPassport({ filename: doc.filename, date });
+      void deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).then(
+        () => setDocuments((prev) => prev.filter((item) => item.id !== doc.id)),
+        (error) => setExpiredPassport({ filename: doc.filename, date, error: error instanceof Error ? error.message : "The expired passport could not be removed." }),
+      );
+    });
+  }, [documents]);
 
   /* ------------------------------------------------------------- finish */
 
@@ -261,7 +278,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   /* ------------------------------------------------------------ navigate */
 
   // An expired passport keeps the agent on the passport step until a current one is uploaded.
-  const passportExpired = documents.some(isExpiredPassport);
+  const passportExpired = expiredPassport !== null || documents.some(isExpiredPassport);
   const goTo = (index: number) => {
     const target = Math.max(0, Math.min(index, LAST_STEP));
     if (passportExpired && PASSPORT_STEP >= 0 && target > PASSPORT_STEP) {
@@ -284,7 +301,8 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     pending.some((item) => item.category === target.category && !item.error) ||
     documents.some((doc) => doc.category === target.category && isReading(doc) && !dismissed.has(doc.id));
   // While this step's file uploads or is read, the wizard is locked so nothing else can be clicked.
-  const locked = ready && stepBusy(current);
+  const removingExpired = !expiredPassport?.error && stepDocs.some(isExpiredPassport);
+  const locked = ready && (stepBusy(current) || removingExpired);
   const blockedByPassport = passportExpired && step === PASSPORT_STEP;
 
   const primaryClass =
@@ -415,7 +433,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
           {ready ? (
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-              {!isLast && !hasFile ? (
+              {!isLast && !hasFile && !blockedByPassport ? (
                 <button
                   type="button"
                   onClick={() => goTo(step + 1)}
@@ -459,7 +477,9 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
-              This passport has expired. Upload the student&rsquo;s current passport to continue.
+              {expiredPassport?.error
+                ? `${expiredPassport.filename} has expired but could not be removed (${expiredPassport.error}). Delete it, then upload the student’s current passport.`
+                : `${expiredPassport?.filename ?? "This passport"} expired${expiredPassport?.date ? ` on ${formatExpiryDate(expiredPassport.date)}` : ""} and was not saved. Upload the student’s current passport to continue.`}
             </p>
           </div>
         ) : null}
@@ -483,7 +503,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           <div className="absolute inset-0 z-10 flex cursor-wait items-center justify-center rounded-xl bg-background-50/70" role="status" aria-live="polite">
             <span className="flex items-center gap-2 rounded-md border border-background-200 bg-background-50 px-4 py-2.5 text-sm font-semibold text-foreground-800 shadow-sm">
               <i className="ri-loader-4-line animate-spin text-primary-600" aria-hidden="true" />
-              {stepPending.some((item) => !item.error) ? `Uploading your ${current.noun}…` : `Reading your ${current.noun}…`}
+              {stepPending.some((item) => !item.error) ? `Uploading your ${current.noun}…` : removingExpired ? "Passport expired, removing it…" : `Reading your ${current.noun}…`}
             </span>
           </div>
         ) : null}
