@@ -5,7 +5,8 @@ import { Link } from "react-router-dom";
 import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
 import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
 import { SELECTABLE_STATUSES } from "@/pages/agency/lib/applicationAccess";
-import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/agency/components/PortalUI";
+import { PortalEmpty, PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
+import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 
 type SortKey = "reference" | "student" | "agency" | "agent" | "status" | "completion" | "created" | "updated";
 
@@ -348,7 +349,7 @@ export default function ApplicationsTable({
                         {row.agentName || <span className="text-foreground-400">Unassigned</span>}
                       </td>
                       <td data-label="Status" className="px-3 py-3">
-                        <StatusBadge status={row.status} />
+                        <ApplicationStatusSelect applicationId={row.id} status={row.status} />
                       </td>
                       <td data-label="Progress" className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1">

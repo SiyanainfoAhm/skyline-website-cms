@@ -2,7 +2,7 @@ import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/components/ui";
-import { AgencyStatusBadge, ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
+import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
 import { listBusinesses, setBusinessStatus, type BusinessRow, type BusinessStatus, type ListCounts } from "@/pages/admin/lib/businessData";
@@ -111,15 +111,19 @@ export default function BusinessesPage() {
                         </div>
                       )}
                     </td>
-                    <td><AgencyStatusBadge status={row.status} /></td>
+                    <td>
+                      {/* Activating happens at once; deactivating asks first, as it blocks everyone in the business. */}
+                      <label className="sr-only" htmlFor={`business-status-${row.id}`}>Status for {row.name}</label>
+                      <select id={`business-status-${row.id}`} value={row.status} disabled={busyId === row.id}
+                        onChange={(e) => { if (e.target.value === "Inactive") setConfirm(row); else void change(row, "Active"); }}
+                        className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${row.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-background-300 bg-background-100 text-foreground-600"}`}>
+                        <option value="Active">{busyId === row.id ? "Saving…" : "Active"}</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </td>
                     <td>
                       <div className="flex flex-wrap justify-end gap-1.5">
                         <Link to={`/admin/businesses/${row.id}`} className="inline-flex items-center rounded-md border border-background-300 px-2.5 py-1 text-[13px] font-medium text-foreground-800 hover:bg-background-100">Open</Link>
-                        {row.status === "Active" ? (
-                          <Button size="sm" variant="ghost" disabled={busyId === row.id} onClick={() => setConfirm(row)}>Deactivate</Button>
-                        ) : (
-                          <Button size="sm" disabled={busyId === row.id} onClick={() => void change(row, "Active")}>{busyId === row.id ? "Activating…" : "Activate"}</Button>
-                        )}
                       </div>
                     </td>
                   </tr>

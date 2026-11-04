@@ -59,6 +59,13 @@ export interface StudentRow {
   id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string; createdAt: string; lastUpdated: string | null;
   agencyId: string; businessId: string; businessName: string; agentId: string | null; agentName: string;
   applications: number; statusCounts: StatusCounts;
+  /** Migration 107: nationality and each application of the student (absent on older databases). */
+  nationality?: string;
+  applicationRows?: StudentApplication[];
+}
+
+export interface StudentApplication {
+  id: string; reference: string; status: string; intake: string; completion: number; updatedAt: string; course: string | null;
 }
 
 export interface StudentDetail {

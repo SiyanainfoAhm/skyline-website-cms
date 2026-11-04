@@ -5,6 +5,8 @@ import { activateAgent, listBusinesses, type ActivationResult, type BusinessRow,
 import type { AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { invokePortalUsers } from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
+import { PhoneInput } from "@/components/feature/applicationInputs";
+import { parseStoredPhone, validateStoredPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 
 type Picked = { id: string; name: string; status: BusinessStatus | null } | null;
 
@@ -12,7 +14,7 @@ const EMAIL = /^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/;
 
 /**
  * Add an agent to a business, or activate one, in one step: choose the business (activated too when it is inactive), confirm
- * name, email, phone, MARN and role, and optionally send the sign-in invitation. A new business is added from Businesses (ABN).
+ * name, email, phone and role, and optionally send the sign-in invitation. A new business is added from Businesses (ABN).
  */
 export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
   agent: AgentToActivate | null; open: boolean; onClose: () => void; onDone: (result: ActivationResult) => void;
@@ -22,7 +24,6 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [marn, setMarn] = useState("");
   const [role, setRole] = useState<"agent" | "agency_admin">("agent");
   const [picked, setPicked] = useState<Picked>(null);
   const [search, setSearch] = useState("");
@@ -36,7 +37,6 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
     setName(agent?.name ?? "");
     setEmail(agent?.email ?? "");
     setPhone(agent?.phone ?? "");
-    setMarn(agent?.marn ?? "");
     setRole(agent?.role === "agency_admin" ? "agency_admin" : "agent");
     setPicked(agent?.business ?? null);
     setSearch("");
@@ -64,9 +64,18 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
     if (!name.trim()) { setError("Enter the agent's name."); return; }
     if (!emailValid) { setError("Enter a valid email address, or leave it empty."); return; }
     if (!picked) { setError("Choose the business this agent works for."); return; }
+    // The phone is optional; when a number is typed it must be valid for its country (10 digits from 0 in Australia).
+    const cleanPhone = phone.trim();
+    const hasNumber = Boolean(parseStoredPhone(cleanPhone)?.national);
+    if (hasNumber) {
+      const problem = validateStoredPhone(cleanPhone);
+      if (problem) { setError(problem); return; }
+    }
+    const storedPhone = hasNumber ? cleanPhone : "";
     setBusy(true);
     try {
-      const result = await activateAgent({ agentId: agent?.agentId ?? null, businessId: picked.id, name: name.trim(), email: cleanEmail, phone: phone.trim(), marn: marn.trim(), role });
+      // The MARN is no longer asked for; an agent's existing one is kept.
+      const result = await activateAgent({ agentId: agent?.agentId ?? null, businessId: picked.id, name: name.trim(), email: cleanEmail, phone: storedPhone, marn: agent?.marn ?? "", role });
       let message = `${result.name} ${adding ? "added to" : "activated with"} ${result.businessName}.`;
       if (result.businessActivated) message += " The business was activated too.";
       if (willInvite && !result.hasLogin) {
@@ -135,10 +144,14 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
           <Field label="Email" hint={agent?.hasLogin ? "They already have a login." : "Where the sign-in invitation goes."}>
             <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!emailValid} />
           </Field>
-          <Field label="Phone"><TextInput type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
-          <Field label="MARN" hint="Migration agent registration number, if they have one.">
-            <TextInput value={marn} onChange={(e) => setMarn(e.target.value)} placeholder="e.g. 1234567" />
-          </Field>
+          <div className="sm:col-span-2">
+            {/* The shared phone control: country code plus number, checked the same way as every other phone field. */}
+            <p className="mb-1.5 text-[13px] font-medium text-foreground-800">Phone</p>
+            <div onInput={(e) => { const target = e.target as HTMLInputElement; if (target.name === "agent_phone") setPhone(target.value); }}>
+              <PhoneInput key={open ? agent?.agentId ?? "new" : "closed"} id="add-agent-phone" name="agent_phone" value={phone} locked={busy} placeholder="041 234 5678" />
+            </div>
+            <p className="mt-1 text-xs text-foreground-500">Optional. Choose the country code, then the number, for example 041 234 5678.</p>
+          </div>
         </div>
 
         <fieldset>
