@@ -118,6 +118,25 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     }
   };
 
+  // The browser's own confirm box: it always shows in front of the page, however long the list is.
+  const askDelete = (row: StudentRow) => {
+    const who = row.name || row.email || "this student";
+    const submitted = submittedCount(row);
+    if (submitted > 0) {
+      window.alert(`${who} cannot be deleted: they have ${submitted} submitted application${submitted === 1 ? "" : "s"}, which are kept as admissions records.
+
+Set their Student status to Disabled instead to lock everything.`);
+      return;
+    }
+    const drafts = row.applicationRows?.length ?? 0;
+    const ok = window.confirm(`Delete ${who}?
+
+The student record${drafts > 0 ? `, their ${drafts} draft application${drafts === 1 ? "" : "s"} and the uploaded files` : ""} will be permanently deleted. This cannot be undone.`);
+    if (!ok) return;
+    setConfirmDelete(row);
+    void deleteStudent(row);
+  };
+
   const filtered = Boolean(search || status);
   const columns = businessId ? 4 : 5;
   return (
@@ -168,7 +187,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                           <button type="button" disabled={busyId === row.id} onClick={() => setEditing(row)} className="inline-flex items-center gap-1 text-primary-700 hover:underline disabled:opacity-50">
                             <i className="ri-edit-line" aria-hidden="true" /> Edit
                           </button>
-                          <button type="button" disabled={busyId === row.id} onClick={() => setConfirmDelete(row)} className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50">
+                          <button type="button" disabled={busyId === row.id} onClick={() => askDelete(row)} className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50">
                             <i className="ri-delete-bin-line" aria-hidden="true" /> {busyId === row.id && confirmDelete?.id === row.id ? "Deleting…" : "Delete"}
                           </button>
                         </span>
@@ -222,21 +241,6 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
       </Card>
 
       <EditStudentDialog student={editing} onClose={() => setEditing(null)} onSaved={() => setReload((n) => n + 1)} />
-
-      <ConfirmDialog
-        open={Boolean(confirmDelete)}
-        title={confirmDelete && submittedCount(confirmDelete) > 0 ? "This student cannot be deleted" : `Delete ${confirmDelete?.name || confirmDelete?.email || "this student"}?`}
-        message={confirmDelete && submittedCount(confirmDelete) > 0
-          ? `They have ${submittedCount(confirmDelete)} submitted application${submittedCount(confirmDelete) === 1 ? "" : "s"}, which are kept as admissions records. Disable the student instead to lock everything.`
-          : `The student record${(confirmDelete?.applicationRows?.length ?? 0) > 0 ? `, their ${confirmDelete?.applicationRows?.length} draft application${confirmDelete?.applicationRows?.length === 1 ? "" : "s"} and the uploaded files` : ""} will be permanently deleted. This cannot be undone.`}
-        confirmLabel={confirmDelete && submittedCount(confirmDelete) > 0 ? "OK" : busyId ? "Deleting…" : "Delete student"}
-        onConfirm={() => {
-          if (!confirmDelete || busyId) return;
-          if (submittedCount(confirmDelete) > 0) { setConfirmDelete(null); return; }
-          void deleteStudent(confirmDelete);
-        }}
-        onCancel={() => { if (!busyId) setConfirmDelete(null); }}
-      />
 
       <ConfirmDialog
         open={Boolean(confirmDisable)}

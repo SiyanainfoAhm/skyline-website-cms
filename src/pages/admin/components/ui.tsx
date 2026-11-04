@@ -11,6 +11,7 @@ import {
   type TextareaHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
+import { createPortal } from "react-dom";
 import { uploadCmsImage } from "@/pages/admin/lib/storage";
 
 /* ------------------------------------------------------------------ Button */
@@ -372,7 +373,9 @@ export function Modal({
   width?: string;
 }) {
   if (!open) return null;
-  return (
+  // Rendered on <body>: inside a table frame (CSS containment) or a transformed parent, a fixed dialog would be placed
+  // relative to that box instead of the screen and could open out of sight on a long page.
+  return createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-foreground-950/40" onClick={onClose} aria-hidden="true" />
       <div className={`relative w-full ${width} rounded-card border border-background-200 bg-background-50`}>
@@ -392,7 +395,8 @@ export function Modal({
           <div className="flex justify-end gap-2 border-t border-background-200 px-5 py-3.5">{footer}</div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
