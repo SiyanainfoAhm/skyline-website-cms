@@ -133,8 +133,8 @@ export default function AgentsPage() {
             <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr>
-                  {sortHeader("business", "Business", "w-[24%]")}
                   {sortHeader("agent", "Agent", "w-[28%]")}
+                  {sortHeader("business", "Business", "w-[24%]")}
                   {sortHeader("students", "Students", "w-[9%]")}
                   {sortHeader("applications", "Applications", "w-[23%]")}
                   {sortHeader("status", "Status", "w-[16%]")}
@@ -144,15 +144,15 @@ export default function AgentsPage() {
                 {loading && !counts ? <tr><td colSpan={5} className="py-10 text-center text-foreground-500">Loading agents…</td></tr> : sorted.map((r) => (
                   <tr key={r.key}>
                     <td>
-                      <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link>
-                      {r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
-                    </td>
-                    <td>
                       <Link to={`/admin/agents/${r.key}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link>
                       <p className="mt-0.5 text-xs text-foreground-500">
                         {[r.marn ? `MARN ${r.marn}` : null, r.role === "agency_admin" ? "Agency admin" : null, r.email].filter(Boolean).join(", ")}
                       </p>
                       {r.registered === false ? <p className="text-xs font-medium text-amber-700">No longer registered with OMARA</p> : null}
+                    </td>
+                    <td>
+                      <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link>
+                      {r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
                     </td>
                     <td>{r.students > 0 ? <Link to={`/admin/agents/${r.key}`} className="font-bold text-foreground-900 hover:text-primary-700">{r.students}</Link> : <span className="text-xs text-foreground-500">None</span>}</td>
                     <td>
