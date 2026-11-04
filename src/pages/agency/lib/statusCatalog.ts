@@ -3,7 +3,7 @@ import { supabase } from "@/pages/admin/lib/supabase";
 
 /** A status as the backend defines it. */
 export interface StatusChoice { value: string; label: string; note?: string }
-export interface StatusCatalog { application: StatusChoice[]; business: StatusChoice[]; agent: StatusChoice[] }
+export interface StatusCatalog { application: StatusChoice[]; business: StatusChoice[]; agent: StatusChoice[]; student: StatusChoice[] }
 
 /**
  * Used only until the backend answers (or if it cannot): the same values the database stores. Every list on screen is
@@ -17,6 +17,7 @@ const FALLBACK: StatusCatalog = {
   ],
   business: [{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }],
   agent: [{ value: "Active", label: "Active" }, { value: "Invited", label: "Invited" }, { value: "Inactive", label: "Inactive" }],
+  student: [{ value: "Active", label: "Active" }, { value: "Inactive", label: "Disabled" }],
 };
 
 let cached: StatusCatalog | null = null;
@@ -38,7 +39,10 @@ export function loadStatusCatalog(): Promise<StatusCatalog> {
     const { data, error } = await supabase.rpc("portal_status_catalog");
     if (error || !data || typeof data !== "object") return FALLBACK;
     const r = data as Record<string, unknown>;
-    cached = { application: choices(r.application, FALLBACK.application), business: choices(r.business, FALLBACK.business), agent: choices(r.agent, FALLBACK.agent) };
+    cached = {
+      application: choices(r.application, FALLBACK.application), business: choices(r.business, FALLBACK.business),
+      agent: choices(r.agent, FALLBACK.agent), student: choices(r.student, FALLBACK.student),
+    };
     return cached;
   })().catch(() => FALLBACK).finally(() => { pending = null; });
   return pending;

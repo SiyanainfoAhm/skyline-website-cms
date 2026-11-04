@@ -1,19 +1,20 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, Card, Select } from "@/pages/admin/components/ui";
+import { Button, Card, ConfirmDialog, Select } from "@/pages/admin/components/ui";
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListControls";
-import { listStudents, type StudentRow } from "@/pages/admin/lib/businessData";
-import { formatDate } from "@/pages/agency/lib/portalData";
+import { useToast } from "@/pages/admin/components/toastContext";
+import { listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 
 // Up to 100 students load per page and are sorted on this device (like the Agents list).
 const PAGE_SIZE = 100;
-type SortKey = "student" | "business" | "agent" | "applications" | "activity";
+type SortKey = "student" | "business" | "agent" | "applications" | "studentStatus";
 const text = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+const studentStatusOf = (row: StudentRow) => row.status ?? "Active";
 
 function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
   // Students without a name yet sort after named ones.
@@ -23,16 +24,17 @@ function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
     case "business": return text(a.businessName).localeCompare(text(b.businessName)) || byName;
     case "agent": return text(a.agentName || "￿").localeCompare(text(b.agentName || "￿")) || byName;
     case "applications": return a.applications - b.applications || byName;
-    case "activity": return (a.lastUpdated ?? "").localeCompare(b.lastUpdated ?? "") || byName;
+    case "studentStatus": return studentStatusOf(a).localeCompare(studentStatusOf(b)) || byName;
   }
 }
 
 /**
- * Students: who they are (name, email, mobile, passport), their business and agent, and each of their applications with
- * its course, intake and a status that can be changed in place. With `businessId`, only that business's students and no
- * business column; with `agentId`, one agent's.
+ * Students: who they are, their business and agent, each application's status (changeable in place) and the student's
+ * own status. Disabling a student locks all of their applications until they are enabled again. With `businessId`, only
+ * that business's students and no business column; with `agentId`, one agent's.
  */
 export default function StudentsTable({ businessId, agentId, emptyText }: { businessId?: string; agentId?: string; emptyText?: string }) {
+  const { push } = useToast();
   const statusCatalog = useStatusCatalog();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -43,6 +45,8 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [confirmDisable, setConfirmDisable] = useState<StudentRow | null>(null);
+  const [busyId, setBusyId] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -72,6 +76,22 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     </th>
   );
 
+  const changeStudentStatus = async (row: StudentRow, next: "Active" | "Inactive") => {
+    setBusyId(row.id);
+    try {
+      await setStudentStatus(row.id, next);
+      push(next === "Inactive"
+        ? `${row.name || row.email} disabled. Their applications are locked until they are enabled again.`
+        : `${row.name || row.email} enabled. Their applications can be worked on again.`);
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not change this student's status.", "error");
+    } finally {
+      setBusyId("");
+      setConfirmDisable(null);
+    }
+  };
+
   const filtered = Boolean(search || status);
   const columns = businessId ? 4 : 5;
   return (
@@ -96,59 +116,85 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
             <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr>
-                  {sortHeader("student", "Student", businessId ? "w-[30%]" : "w-[26%]")}
+                  {sortHeader("student", "Student", businessId ? "w-[30%]" : "w-[25%]")}
                   {businessId ? null : sortHeader("business", "Business", "w-[16%]")}
-                  {sortHeader("agent", "Agent", "w-[14%]")}
-                  {sortHeader("applications", "Applications", "w-[34%]")}
-                  {sortHeader("activity", "Last activity", "w-[10%]")}
+                  {sortHeader("agent", "Agent", "w-[13%]")}
+                  {sortHeader("applications", "Application status", "w-[34%]")}
+                  {sortHeader("studentStatus", "Student status", "w-[12%]")}
                 </tr>
               </thead>
               <tbody>
-                {!loaded ? <tr><td colSpan={columns} className="py-10 text-center text-foreground-500">Loading students…</td></tr> : sorted.map((row) => (
-                  <tr key={row.id} className="align-top">
-                    <td>
-                      <Link to={`/admin/students/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">
-                        {row.name || <span className="italic text-foreground-500">Name not read from passport yet</span>}
-                      </Link>
-                      <p className="mt-0.5 text-xs text-foreground-600">{row.email || "No email"}</p>
-                      {row.phone ? <p className="text-xs text-foreground-600">{formatPhone(row.phone)}</p> : null}
-                      {row.passportNumber || row.nationality ? (
-                        <p className="text-xs text-foreground-500">{[row.passportNumber ? `Passport ${row.passportNumber}` : "", row.nationality ?? ""].filter(Boolean).join(" · ")}</p>
-                      ) : null}
-                    </td>
-                    {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
-                    <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>
-                    <td>
-                      {row.applicationRows ? (
-                        row.applicationRows.length === 0 ? <span className="text-xs text-foreground-500">No applications</span> : (
-                          <ul className="space-y-2">
-                            {row.applicationRows.map((application) => (
-                              <li key={application.id} className="flex flex-wrap items-center justify-between gap-2">
-                                <span className="min-w-0 text-xs">
-                                  <Link to={`/admin/applications/${application.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{application.reference || "Draft"}</Link>
-                                  <span className="block text-foreground-600">{[application.course || "No course yet", application.intake ? `Intake ${application.intake}` : "", `${application.completion}%`].filter(Boolean).join(" · ")}</span>
-                                </span>
-                                <ApplicationStatusSelect applicationId={application.id} status={application.status} openHref={`/admin/applications/${application.id}`} />
-                              </li>
-                            ))}
-                          </ul>
-                        )
-                      ) : (
-                        <>
-                          <p className="mb-1 text-xs font-semibold text-foreground-900">{row.applications} application{row.applications === 1 ? "" : "s"}</p>
-                          <ApplicationStatusPills counts={row.statusCounts} />
-                        </>
-                      )}
-                    </td>
-                    <td className="text-xs text-foreground-600">{formatDate(row.lastUpdated)}</td>
-                  </tr>
-                ))}
+                {!loaded ? <tr><td colSpan={columns} className="py-10 text-center text-foreground-500">Loading students…</td></tr> : sorted.map((row) => {
+                  const disabled = studentStatusOf(row) === "Inactive";
+                  return (
+                    <tr key={row.id} className={`align-top ${disabled ? "bg-background-100/60" : ""}`}>
+                      <td>
+                        <Link to={`/admin/students/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">
+                          {row.name || <span className="italic text-foreground-500">Name not read from passport yet</span>}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-foreground-600">{row.email || "No email"}</p>
+                        {row.phone ? <p className="text-xs text-foreground-600">{formatPhone(row.phone)}</p> : null}
+                        {row.passportNumber || row.nationality ? (
+                          <p className="text-xs text-foreground-500">{[row.passportNumber ? `Passport ${row.passportNumber}` : "", row.nationality ?? ""].filter(Boolean).join(" · ")}</p>
+                        ) : null}
+                      </td>
+                      {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
+                      <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>
+                      <td>
+                        {row.applicationRows ? (
+                          row.applicationRows.length === 0 ? <span className="text-xs text-foreground-500">No applications</span> : (
+                            <ul className="space-y-2">
+                              {row.applicationRows.map((application) => (
+                                <li key={application.id} className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="min-w-0 text-xs">
+                                    <Link to={`/admin/applications/${application.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{application.reference || "Draft"}</Link>
+                                    <span className="block text-foreground-600">{[application.course || "No course yet", application.intake ? `Intake ${application.intake}` : "", `${application.completion}%`].filter(Boolean).join(" · ")}</span>
+                                  </span>
+                                  <span className="inline-flex flex-col items-end gap-0.5">
+                                    {/* A disabled student's applications are locked: their status shows but cannot change. */}
+                                    <ApplicationStatusSelect applicationId={application.id} status={application.status}
+                                      allowed={disabled ? [] : application.nextStatuses} openHref={disabled ? undefined : `/admin/applications/${application.id}`} />
+                                    {disabled ? <span className="text-[11px] font-medium text-foreground-500"><i className="ri-lock-line" aria-hidden="true" /> Locked</span> : null}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )
+                        ) : (
+                          <>
+                            <p className="mb-1 text-xs font-semibold text-foreground-900">{row.applications} application{row.applications === 1 ? "" : "s"}</p>
+                            <ApplicationStatusPills counts={row.statusCounts} />
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        <label className="sr-only" htmlFor={`student-status-${row.id}`}>Status for {row.name || row.email}</label>
+                        <select id={`student-status-${row.id}`} value={studentStatusOf(row)} disabled={busyId === row.id || row.status === undefined}
+                          onChange={(e) => { if (e.target.value === "Inactive") setConfirmDisable(row); else void changeStudentStatus(row, "Active"); }}
+                          className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${disabled ? "border-background-300 bg-background-100 text-foreground-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                          {statusCatalog.student.map((item) => (
+                            <option key={item.value} value={item.value}>{busyId === row.id && item.value === studentStatusOf(row) ? "Saving…" : item.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </ResponsiveTable>
           </div>
         )}
         {!error ? <Pager page={page} pageSize={PAGE_SIZE} total={total} loading={loading} onPage={setPage} /> : null}
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(confirmDisable)}
+        title={`Disable ${confirmDisable?.name || confirmDisable?.email || "this student"}?`}
+        message={`All ${confirmDisable?.applications ?? 0} of their application${confirmDisable?.applications === 1 ? "" : "s"} will be locked: nothing can be edited, uploaded, submitted or have its status changed. Their statuses are kept, and enabling the student again unlocks everything.`}
+        confirmLabel={busyId ? "Disabling…" : "Disable student"}
+        onConfirm={() => { if (confirmDisable && !busyId) void changeStudentStatus(confirmDisable, "Inactive"); }}
+        onCancel={() => { if (!busyId) setConfirmDisable(null); }}
+      />
     </div>
   );
 }

@@ -62,11 +62,19 @@ export interface StudentRow {
   /** Migration 107: nationality and each application of the student (absent on older databases). */
   nationality?: string;
   applicationRows?: StudentApplication[];
+  /** Migration 112: Active, or Inactive (Disabled: every application of the student is locked). */
+  status?: "Active" | "Inactive";
 }
 
 export interface StudentApplication {
   id: string; reference: string; status: string; intake: string; completion: number; updatedAt: string; course: string | null;
+  /** Moves the backend allows for the signed-in administrator (empty while the student is disabled). */
+  nextStatuses?: string[];
 }
+
+/** Enable (Active) or disable (Inactive) a student; disabling locks all of their applications. */
+export const setStudentStatus = (id: string, status: "Active" | "Inactive") =>
+  call<{ studentId: string; status: "Active" | "Inactive" }>("admin_student_set_status", { p_student: id, p_status: status }, "We could not change this student's status.");
 
 export interface StudentDetail {
   id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string; nationality: string; createdAt: string;
