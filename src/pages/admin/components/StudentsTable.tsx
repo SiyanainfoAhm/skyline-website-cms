@@ -7,7 +7,7 @@ import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListCont
 import { useToast } from "@/pages/admin/components/toastContext";
 import { listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
-import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
+import { StatusBadge } from "@/pages/agency/components/PortalUI";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 
 // Up to 100 students load per page and are sorted on this device (like the Agents list).
@@ -29,8 +29,8 @@ function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
 }
 
 /**
- * Students: who they are, their business and agent, each application's status (changeable in place) and the student's
- * own status. Disabling a student locks all of their applications until they are enabled again. With `businessId`, only
+ * Students: who they are, their business and agent, the student's own status, and each application's status (shown
+ * only). Disabling a student locks all of their applications until they are enabled again. With `businessId`, only
  * that business's students and no business column; with `agentId`, one agent's.
  */
 export default function StudentsTable({ businessId, agentId, emptyText }: { businessId?: string; agentId?: string; emptyText?: string }) {
@@ -119,8 +119,8 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                   {sortHeader("student", "Student", businessId ? "w-[30%]" : "w-[25%]")}
                   {businessId ? null : sortHeader("business", "Business", "w-[16%]")}
                   {sortHeader("agent", "Agent", "w-[13%]")}
-                  {sortHeader("applications", "Application status", "w-[34%]")}
                   {sortHeader("studentStatus", "Student status", "w-[12%]")}
+                  {sortHeader("applications", "Application status", "w-[34%]")}
                 </tr>
               </thead>
               <tbody>
@@ -141,6 +141,16 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                       {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
                       <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>
                       <td>
+                        <label className="sr-only" htmlFor={`student-status-${row.id}`}>Status for {row.name || row.email}</label>
+                        <select id={`student-status-${row.id}`} value={studentStatusOf(row)} disabled={busyId === row.id || row.status === undefined}
+                          onChange={(e) => { if (e.target.value === "Inactive") setConfirmDisable(row); else void changeStudentStatus(row, "Active"); }}
+                          className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${disabled ? "border-background-300 bg-background-100 text-foreground-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                          {statusCatalog.student.map((item) => (
+                            <option key={item.value} value={item.value}>{busyId === row.id && item.value === studentStatusOf(row) ? "Saving…" : item.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
                         {row.applicationRows ? (
                           row.applicationRows.length === 0 ? <span className="text-xs text-foreground-500">No applications</span> : (
                             <ul className="space-y-2">
@@ -151,9 +161,8 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                                     <span className="block text-foreground-600">{[application.course || "No course yet", application.intake ? `Intake ${application.intake}` : "", `${application.completion}%`].filter(Boolean).join(" · ")}</span>
                                   </span>
                                   <span className="inline-flex flex-col items-end gap-0.5">
-                                    {/* A disabled student's applications are locked: their status shows but cannot change. */}
-                                    <ApplicationStatusSelect applicationId={application.id} status={application.status}
-                                      allowed={disabled ? [] : application.nextStatuses} openHref={disabled ? undefined : `/admin/applications/${application.id}`} />
+                                    {/* Shown only; the status is changed on the Applications list or the application itself. */}
+                                    <StatusBadge status={application.status} />
                                     {disabled ? <span className="text-[11px] font-medium text-foreground-500"><i className="ri-lock-line" aria-hidden="true" /> Locked</span> : null}
                                   </span>
                                 </li>
@@ -166,16 +175,6 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                             <ApplicationStatusPills counts={row.statusCounts} />
                           </>
                         )}
-                      </td>
-                      <td>
-                        <label className="sr-only" htmlFor={`student-status-${row.id}`}>Status for {row.name || row.email}</label>
-                        <select id={`student-status-${row.id}`} value={studentStatusOf(row)} disabled={busyId === row.id || row.status === undefined}
-                          onChange={(e) => { if (e.target.value === "Inactive") setConfirmDisable(row); else void changeStudentStatus(row, "Active"); }}
-                          className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${disabled ? "border-background-300 bg-background-100 text-foreground-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
-                          {statusCatalog.student.map((item) => (
-                            <option key={item.value} value={item.value}>{busyId === row.id && item.value === studentStatusOf(row) ? "Saving…" : item.label}</option>
-                          ))}
-                        </select>
                       </td>
                     </tr>
                   );
