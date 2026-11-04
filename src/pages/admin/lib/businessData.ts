@@ -1,4 +1,12 @@
 import { supabase } from "@/pages/admin/lib/supabase";
+import { invokePortalUsers } from "@/pages/agency/lib/portalData";
+import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
+
+/** Sends a waiting sign-in invitation again; returns the message to show. */
+export async function resendInvitation(invitationId: string, email: string): Promise<string> {
+  const data = await invokePortalUsers({ action: "resend", invitationId, redirectTo: portalPasswordResetUrl() });
+  return data.warning ? String(data.warning) : `Invitation resent to ${email}.`;
+}
 
 /**
  * SLIT administrator views of the one chain: business (an agency record, unique by ABN) -> agents -> students -> applications.

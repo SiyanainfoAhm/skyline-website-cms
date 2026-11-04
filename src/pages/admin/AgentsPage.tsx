@@ -7,7 +7,7 @@ import ActivateAgentDialog from "@/pages/admin/components/ActivateAgentDialog";
 import { toActivate, type AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deactivateAgent, listAgentDirectory, type AgentCounts, type AgentStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, listAgentDirectory, resendInvitation, type AgentCounts, type AgentStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
@@ -114,6 +114,18 @@ export default function AgentsPage() {
     }
   };
 
+  const resend = async (row: DirectoryAgent) => {
+    if (!row.invitationId) return;
+    setBusyKey(row.key);
+    try {
+      push(await resendInvitation(row.invitationId, row.email));
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
   const filtered = Boolean(values.q || values.status);
   return (
     <div>
@@ -180,6 +192,12 @@ export default function AgentsPage() {
                           </option>
                         ))}
                       </select>
+                      {r.status === "Invited" && r.invitationId ? (
+                        <button type="button" disabled={busyKey === r.key} onClick={() => void resend(r)}
+                          className="mt-1.5 flex cursor-pointer items-center gap-1 text-xs font-semibold text-primary-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60">
+                          <i className="ri-mail-send-line" aria-hidden="true" /> {busyKey === r.key ? "Sending…" : "Resend invite"}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

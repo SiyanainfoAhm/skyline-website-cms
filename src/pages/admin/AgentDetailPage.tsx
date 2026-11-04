@@ -7,7 +7,7 @@ import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import ApplicationsList from "@/pages/admin/components/ApplicationsList";
 import { ListMessage } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deactivateAgent, getAgentOverview, type AgentOverview } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, getAgentOverview, resendInvitation, type AgentOverview } from "@/pages/admin/lib/businessData";
 import { groupByStudent } from "@/pages/admin/lib/businessGroups";
 import { formatDate } from "@/pages/agency/lib/portalData";
 
@@ -50,6 +50,18 @@ export default function AgentDetailPage() {
     }
   };
 
+  const resend = async () => {
+    if (!agent?.invitationId) return;
+    setBusy(true);
+    try {
+      push(await resendInvitation(agent.invitationId, agent.email));
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (state === "loading") return <p className="p-6 text-sm text-foreground-600">Loading agent&hellip;</p>;
   if (!agent) {
     return (
@@ -76,6 +88,9 @@ export default function AgentDetailPage() {
         description={[agent.marn ? `MARN ${agent.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
         actions={<>
           <AgentStatusBadge status={agent.status} />
+          {agent.status === "Invited" && agent.invitationId
+            ? <Button variant="outline" icon="ri-mail-send-line" disabled={busy} onClick={() => void resend()}>{busy ? "Sending…" : "Resend invite"}</Button>
+            : null}
           {agent.status === "Inactive"
             ? <Button onClick={() => setDialog(true)}>Activate agent</Button>
             : <Button variant="outline" disabled={busy} onClick={() => setConfirm(true)}>Deactivate agent</Button>}

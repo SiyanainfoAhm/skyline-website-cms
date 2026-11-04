@@ -10,9 +10,8 @@ import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import { toActivate, type AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { useToast } from "@/pages/admin/components/toastContext";
 import { ApplicationsTab, DetailsTab } from "@/pages/admin/AgencyDetailPage";
-import { deactivateAgent, getBusiness, listBusinessAgents, setBusinessStatus, type BusinessDetail, type BusinessStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
-import { formatDate, getAgency, invokePortalUsers, type AgencySummary } from "@/pages/agency/lib/portalData";
-import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
+import { deactivateAgent, getBusiness, resendInvitation, listBusinessAgents, setBusinessStatus, type BusinessDetail, type BusinessStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
+import { formatDate, getAgency, type AgencySummary } from "@/pages/agency/lib/portalData";
 
 type Tab = "details" | "agents" | "students" | "applications";
 const TAB_IDS: Tab[] = ["details", "agents", "students", "applications"];
@@ -203,8 +202,7 @@ function AgentsSection({ business, onChanged }: { business: { id: string; name: 
     if (!row.invitationId) return;
     setBusyId(row.agentId);
     try {
-      const data = await invokePortalUsers({ action: "resend", invitationId: row.invitationId, redirectTo: portalPasswordResetUrl() });
-      push(data.warning ? String(data.warning) : `Invitation resent to ${row.email}.`);
+      push(await resendInvitation(row.invitationId, row.email));
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
     } finally {
