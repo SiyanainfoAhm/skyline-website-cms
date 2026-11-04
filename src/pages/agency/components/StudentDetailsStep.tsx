@@ -11,6 +11,9 @@ export interface StudentDraft {
   mobile: string;
   dateOfBirth: string;
   passportNumber: string;
+  /** Asked only by Students > Add student (no passport yet); the passport replaces them when read. */
+  firstName?: string;
+  lastName?: string;
 }
 
 const EMPTY: StudentDraft = { fullName: "", email: "", mobile: "", dateOfBirth: "", passportNumber: "" };
@@ -21,7 +24,7 @@ const INPUT = "w-full rounded-md border border-background-300 bg-background-50 p
  * stops the step with a message; nothing is created. With `allowStudentWithoutApplication`, a student added earlier
  * (Students > Add student) who matches both email and mobile and has no application yet continues as that student.
  */
-export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false }: {
+export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false, askName = false }: {
   initial?: Partial<StudentDraft>;
   busy: boolean;
   error?: string;
@@ -31,9 +34,11 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   cancel?: ReactNode;
   description?: string;
   allowStudentWithoutApplication?: boolean;
+  /** Also asks first and last name (both required). */
+  askName?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
-  const [errors, setErrors] = useState<{ email?: string; mobile?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; mobile?: string; firstName?: string; lastName?: string }>({});
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState("");
   const start = { ...EMPTY, ...initial };
@@ -41,12 +46,19 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   const submit = async () => {
     const data = new FormData(formRef.current ?? undefined);
     const draft: StudentDraft = { ...EMPTY, email: String(data.get("email") ?? "").trim().toLowerCase(), mobile: String(data.get("mobile") ?? "").trim() };
+    if (askName) {
+      draft.firstName = String(data.get("firstName") ?? "").replace(/\s+/g, " ").trim();
+      draft.lastName = String(data.get("lastName") ?? "").replace(/\s+/g, " ").trim();
+      draft.fullName = [draft.firstName, draft.lastName].filter(Boolean).join(" ");
+    }
     const next = {
+      firstName: askName && !draft.firstName ? "Enter the student's first name." : undefined,
+      lastName: askName && !draft.lastName ? "Enter the student's last name." : undefined,
       email: validateEmail(draft.email) ?? undefined,
       mobile: !draft.mobile.startsWith("+") || !parseStoredPhone(draft.mobile)?.national ? "Enter the student's mobile number." : validateStoredPhone(draft.mobile) || undefined,
     };
     setErrors(next);
-    if (next.email || next.mobile) return;
+    if (next.email || next.mobile || next.firstName || next.lastName) return;
     setChecking(true);
     setCheckError("");
     try {
@@ -77,15 +89,29 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
       // A field's error goes as soon as it is edited; both are checked again on Next.
       onInput={(event) => {
         const name = (event.target as HTMLInputElement).name;
-        if (name === "email" || name === "mobile") setErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
+        if (name === "email" || name === "mobile" || name === "firstName" || name === "lastName") setErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
       }}>
-      <h2 className="font-heading text-base font-semibold text-foreground-950">Student contact details</h2>
+      <h2 className="font-heading text-base font-semibold text-foreground-950">{askName ? "Student details" : "Student contact details"}</h2>
       <p className="mt-1.5 text-sm text-foreground-600">{description ?? "Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport you upload next."}</p>
 
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {askName ? (
+          <>
+            <div>
+              <label htmlFor="student-first-name" className="mb-1.5 block text-[13px] font-medium text-foreground-800">First name <span className="text-primary-600">*</span></label>
+              <input id="student-first-name" name="firstName" required autoFocus autoComplete="off" maxLength={100} defaultValue={start.firstName ?? ""} aria-invalid={Boolean(errors.firstName)} className={INPUT} />
+              {errors.firstName ? <p className="mt-1 text-xs text-primary-800" role="alert">{errors.firstName}</p> : null}
+            </div>
+            <div>
+              <label htmlFor="student-last-name" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Last name <span className="text-primary-600">*</span></label>
+              <input id="student-last-name" name="lastName" required autoComplete="off" maxLength={100} defaultValue={start.lastName ?? ""} aria-invalid={Boolean(errors.lastName)} className={INPUT} />
+              {errors.lastName ? <p className="mt-1 text-xs text-primary-800" role="alert">{errors.lastName}</p> : null}
+            </div>
+          </>
+        ) : null}
         <div>
           <label htmlFor="student-email" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Email <span className="text-primary-600">*</span></label>
-          <input id="student-email" name="email" type="email" required autoFocus autoComplete="off" maxLength={254} defaultValue={start.email} placeholder="student@example.com" aria-invalid={Boolean(errors.email)} className={INPUT} />
+          <input id="student-email" name="email" type="email" required autoFocus={!askName} autoComplete="off" maxLength={254} defaultValue={start.email} placeholder="student@example.com" aria-invalid={Boolean(errors.email)} className={INPUT} />
           {errors.email ? <p className="mt-1 text-xs text-primary-800" role="alert">{errors.email}</p> : null}
         </div>
         <div>

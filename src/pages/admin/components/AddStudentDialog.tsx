@@ -73,8 +73,8 @@ export default function AddStudentDialog({ open, onClose, onAdded }: { open: boo
         await activateAgent({ agentId: agent.id, businessId: business.id, name: agent.name, email: agent.email, role: agent.role });
         notes.push(`${agent.name} was activated.`);
       }
-      const saved = await saveStudent({ agentId: agent.id, fullName: draft.fullName, email: draft.email, mobile: draft.mobile, dateOfBirth: draft.dateOfBirth, passportNumber: draft.passportNumber });
-      push([saved.reused ? `${saved.name || draft.email} is already on record, so that record is kept.` : `Student ${draft.email} added to ${agent.name}.`, ...notes].join(" "));
+      const saved = await saveStudent({ agentId: agent.id, fullName: draft.fullName, firstName: draft.firstName, lastName: draft.lastName, email: draft.email, mobile: draft.mobile, dateOfBirth: draft.dateOfBirth, passportNumber: draft.passportNumber });
+      push([saved.reused ? `${saved.name || draft.email} is already on record, so that record is kept.` : `${draft.fullName || draft.email} added to ${agent.name}.`, ...notes].join(" "));
       onAdded?.();
       onClose();
     } catch (e) {
@@ -99,7 +99,7 @@ export default function AddStudentDialog({ open, onClose, onAdded }: { open: boo
     <Modal open={open} onClose={() => { if (!busy) onClose(); }} width="max-w-2xl" title="Add student"
       footer={ready ? undefined : <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>}>
       <div className="space-y-5">
-        {!ready ? <p className="text-sm text-foreground-600">Choose the business and the agent who looks after the student, then enter the student's email and mobile.</p> : null}
+        {!ready ? <p className="text-sm text-foreground-600">Choose the business and the agent who looks after the student, then enter the student's name, email and mobile.</p> : null}
 
         {/* Business */}
         <div>
@@ -133,8 +133,8 @@ export default function AddStudentDialog({ open, onClose, onAdded }: { open: boo
         {/* Student */}
         {ready ? (
           <div className="border-t border-background-200 pt-5">
-            <StudentDetailsStep busy={busy} error={error} submitLabel="Add student"
-              description="Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport when an application is started."
+            <StudentDetailsStep askName busy={busy} error={error} submitLabel="Add student"
+              description="Name, email and mobile. Email and mobile must be new: a student already on record with either cannot be added again. When an application is started, the name read from the passport replaces the one typed here."
               onContinue={(draft, existing) => void finish(draft, existing)}
               cancel={<Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>} />
           </div>

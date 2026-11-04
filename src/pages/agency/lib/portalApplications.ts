@@ -485,6 +485,9 @@ export interface StudentInput {
   dateOfBirth?: string;
   passportNumber?: string;
   nationality?: string;
+  /** Migration 117: first and last name typed on Add student (sent only when given). */
+  firstName?: string;
+  lastName?: string;
 }
 
 /** Creates or updates a student. A new student matching an existing one of the business comes back as that student (`reused`). */
@@ -492,6 +495,7 @@ export async function saveStudent(input: StudentInput): Promise<{ id: string; na
   const { data, error } = await supabase.rpc("portal_student_save", {
     p_student: input.studentId ?? null, p_agent: input.agentId, p_full_name: input.fullName, p_email: input.email, p_phone: input.mobile,
     p_date_of_birth: input.dateOfBirth || null, p_passport: input.passportNumber ?? "", p_nationality: input.nationality ?? "",
+    ...(input.firstName || input.lastName ? { p_first_name: input.firstName ?? "", p_last_name: input.lastName ?? "" } : {}),
   });
   if (error) throw new Error(error.message);
   const r = (data ?? {}) as Record<string, unknown>;
