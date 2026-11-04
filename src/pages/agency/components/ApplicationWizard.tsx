@@ -184,7 +184,8 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
         const courses = Array.isArray(values.courses_of_interest) ? (values.courses_of_interest as unknown[]).map(String) : [];
         if (active) {
           setAnswers({
-            language_home: pick("language_home"), language_other: pick("language_other"), usi_number: pick("usi_number"),
+            // "Yes, another language" is selected unless an answer was already given.
+            language_home: pick("language_home") || OTHER_LANGUAGE, language_other: pick("language_other"), usi_number: pick("usi_number"),
             ec_name: pick("ec_name"), ec_phone: pick("ec_phone"), ec_relationship: pick("ec_relationship"),
             course: courses[0] ?? "", preferred_intake: pick("preferred_intake"),
           });
