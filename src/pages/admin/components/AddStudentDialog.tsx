@@ -146,7 +146,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
         {ready ? (
           <div className="border-t border-background-200 pt-5">
             <StudentDetailsStep busy={busy} error={error} submitLabel="Add student and open form"
-              description="Name, email and mobile are required. A student already on record with this email, mobile or passport is offered first, so each student keeps one record."
+              description="Email and mobile only. A student already on record is used as they are; for a new student, the name and other details are read from the passport on the form."
               onContinue={(draft, existing) => void finish(draft, existing)}
               cancel={<Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>} />
           </div>

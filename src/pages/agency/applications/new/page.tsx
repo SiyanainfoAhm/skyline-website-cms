@@ -347,7 +347,7 @@ export default function NewApplicationPage() {
         <div className="mt-6 flex max-w-2xl items-center justify-between gap-3 rounded-card border border-background-200 bg-background-50 px-4 py-3">
           <span className="min-w-0 text-sm text-foreground-700">
             <span className="text-xs font-semibold uppercase tracking-wide text-foreground-500">Student</span>{" "}
-            <b className="font-medium text-foreground-900">{draft.fullName}</b> &middot; {draft.email} &middot; {formatPhone(draft.mobile)}
+            <b className="font-medium text-foreground-900">{draft.email}</b> &middot; {formatPhone(draft.mobile)}
           </span>
         </div>
       ) : null}
