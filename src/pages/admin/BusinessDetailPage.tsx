@@ -199,10 +199,9 @@ function AgentsSection({ business, onChanged }: { business: { id: string; name: 
     }
   };
   const resend = async (row: DirectoryAgent) => {
-    if (!row.invitationId) return;
     setBusyId(row.agentId);
     try {
-      push(await resendInvitation(row.invitationId, row.email));
+      push(await resendInvitation(row));
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
     } finally {
@@ -243,7 +242,7 @@ function AgentsSection({ business, onChanged }: { business: { id: string; name: 
                   <td><AgentStatusBadge status={r.status} /></td>
                   <td>
                     <div className="flex flex-wrap justify-end gap-1.5">
-                      {r.status === "Invited" && r.invitationId ? <Button size="sm" variant="outline" disabled={busyId === r.agentId} onClick={() => void resend(r)}>Resend invite</Button> : null}
+                      {r.status === "Invited" && r.email ? <Button size="sm" variant="outline" disabled={busyId === r.agentId} onClick={() => void resend(r)}>Resend invite</Button> : null}
                       {r.status === "Inactive"
                         ? <Button size="sm" onClick={() => openDialog(toActivate(r))}>Activate</Button>
                         : <Button size="sm" variant="ghost" disabled={busyId === r.agentId} onClick={() => setConfirm(r)}>Deactivate</Button>}

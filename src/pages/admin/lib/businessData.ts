@@ -2,10 +2,16 @@ import { supabase } from "@/pages/admin/lib/supabase";
 import { invokePortalUsers } from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 
-/** Sends a waiting sign-in invitation again; returns the message to show. */
-export async function resendInvitation(invitationId: string, email: string): Promise<string> {
-  const data = await invokePortalUsers({ action: "resend", invitationId, redirectTo: portalPasswordResetUrl() });
-  return data.warning ? String(data.warning) : `Invitation resent to ${email}.`;
+/**
+ * Sends an Invited agent their sign-in invitation again: the waiting one when there is one, otherwise a new one (the
+ * first was never sent, or it expired or was withdrawn). Returns the message to show.
+ */
+export async function resendInvitation(agent: { invitationId: string | null; email: string; name: string; role: "agent" | "agency_admin"; businessId: string }): Promise<string> {
+  if (!agent.email) throw new Error("Add the agent's email before sending an invitation.");
+  const data = agent.invitationId
+    ? await invokePortalUsers({ action: "resend", invitationId: agent.invitationId, redirectTo: portalPasswordResetUrl() })
+    : await invokePortalUsers({ action: "invite", email: agent.email, name: agent.name, role: agent.role, agencyId: agent.businessId, redirectTo: portalPasswordResetUrl() });
+  return data.warning ? String(data.warning) : `Invitation sent to ${agent.email}.`;
 }
 
 /**

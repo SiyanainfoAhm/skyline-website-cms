@@ -115,10 +115,10 @@ export default function AgentsPage() {
   };
 
   const resend = async (row: DirectoryAgent) => {
-    if (!row.invitationId) return;
     setBusyKey(row.key);
     try {
-      push(await resendInvitation(row.invitationId, row.email));
+      push(await resendInvitation(row));
+      setReload((n) => n + 1);
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
     } finally {
@@ -192,7 +192,7 @@ export default function AgentsPage() {
                           </option>
                         ))}
                       </select>
-                      {r.status === "Invited" && r.invitationId ? (
+                      {r.status === "Invited" && r.email ? (
                         <button type="button" disabled={busyKey === r.key} onClick={() => void resend(r)}
                           className="mt-1.5 flex cursor-pointer items-center gap-1 text-xs font-semibold text-primary-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60">
                           <i className="ri-mail-send-line" aria-hidden="true" /> {busyKey === r.key ? "Sending…" : "Resend invite"}

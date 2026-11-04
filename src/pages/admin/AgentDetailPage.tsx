@@ -51,10 +51,11 @@ export default function AgentDetailPage() {
   };
 
   const resend = async () => {
-    if (!agent?.invitationId) return;
+    if (!agent) return;
     setBusy(true);
     try {
-      push(await resendInvitation(agent.invitationId, agent.email));
+      push(await resendInvitation({ ...agent, businessId: agent.business.id }));
+      await load();
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
     } finally {
@@ -88,7 +89,7 @@ export default function AgentDetailPage() {
         description={[agent.marn ? `MARN ${agent.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
         actions={<>
           <AgentStatusBadge status={agent.status} />
-          {agent.status === "Invited" && agent.invitationId
+          {agent.status === "Invited" && agent.email
             ? <Button variant="outline" icon="ri-mail-send-line" disabled={busy} onClick={() => void resend()}>{busy ? "Sending…" : "Resend invite"}</Button>
             : null}
           {agent.status === "Inactive"
