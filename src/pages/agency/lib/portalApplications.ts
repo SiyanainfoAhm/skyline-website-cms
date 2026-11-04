@@ -312,11 +312,16 @@ export interface DocumentRow {
 
 export async function getApplication(id: string, refreshDraftRevision = true): Promise<ApplicationDetail | null> {
   countPortalMetric("applications.detail");
-  const { data, error } = await supabase
+  const base = `${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id`;
+  let { data, error } = await supabase
     .from("enrollment_applications")
-    .select(`${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id, student:enrollment_students!enrollment_applications_student_fk(id, details, qualifications)`)
+    .select(`${base}, student:enrollment_students!enrollment_applications_student_fk(id, details, qualifications)`)
     .eq("id", id)
     .maybeSingle();
+  // Before migration 103 the student relation does not exist and every answer is still on the application.
+  if (error && /relationship|enrollment_applications_student_fk/i.test(error.message)) {
+    ({ data, error } = await supabase.from("enrollment_applications").select(base).eq("id", id).maybeSingle());
+  }
   if (error) throw new Error(error.message);
   if (!data) return null;
 
