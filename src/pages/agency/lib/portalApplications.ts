@@ -56,6 +56,8 @@ export interface ApplicationListRow {
   updatedAt: string;
   submittedAt: string | null;
   isTest: boolean;
+  /** Migration 109: where a SLIT administrator may move this application, decided by the backend rules (absent before it). */
+  nextStatuses?: string[];
 }
 
 export interface ApplicationFilters {
@@ -107,10 +109,17 @@ export async function listApplications(filters: ApplicationFilters = {}): Promis
   return rows;
 }
 
+/** The application statuses the backend defines, in workflow order (empty before migration 109). */
+export async function listApplicationStatuses(): Promise<Array<{ value: string; label: string }>> {
+  const { data, error } = await supabase.rpc("portal_application_statuses");
+  if (error || !Array.isArray(data)) return [];
+  return (data as Array<Record<string, unknown>>).map((item) => ({ value: str(item.value), label: str(item.label) })).filter((item) => item.value);
+}
+
 export async function queryApplications(filters: ApplicationFilters & { sort?: string; direction?: string; limit?: number; offset?: number } = {}): Promise<{ total: number; rows: ApplicationListRow[] }> {
   const { data, error } = await supabase.rpc("portal_query_applications", { p_search: filters.search ?? "", p_status: filters.status ?? "", p_agency: filters.agencyId || null, p_agent: filters.agentId || null, p_course: filters.courseCode ?? "", p_intake: filters.intake ?? "", p_sort: filters.sort ?? "updated", p_direction: filters.direction ?? "desc", p_limit: filters.limit ?? 25, p_offset: filters.offset ?? 0 });
   if (error) throw new Error(error.message);
-  return { total: data.total, rows: (data.rows ?? []).map((r: Record<string, unknown>) => ({ id: str(r.id), reference: str(r.reference), status: str(r.status) as ApplicationStatus, studentName: str(r.student_name), studentEmail: str(r.student_email), intake: str(r.intake), completion: Number(r.completion), agencyId: str(r.agency_id), agencyName: str(r.agency_name), agentId: r.assigned_agent_id ? str(r.assigned_agent_id) : null, agentName: str(r.agent_name), courses: r.courses as ApplicationCourseRow[], createdAt: str(r.created_at), updatedAt: str(r.updated_at), submittedAt: r.submitted_at ? str(r.submitted_at) : null, isTest: Boolean(r.is_test) })) };
+  return { total: data.total, rows: (data.rows ?? []).map((r: Record<string, unknown>) => ({ id: str(r.id), reference: str(r.reference), status: str(r.status) as ApplicationStatus, studentName: str(r.student_name), studentEmail: str(r.student_email), intake: str(r.intake), completion: Number(r.completion), agencyId: str(r.agency_id), agencyName: str(r.agency_name), agentId: r.assigned_agent_id ? str(r.assigned_agent_id) : null, agentName: str(r.agent_name), courses: r.courses as ApplicationCourseRow[], createdAt: str(r.created_at), updatedAt: str(r.updated_at), submittedAt: r.submitted_at ? str(r.submitted_at) : null, isTest: Boolean(r.is_test), nextStatuses: Array.isArray(r.next_statuses) ? (r.next_statuses as unknown[]).map(String) : undefined })) };
 }
 
 async function fetchAgencyNames(ids: string[]): Promise<Map<string, string>> {

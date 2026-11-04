@@ -13,9 +13,11 @@ const OPEN_FORM = "__open_form";
  * rules allow. A draft can be withdrawn or rejected here; submitting it opens its form (`openHref`), where the required
  * answers, consent and the frozen copy are checked. Everyone else sees the status only.
  */
-export default function ApplicationStatusSelect({ applicationId, status, openHref, onChanged }: {
+export default function ApplicationStatusSelect({ applicationId, status, allowed, openHref, onChanged }: {
   applicationId: string;
   status: string;
+  /** The moves the backend allows from `status` for the signed-in user (from the list query); used while the status is unchanged. */
+  allowed?: string[];
   /** The application's page, offered on a draft as "Submit… (open form)". */
   openHref?: string;
   onChanged?: (next: string) => void;
@@ -31,8 +33,12 @@ export default function ApplicationStatusSelect({ applicationId, status, openHre
   const [previous, setPrevious] = useState(status);
   if (previous !== status) { setPrevious(status); setCurrent(status); }
 
-  const options = isSlitAdmin ? nextStatusOptions(current) : [];
-  const offerForm = isSlitAdmin && current === "draft" && Boolean(openHref);
+  // The backend's list of moves wins while the status is the one it was computed for; after a change here the
+  // same rules are applied locally until the list reloads.
+  const fromBackend = allowed !== undefined && current === status;
+  const admin = fromBackend ? allowed.length > 0 || isSlitAdmin : isSlitAdmin;
+  const options = fromBackend ? allowed : admin ? nextStatusOptions(current) : [];
+  const offerForm = admin && current === "draft" && Boolean(openHref);
   if (!options.length && !offerForm) return <StatusBadge status={current} />;
 
   const change = async (next: string) => {

@@ -2,7 +2,7 @@ import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { Link } from "react-router-dom";
-import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
+import { listApplicationStatuses, queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
 import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
 import { SELECTABLE_STATUSES } from "@/pages/agency/lib/applicationAccess";
 import { PortalEmpty, PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
@@ -122,6 +122,15 @@ export default function ApplicationsTable({
     return () => { active = false; window.clearTimeout(timer); };
   }, [remote, search, status, agencyId, agentId, courseCode, intake, sort, dir, page, pageSize, retry]);
 
+  // The status filter lists the statuses the backend defines (the built-in list until it answers or if it cannot).
+  const [statusChoices, setStatusChoices] = useState<Array<{ value: string; label: string }>>(() =>
+    SELECTABLE_STATUSES.map((value) => ({ value, label: STATUS_META[value].label })));
+  useEffect(() => {
+    let active = true;
+    void listApplicationStatuses().then((list) => { if (active && list.length) setStatusChoices(list); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   const courseOptions = useMemo(() => {
     const map = new Map<string, string>();
     rows.forEach((row) => row.courses.forEach((c) => map.set(c.code, c.code)));
@@ -226,9 +235,9 @@ export default function ApplicationsTable({
               aria-label="Filter by status"
             >
               <option value="">All statuses</option>
-              {SELECTABLE_STATUSES.map((value) => [value, STATUS_META[value]] as const).map(([value, meta]) => (
-                <option key={value} value={value}>
-                  {meta.label}
+              {statusChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
                 </option>
               ))}
             </select>
@@ -349,7 +358,7 @@ export default function ApplicationsTable({
                         {row.agentName || <span className="text-foreground-400">Unassigned</span>}
                       </td>
                       <td data-label="Status" className="px-3 py-3">
-                        <ApplicationStatusSelect applicationId={row.id} status={row.status} openHref={paths.detail(row.id)} />
+                        <ApplicationStatusSelect applicationId={row.id} status={row.status} allowed={row.nextStatuses} openHref={paths.detail(row.id)} />
                       </td>
                       <td data-label="Progress" className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1">
