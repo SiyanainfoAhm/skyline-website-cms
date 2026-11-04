@@ -110,12 +110,12 @@ export default function NewApplicationPage() {
   const chosenBusiness = ownBusiness ?? business;
 
   const searchBusinesses = useCallback(async (q: string): Promise<PickOption[]> => {
-    const result = await listBusinesses({ search: q, limit: 8, offset: 0 });
+    // Only active businesses can be chosen.
+    const result = await listBusinesses({ search: q, status: "Active", limit: 8, offset: 0 });
     return result.rows.map((row) => ({
       id: row.id,
       label: row.name,
       meta: [row.abn ? `ABN ${row.abn}` : "", `${row.agents} agent${row.agents === 1 ? "" : "s"}`, `${row.students} student${row.students === 1 ? "" : "s"}`].filter(Boolean).join(", "),
-      tag: row.status === "Active" ? undefined : <span className="rounded-full bg-background-200 px-2 py-0.5 text-[11px] font-medium text-foreground-600">Inactive</span>,
       raw: row,
     })) as PickOption[];
   }, []);
@@ -125,11 +125,11 @@ export default function NewApplicationPage() {
     if (!businessId) return [];
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     return (await listAgentsOfBusiness(businessId))
-      // Only a SLIT administrator can activate an inactive agent, so agency administrators see active and invited agents only.
-      .filter((a) => role === "slit_admin" || a.status !== "Inactive")
+      // Only active agents can be chosen.
+      .filter((a) => a.status === "Active")
       .filter((a) => { const text = `${a.name} ${a.email} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase(); return words.every((w) => text.includes(w)); })
       .map((a) => ({ id: a.id, label: a.name, meta: [a.email, a.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "), tag: <AgentStatusBadge status={a.status} />, raw: a }));
-  }, [businessId, role]);
+  }, [businessId]);
 
   const openWizard = (id: string) => {
     if (authUser?.id) writeSession(authUser.id, id);

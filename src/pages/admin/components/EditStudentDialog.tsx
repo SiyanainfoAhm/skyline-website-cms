@@ -87,7 +87,8 @@ export default function EditStudentDialog({ student, onClose, onSaved }: { stude
           <Select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
             {agentId && !agents.some((a) => a.id === agentId) ? <option value={agentId}>{student?.agentName || "Current agent"}</option> : null}
             {!agentId ? <option value="">Not assigned</option> : null}
-            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status !== "Active" ? ` (${a.status})` : ""}</option>)}
+            {/* Only active agents can be chosen; the current one stays listed. */}
+            {agents.filter((a) => a.status === "Active" || a.id === agentId).map((a) => <option key={a.id} value={a.id}>{a.name}{a.status !== "Active" ? ` (${a.status})` : ""}</option>)}
           </Select>
         </Field>
         {error ? <p role="alert" className="sm:col-span-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p> : null}

@@ -35,10 +35,10 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
   }, [open]);
 
   const searchBusinesses = useCallback(async (q: string): Promise<PickOption[]> => {
-    const r = await listBusinesses({ search: q, limit: 8, offset: 0 });
+    // Only active businesses and active agents can be chosen.
+    const r = await listBusinesses({ search: q, status: "Active", limit: 8, offset: 0 });
     return r.rows.map((b) => ({
       id: b.id, label: b.name, meta: [b.abn ? `ABN ${b.abn}` : "", `${b.agents} agent${b.agents === 1 ? "" : "s"}`, `${b.students} student${b.students === 1 ? "" : "s"}`].filter(Boolean).join(", "),
-      tag: b.status === "Active" ? undefined : <span className="rounded-full bg-background-200 px-2 py-0.5 text-[11px] font-medium text-foreground-600">Inactive</span>,
       raw: b,
     })) as PickOption[];
   }, []);
@@ -48,6 +48,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
     if (!businessId) return [];
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     return (await listAgentsOfBusiness(businessId))
+      .filter((a) => a.status === "Active")
       .filter((a) => { const text = `${a.name} ${a.email} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase(); return words.every((w) => text.includes(w)); })
       .map((a) => ({ id: a.id, label: a.name, meta: [a.email, a.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "), tag: <AgentStatusBadge status={a.status} />, raw: a }));
   }, [businessId]);
