@@ -136,7 +136,7 @@ export default function ActivateAgentDialog({ agent, open, onClose, onDone }: {
             <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!emailValid} />
           </Field>
           <Field label="Phone"><TextInput type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
-          <Field label="MARN" hint="Migration agent registration number, if they have one; checked against the OMARA register.">
+          <Field label="MARN" hint="Migration agent registration number, if they have one.">
             <TextInput value={marn} onChange={(e) => setMarn(e.target.value)} placeholder="e.g. 1234567" />
           </Field>
         </div>

@@ -141,8 +141,8 @@ export interface AgentOverview {
   role: "agent" | "agency_admin";
   status: AgentStatus;
   statusChangedAt: string | null;
+  marn: string;
   business: { id: string; name: string; status: BusinessStatus };
-  omara: null | { id: string; marn: string; registered: boolean; registrationStatus: string; place: string };
   applications: ApplicationRow[];
   students: Array<{ id: string; name: string; email: string }>;
 }

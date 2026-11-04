@@ -73,7 +73,7 @@ export default function AgentDetailPage() {
       </Link>
       <PageHeader
         title={agent.name}
-        description={[agent.omara ? `MARN ${agent.omara.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
+        description={[agent.marn ? `MARN ${agent.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
         actions={<>
           <AgentStatusBadge status={agent.status} />
           {agent.status === "Inactive"
@@ -100,13 +100,9 @@ export default function AgentDetailPage() {
           </div>
         </Card>
         <Card className="p-4">
-          <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">OMARA registration</h2>
-          {agent.omara ? (
-            <dl className="space-y-1.5 text-sm">
-              <div><dt className="inline text-foreground-500">MARN </dt><dd className="inline font-semibold tabular-nums text-foreground-900">{agent.omara.marn}</dd></div>
-              <dd className={agent.omara.registered ? "text-emerald-800" : "font-medium text-amber-700"}>{agent.omara.registered ? "Registered" : "No longer registered"}</dd>
-              {agent.omara.place ? <dd className="text-foreground-700">{agent.omara.place}</dd> : null}
-            </dl>
+          <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">Migration agent registration</h2>
+          {agent.marn ? (
+            <p className="text-sm"><span className="text-foreground-500">MARN </span><b className="tabular-nums text-foreground-900">{agent.marn}</b></p>
           ) : <p className="text-sm text-foreground-600">No MARN recorded. Add one when activating the agent.</p>}
         </Card>
         <Card className="p-4">
@@ -152,7 +148,7 @@ export default function AgentDetailPage() {
       )}
 
       <ActivateAgentDialog open={dialog} onClose={() => setDialog(false)} onDone={() => void load()}
-        agent={{ agentId: agent.agentId, name: agent.name, email: agent.email, phone: agent.phone, marn: agent.omara?.marn, role: agent.role,
+        agent={{ agentId: agent.agentId, name: agent.name, email: agent.email, phone: agent.phone, marn: agent.marn, role: agent.role,
           hasLogin: Boolean(agent.profileId), business: agent.business }} />
       <ConfirmDialog open={confirm} title={`Deactivate ${agent.name}?`}
         message="They will not be able to sign in, and an invitation still waiting is withdrawn. Their students and applications stay with the business. You can activate them again at any time."

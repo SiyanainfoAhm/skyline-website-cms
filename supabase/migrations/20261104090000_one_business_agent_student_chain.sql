@@ -1,13 +1,16 @@
 -- One chain: business (the agencies table, unique by ABN) -> agents -> students -> applications.
 --
 -- Removes the duplicate records that grew around it:
--- * businesses (names generated from the OMARA register) and business_agent_affiliations: a business is an
---   agency row with an ABN; the OMARA register stays a read-only lookup for an agent's MARN.
--- * business_agents and agent_directory_links: replaced by one agents table (business, contact, MARN, login, status).
+-- * businesses and (where still present) business_agent_affiliations, agent_directory_links, omara_agents: a business is an
+--   agency row with an ABN. The OMARA register is gone from hosted (remove_omara, 2 Nov 2026); an agent's MARN is a plain field.
+-- * business_agents: replaced by one agents table (business, contact, MARN, login, status). Ids are kept.
 -- * The one-student-per-application trigger: an application is created for a chosen student, so a student can
 --   have many applications. Students carry their agent and are kept in step with their latest application.
 -- Existing students are merged inside a business when they share a passport and date of birth, or an email and
 -- date of birth; nothing is merged on a name or an email alone.
+-- Written against the hosted schema (which has migrations this repo lacks: agency_invitations.business_id,
+-- enrollment_students.business_agent_id, skyline_private.business_directory_info); every such step is guarded so the
+-- file also replays on a checkout that never had them.
 set local lock_timeout='5s';
 set local statement_timeout='300s';
 
@@ -18,8 +21,8 @@ drop trigger if exists agency_business_identity_before_write on public.agencies;
 drop function if exists public.agency_ensure_business_identity();
 drop trigger if exists agency_business_status_sync on public.agencies;
 drop function if exists public.agency_sync_business_status();
-drop trigger if exists omara_directory_business_after_insert on public.omara_agents;
-drop function if exists public.omara_attach_directory_business();
+drop trigger if exists trg_agency_invitations_set_business_id on public.agency_invitations;
+drop function if exists public.agency_invitations_set_business_id();
 drop function if exists public.admin_business_set_status(uuid, text);
 drop function if exists public.admin_business_link_agency(uuid, uuid);
 drop function if exists public.admin_link_agent_marn(uuid, uuid, text);
@@ -35,6 +38,7 @@ drop function if exists public.admin_agent_activate(uuid, uuid, uuid, text, text
 drop function if exists public.admin_agent_deactivate(uuid);
 drop function if exists public.admin_agent_directory(text, text, uuid, integer, integer);
 drop function if exists public.admin_agent_overview(uuid);
+drop function if exists public.agent_picker_options(uuid, text);
 
 -- ------------------------------------------------------------------ businesses are agencies, unique by ABN
 drop index if exists public.agencies_directory_business_unique;
@@ -47,10 +51,10 @@ create table public.agents (
  id uuid primary key default gen_random_uuid(),
  business_id uuid not null references public.agencies(id) on delete restrict,
  profile_id uuid unique references public.portal_profiles(id) on delete set null,
- omara_agent_id uuid unique references public.omara_agents(id) on delete set null,
  full_name text not null check (length(btrim(full_name)) between 1 and 200),
  email text not null default '' check (email = lower(btrim(email)) and length(email) <= 254),
  phone text not null default '' check (length(phone) <= 40),
+ marn text not null default '' check (length(marn) <= 20),
  role text not null default 'agent' check (role in ('agent','agency_admin')),
  status text not null default 'Inactive' check (status in ('Active','Inactive')),
  status_changed_at timestamptz,
@@ -60,7 +64,7 @@ create table public.agents (
 );
 create index agents_business_idx on public.agents(business_id);
 create index agents_email_idx on public.agents(lower(email)) where email <> '';
-comment on table public.agents is 'An agent of one business. MARN (omara_agent_id) and portal login (profile_id) are optional. Students belong to an agent.';
+comment on table public.agents is 'An agent of one business. MARN and portal login (profile_id) are optional. Students belong to an agent.';
 alter table public.agents enable row level security;
 revoke all on public.agents from public, anon, authenticated;
 grant select on public.agents to authenticated;
@@ -70,30 +74,49 @@ create policy agents_scoped_read on public.agents for select to authenticated
 create trigger agents_touch_updated before update on public.agents
  for each row execute function public.business_student_touch_updated_at();
 
--- Agents activated so far, mapped from their business record to the agency row behind it.
-insert into public.agents(id, business_id, profile_id, omara_agent_id, full_name, email, phone, role, status, status_changed_at, status_changed_by, created_at)
-select g.id, a.id, g.profile_id, g.omara_agent_id, g.full_name, g.email, g.phone, g.role, g.status, g.status_changed_at, g.status_changed_by, g.created_at
+-- Agents activated so far, mapped from their business record to the agency row behind it; ids are kept.
+insert into public.agents(id, business_id, profile_id, full_name, email, phone, role, status, status_changed_at, status_changed_by, created_at)
+select g.id, a.id, g.profile_id, g.full_name, g.email, g.phone, g.role, g.status, g.status_changed_at, g.status_changed_by, g.created_at
 from public.business_agents g join public.agencies a on a.business_id = g.business_id
 on conflict do nothing;
 -- Everyone with a portal login who is not an agent record yet.
-insert into public.agents(business_id, profile_id, omara_agent_id, full_name, email, phone, role, status, status_changed_at)
-select m.agency_id, p.id, l.omara_agent_id, coalesce(nullif(btrim(p.full_name), ''), nullif(btrim(p.email), ''), 'Portal user'),
+insert into public.agents(business_id, profile_id, full_name, email, phone, role, status, status_changed_at)
+select m.agency_id, p.id, coalesce(nullif(btrim(p.full_name), ''), nullif(btrim(p.email), ''), 'Portal user'),
  lower(btrim(coalesce(p.email, ''))), left(coalesce(p.phone, ''), 40), m.role,
  case when m.status = 'Active' and p.status = 'Active' then 'Active' else 'Inactive' end, now()
 from public.agency_memberships m
 join public.portal_profiles p on p.id = m.user_id
-left join public.agent_directory_links l on l.profile_id = p.id
-where not exists (select 1 from public.agents g where g.profile_id = p.id)
- and (l.omara_agent_id is null or not exists (select 1 from public.agents g where g.omara_agent_id = l.omara_agent_id));
+where not exists (select 1 from public.agents g where g.profile_id = p.id);
 
--- The register is readable by SLIT administrators and, for its own agents, by a business's portal users.
-drop policy if exists omara_agents_scoped_read on public.omara_agents;
-create policy omara_agents_scoped_read on public.omara_agents for select to authenticated using (
- public.portal_is_slit_admin() or exists (select 1 from public.agents g where g.omara_agent_id = omara_agents.id and g.business_id = public.portal_agency_id()));
+-- ------------------------------------------------------------------ students: their agent, passport and nationality
+alter table public.enrollment_students
+ add column agent_id uuid references public.agents(id) on delete set null,
+ add column passport_number text not null default '' check (length(passport_number) <= 40),
+ add column nationality text not null default '';
+create index enrollment_students_agent_idx on public.enrollment_students(agent_id);
+comment on column public.enrollment_students.agent_id is 'The agent who looks after this student; follows the student''s latest application.';
+-- Hosted already linked students to business_agents (same ids as agents now).
+do $do$ begin
+ if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'enrollment_students' and column_name = 'business_agent_id') then
+  update public.enrollment_students s set agent_id = s.business_agent_id
+   where s.business_agent_id is not null and exists (select 1 from public.agents g where g.id = s.business_agent_id);
+  alter table public.enrollment_students drop column business_agent_id;
+ end if;
+end $do$;
 
+-- ------------------------------------------------------------------ the old business records go
+alter table public.agency_invitations drop column if exists business_id;
+drop table if exists skyline_private.business_directory_info;
+drop table if exists skyline_private.business_omara_agent;
+do $do$ begin
+ if to_regclass('public.omara_agents') is not null then
+  drop policy if exists omara_agents_scoped_read on public.omara_agents;
+  drop trigger if exists omara_directory_business_after_insert on public.omara_agents;
+ end if;
+end $do$;
+drop function if exists public.omara_attach_directory_business();
+drop table if exists public.agent_directory_links, public.business_agent_affiliations, public.omara_agents;
 drop table public.business_agents;
-drop table public.agent_directory_links;
-drop table public.business_agent_affiliations;
 alter table public.agencies drop column business_id;
 drop table public.businesses;
 
@@ -127,14 +150,7 @@ revoke all on function public.agent_sync_membership() from public, anon, authent
 create trigger agent_membership_sync after insert or update of status, role, agency_id on public.agency_memberships
  for each row execute function public.agent_sync_membership();
 
--- ------------------------------------------------------------------ students
-alter table public.enrollment_students
- add column agent_id uuid references public.agents(id) on delete set null,
- add column passport_number text not null default '' check (length(passport_number) <= 40),
- add column nationality text not null default '';
-create index enrollment_students_agent_idx on public.enrollment_students(agent_id);
-comment on column public.enrollment_students.agent_id is 'The agent who looks after this student; follows the student''s latest application.';
-
+-- ------------------------------------------------------------------ students: fill, merge, protect
 -- A date typed or read from a document: ISO, or day/month/year. Anything else is unknown.
 create function public.student_safe_date(p text) returns date
 language plpgsql stable as $fn$
@@ -374,6 +390,24 @@ end $fn$;
 revoke all on function public.portal_create_student_application(text, uuid) from public, anon;
 grant execute on function public.portal_create_student_application(text, uuid) to authenticated;
 
+-- Agents of a business who can be assigned applications (same shape as before; p_business is the agency id).
+create function public.agent_picker_options(p_business uuid, p_search text default '') returns jsonb
+language plpgsql stable security definer set search_path = public as $fn$
+declare v_words text[] := public.admin_search_words(p_search);
+begin
+ if auth.uid() is null then raise exception 'Sign-in required' using errcode = '42501'; end if;
+ if p_business is null then return '[]'::jsonb; end if;
+ if not (public.portal_is_slit_admin() or p_business = public.portal_agency_id()) then
+  raise exception 'Not allowed to view agents for this business' using errcode = '42501'; end if;
+ return coalesce((select jsonb_agg(jsonb_build_object('agentId', g.id, 'profileId', g.profile_id, 'name', g.full_name, 'email', g.email) order by lower(g.full_name), g.id)
+  from public.agents g
+  where g.business_id = p_business and g.status = 'Active' and g.profile_id is not null
+   and exists (select 1 from public.agency_memberships m join public.portal_profiles pp on pp.id = m.user_id where m.user_id = g.profile_id and m.status = 'Active' and pp.status = 'Active')
+   and not exists (select 1 from unnest(v_words) w where strpos(lower(concat_ws(' ', g.full_name, g.email)), w) = 0)), '[]'::jsonb);
+end $fn$;
+revoke all on function public.agent_picker_options(uuid, text) from public, anon;
+grant execute on function public.agent_picker_options(uuid, text) to authenticated;
+
 -- ------------------------------------------------------------------ CMS: businesses
 create function public.admin_business_set_status(p_business uuid, p_status text) returns jsonb
 language plpgsql security definer set search_path = public as $fn$
@@ -400,7 +434,7 @@ begin
   select a.id, a.name, a.code, a.status, a.registration_number, a.business_email, a.primary_contact, a.phone, a.address, a.country, a.created_at
   from public.agencies a
   where not exists (select 1 from unnest(v_words) w where strpos(lower(concat_ws(' ', a.name, a.code, a.registration_number, a.business_email, a.primary_contact, a.phone, a.address,
-    (select string_agg(concat_ws(' ', g.full_name, g.email, o.marn), ' ') from public.agents g left join public.omara_agents o on o.id = g.omara_agent_id where g.business_id = a.id))), w) = 0)
+    (select string_agg(concat_ws(' ', g.full_name, g.email, g.marn), ' ') from public.agents g where g.business_id = a.id))), w) = 0)
  ), filtered as (
   select * from searched where coalesce(p_status, '') = '' or status = p_status
  ), page as (
@@ -455,19 +489,18 @@ language plpgsql stable security definer set search_path = public as $fn$
 declare v_words text[] := public.admin_search_words(p_search); result jsonb;
 begin
  with rows as (
-  select g.id as agent_id, g.omara_agent_id as omara_id, g.profile_id, g.full_name as name, g.email, g.phone, g.role, g.business_id, g.status_changed_at,
+  select g.id as agent_id, g.profile_id, g.full_name as name, g.email, g.phone, g.marn, g.role, g.business_id, g.status_changed_at,
    case when g.status <> 'Active' then 'Inactive'
         when g.profile_id is null then 'Invited'
         when exists (select 1 from public.agency_memberships m join public.portal_profiles pp on pp.id = m.user_id
           where m.user_id = g.profile_id and m.status = 'Active' and pp.status = 'Active') then 'Active'
         else 'Inactive' end as status,
-   o.marn, o.is_active as registered, a.name as business_name, a.status as business_status,
+   a.name as business_name, a.status as business_status,
    (select i.id from public.agency_invitations i where i.agency_id = g.business_id and i.email = g.email and i.status = 'pending' and g.email <> '' limit 1) as invitation_id
   from public.agents g
   join public.agencies a on a.id = g.business_id
-  left join public.omara_agents o on o.id = g.omara_agent_id
   where (p_business is null or g.business_id = p_business)
-   and not exists (select 1 from unnest(v_words) w where strpos(lower(concat_ws(' ', g.full_name, g.email, g.phone, o.marn, a.name)), w) = 0)
+   and not exists (select 1 from unnest(v_words) w where strpos(lower(concat_ws(' ', g.full_name, g.email, g.phone, g.marn, a.name)), w) = 0)
  ), filtered as (
   select *, case status when 'Active' then 0 when 'Invited' then 1 else 2 end as rank_key from rows where coalesce(p_status, '') = '' or status = p_status
  ), page as (
@@ -478,9 +511,9 @@ begin
   'counts', jsonb_build_object('all', (select count(*) from rows), 'active', (select count(*) from rows where status = 'Active'),
    'invited', (select count(*) from rows where status = 'Invited'), 'inactive', (select count(*) from rows where status = 'Inactive')),
   'rows', coalesce((select jsonb_agg(jsonb_build_object(
-   'key', p.agent_id, 'agentId', p.agent_id, 'omaraId', p.omara_id, 'profileId', p.profile_id, 'invitationId', p.invitation_id,
+   'key', p.agent_id, 'agentId', p.agent_id, 'omaraId', null, 'profileId', p.profile_id, 'invitationId', p.invitation_id,
    'name', p.name, 'email', p.email, 'phone', p.phone, 'role', p.role, 'status', p.status, 'statusChangedAt', p.status_changed_at,
-   'marn', coalesce(p.marn, ''), 'registered', p.registered,
+   'marn', p.marn, 'registered', null,
    'businessId', p.business_id, 'businessName', p.business_name, 'businessStatus', p.business_status,
    'students', (select count(*) from public.enrollment_students s where s.agent_id = p.agent_id),
    'statusCounts', (select coalesce(jsonb_object_agg(x.status, x.n), '{}'::jsonb) from (select e.status, count(*) n from public.enrollment_applications e
@@ -529,26 +562,23 @@ language sql stable security definer set search_path = public as $fn$
 $fn$;
 revoke all on function public.admin_application_rows(uuid, uuid) from public, anon, authenticated;
 
--- One agent by its id, its portal login id or its OMARA record id.
+-- One agent by its id or its portal login id.
 create function public.admin_agent_overview(p_id uuid) returns jsonb
 language plpgsql stable security definer set search_path = public as $fn$
-declare g public.agents; o public.omara_agents; a public.agencies; p public.portal_profiles; v_status text;
+declare g public.agents; a public.agencies; p public.portal_profiles; v_status text;
 begin
  perform public.admin_business_require();
- select * into g from public.agents where id = p_id or profile_id = p_id or omara_agent_id = p_id limit 1;
+ select * into g from public.agents where id = p_id or profile_id = p_id limit 1;
  if not found then return null; end if;
- if g.omara_agent_id is not null then select * into o from public.omara_agents where id = g.omara_agent_id; end if;
  select * into a from public.agencies where id = g.business_id;
  if g.profile_id is not null then select * into p from public.portal_profiles where id = g.profile_id; end if;
  v_status := case when g.status <> 'Active' then 'Inactive' when g.profile_id is null then 'Invited'
   when exists (select 1 from public.agency_memberships m where m.user_id = g.profile_id and m.status = 'Active') and p.status = 'Active' then 'Active' else 'Inactive' end;
  return jsonb_build_object(
-  'key', g.id, 'agentId', g.id, 'profileId', g.profile_id, 'omaraId', o.id,
-  'name', g.full_name, 'email', g.email, 'phone', coalesce(nullif(g.phone, ''), p.phone, ''), 'role', g.role, 'status', v_status, 'statusChangedAt', g.status_changed_at,
+  'key', g.id, 'agentId', g.id, 'profileId', g.profile_id, 'omaraId', null,
+  'name', g.full_name, 'email', g.email, 'phone', coalesce(nullif(g.phone, ''), p.phone, ''), 'marn', g.marn, 'role', g.role, 'status', v_status, 'statusChangedAt', g.status_changed_at,
   'invitationId', (select i.id from public.agency_invitations i where i.agency_id = g.business_id and i.email = g.email and i.status = 'pending' and g.email <> '' limit 1),
   'business', jsonb_build_object('id', a.id, 'name', a.name, 'status', a.status),
-  'omara', case when o.id is null then null else jsonb_build_object('id', o.id, 'marn', o.marn, 'registered', o.is_active,
-    'registrationStatus', o.registration_status, 'place', concat_ws(' ', nullif(btrim(o.suburb), ''), nullif(btrim(o.state), ''))) end,
   'applications', public.admin_application_rows(null, g.id),
   'students', (select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'name', s.full_name, 'email', coalesce(s.email, '')) order by lower(s.full_name)), '[]'::jsonb)
     from public.enrollment_students s where s.agent_id = g.id));
@@ -556,62 +586,56 @@ end $fn$;
 revoke all on function public.admin_agent_overview(uuid) from public, anon;
 grant execute on function public.admin_agent_overview(uuid) to authenticated;
 
--- Add or activate an agent of a business. p_agent updates an existing record; otherwise one is created. p_marn (optional)
--- links the agent to their OMARA record. An inactive business is activated too. The sign-in invitation is sent afterwards
--- by the portal-admin-users Edge Function; when accepted, the login is linked to this record automatically.
+-- Add or activate an agent of a business. p_agent updates an existing record; otherwise one is created. p_marn is the
+-- agent's migration agent registration number, if any. An inactive business is activated too. The sign-in invitation is
+-- sent afterwards by the portal-admin-users Edge Function; when accepted, the login is linked to this record automatically.
 create function public.admin_agent_activate(p_agent uuid, p_business uuid, p_name text, p_email text, p_phone text default '',
  p_marn text default '', p_role text default 'agent') returns jsonb
 language plpgsql security definer set search_path = public as $fn$
-declare g public.agents; o public.omara_agents; a public.agencies; v_old uuid; v_business_activated boolean := false;
+declare g public.agents; a public.agencies; v_old uuid; v_business_activated boolean := false;
  v_name text := btrim(coalesce(p_name, '')); v_email text := lower(btrim(coalesce(p_email, ''))); v_phone text := left(btrim(coalesce(p_phone, '')), 40);
- v_marn text := btrim(coalesce(p_marn, ''));
+ v_marn text := upper(regexp_replace(coalesce(p_marn, ''), '\s', '', 'g'));
 begin
  perform public.admin_business_require();
  if coalesce(p_role, '') not in ('agent', 'agency_admin') then raise exception 'Role must be agent or agency admin' using errcode = '22023'; end if;
  if v_email <> '' and (length(v_email) > 254 or v_email !~ '^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$') then raise exception 'Enter a valid email address' using errcode = '22023'; end if;
  if v_name ~ '[[:cntrl:]]' or length(v_name) > 200 then raise exception 'Enter a valid name' using errcode = '22023'; end if;
+ if length(v_marn) > 20 or v_marn ~ '[^A-Z0-9]' then raise exception 'Enter a valid MARN' using errcode = '22023'; end if;
  if p_agent is not null then
   select * into g from public.agents where id = p_agent for update;
   if not found then raise exception 'Agent not found' using errcode = 'P0002'; end if;
  end if;
  select * into a from public.agencies where id = coalesce(p_business, g.business_id) for update;
  if not found then raise exception 'Choose the business this agent works for' using errcode = '22023'; end if;
- if v_marn <> '' then
-  select * into o from public.omara_agents where upper(regexp_replace(marn, '\s', '', 'g')) = upper(regexp_replace(v_marn, '\s', '', 'g'));
-  if not found then raise exception 'This MARN is not on the OMARA register' using errcode = '22023'; end if;
-  if exists (select 1 from public.agents x where x.omara_agent_id = o.id and x.id is distinct from g.id) then
-   raise exception 'This MARN is already linked to another agent' using errcode = '23505'; end if;
- elsif g.omara_agent_id is not null then
-  select * into o from public.omara_agents where id = g.omara_agent_id;
- end if;
- if v_name = '' then v_name := coalesce(nullif(btrim(g.full_name), ''), nullif(btrim(o.full_name), ''), ''); end if;
+ if v_name = '' then v_name := coalesce(nullif(btrim(g.full_name), ''), ''); end if;
  if v_name = '' then raise exception 'Enter the agent''s name' using errcode = '22023'; end if;
- if v_email = '' then v_email := coalesce(nullif(g.email, ''), lower(btrim(coalesce(o.email, '')))); end if;
- if v_phone = '' then v_phone := coalesce(nullif(g.phone, ''), left(coalesce(o.phone, ''), 40), ''); end if;
+ if v_email = '' then v_email := coalesce(g.email, ''); end if;
+ if v_phone = '' then v_phone := coalesce(g.phone, ''); end if;
+ if v_marn = '' then v_marn := coalesce(g.marn, ''); end if;
  if v_email <> '' and exists (select 1 from public.agents x where x.email = v_email and x.business_id = a.id and x.id is distinct from g.id) then
   raise exception 'An agent with this email is already in this business' using errcode = '23505'; end if;
  if a.status <> 'Active' then
   update public.agencies set status = 'Active', updated_at = now() where id = a.id;
   v_business_activated := true;
  end if;
- -- A person who already has a login moves only if no student ties them to their current business.
+ -- An agent moves to another business only if no student ties them to their current one.
  if g.id is not null and g.business_id <> a.id then
   if exists (select 1 from public.enrollment_students s where s.agent_id = g.id) then
    raise exception 'This agent has students with their current business, so they stay attached to it.' using errcode = '23514'; end if;
   v_old := g.business_id;
  end if;
  if g.id is null then
-  insert into public.agents(omara_agent_id, business_id, full_name, email, phone, role, status, status_changed_at, status_changed_by)
-  values (o.id, a.id, v_name, v_email, v_phone, p_role, 'Active', now(), auth.uid()) returning * into g;
+  insert into public.agents(business_id, full_name, email, phone, marn, role, status, status_changed_at, status_changed_by)
+  values (a.id, v_name, v_email, v_phone, v_marn, p_role, 'Active', now(), auth.uid()) returning * into g;
  else
-  update public.agents set business_id = a.id, omara_agent_id = coalesce(o.id, omara_agent_id), full_name = v_name, email = v_email, phone = v_phone, role = p_role,
+  update public.agents set business_id = a.id, full_name = v_name, email = v_email, phone = v_phone, marn = v_marn, role = p_role,
    status = 'Active', status_changed_at = now(), status_changed_by = auth.uid(), updated_at = now() where id = g.id returning * into g;
  end if;
  if g.profile_id is not null then
   update public.portal_profiles set status = 'Active', updated_at = now() where id = g.profile_id and status <> 'Active';
   update public.agency_memberships set status = 'Active', role = p_role, agency_id = a.id, updated_at = now() where user_id = g.profile_id;
  end if;
- perform public.admin_business_audit('agent_activated', a.id, a.id, jsonb_build_object('agent', v_name, 'marn', o.marn, 'businessActivated', v_business_activated, 'previousBusiness', v_old));
+ perform public.admin_business_audit('agent_activated', a.id, a.id, jsonb_build_object('agent', v_name, 'marn', v_marn, 'businessActivated', v_business_activated, 'previousBusiness', v_old));
  return jsonb_build_object('agentId', g.id, 'businessId', a.id, 'businessName', a.name, 'agencyId', a.id,
   'businessCreated', false, 'businessActivated', v_business_activated, 'hasLogin', g.profile_id is not null, 'email', v_email, 'name', v_name, 'role', p_role);
 end $fn$;
