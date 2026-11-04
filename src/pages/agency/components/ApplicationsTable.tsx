@@ -95,9 +95,10 @@ export default function ApplicationsTable({
   const [status, setStatus] = useState(initialStatus);
   const [chosenAgencyId, setAgencyId] = useState(initialAgencyId);
   const agencyId = fixedAgencyId || chosenAgencyId;
-  const [agentId, setAgentId] = useState(initialAgentId);
-  const [courseCode, setCourseCode] = useState("");
-  const [intake, setIntake] = useState("");
+  // No agent, course or intake filter controls; a link from the Agents list still opens with its agent selected.
+  const agentId = initialAgentId;
+  const courseCode: string = "";
+  const intake: string = "";
   const [sort, setSort] = useState<SortKey>("updated");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -124,12 +125,6 @@ export default function ApplicationsTable({
 
   // The status filter and every row's status dropdown use the same backend catalogue.
   const statusChoices = useStatusCatalog().application;
-
-  const courseOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    rows.forEach((row) => row.courses.forEach((c) => map.set(c.code, c.code)));
-    return Array.from(map.keys()).sort();
-  }, [rows]);
 
   const filtered = useMemo(() => {
     if (remote) return rows;
@@ -205,7 +200,7 @@ export default function ApplicationsTable({
       {remoteError ? <PortalError message={remoteError} onRetry={() => setRetry(value => value + 1)} /> : null}
       {showFilters ? (
         <div className="mb-4 rounded-card border border-background-200 bg-background-50 p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="flex items-center gap-2 rounded-md border border-background-300 bg-background-50 px-3 py-2 lg:col-span-2">
               <i className="ri-search-line text-base text-foreground-400" aria-hidden="true" />
               <input
@@ -253,51 +248,6 @@ export default function ApplicationsTable({
                 ))}
               </select>
             ) : null}
-            {agents ? (
-              <select
-                value={agentId}
-                onChange={(e) => {
-                  setAgentId(e.target.value);
-                  resetPage();
-                }}
-                className={SELECT_CLASS}
-                aria-label="Filter by agent"
-              >
-                <option value="">All agents</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <select
-              value={courseCode}
-              onChange={(e) => {
-                setCourseCode(e.target.value);
-                resetPage();
-              }}
-              className={SELECT_CLASS}
-              aria-label="Filter by course"
-            >
-              <option value="">All courses</option>
-              {courseOptions.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={intake}
-              onChange={(e) => {
-                setIntake(e.target.value);
-                resetPage();
-              }}
-              placeholder="Intake e.g. 02/2026"
-              className={SELECT_CLASS}
-              aria-label="Filter by intake"
-            />
           </div>
         </div>
       ) : null}

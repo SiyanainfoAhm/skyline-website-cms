@@ -318,7 +318,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <PortalAuthContext.Provider value={value}>
-    {authUser && scopes.length > 0 ? <div className="border-b border-background-200 bg-background-50 px-5 py-3">
+    {/* The institution is chosen automatically (the last one used, else the first allowed). The bar only appears when
+        none could be chosen, so nobody is left without one. */}
+    {authUser && scopes.length > 0 && !selectedScope && !identityLoading ? <div className="border-b border-background-200 bg-background-50 px-5 py-3">
       <label className="flex items-center gap-3 text-sm">Institution
         <select aria-label="Institution" className="rounded border border-background-300 px-3 py-2" value={selectedScope?.key ?? ""} disabled={identityLoading} onChange={(event) => void selectScope(event.target.value)}>
           {!selectedScope ? <option value="">Choose an institution</option> : null}
