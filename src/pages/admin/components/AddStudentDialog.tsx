@@ -88,7 +88,8 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
       const created = await createApplicationForStudent(newKey(), studentId);
       push([existing ? "Application started as a draft." : "Student added and their application started as a draft.", ...notes].join(" "));
       onClose();
-      navigate(`/admin/applications/${created.id}`);
+      // The new application opens on the document wizard, as New application does.
+      navigate(`/admin/applications/${created.id}?wizard=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not add this student.");
     } finally {

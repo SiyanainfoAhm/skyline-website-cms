@@ -1,7 +1,7 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useState } from "react";
 import { formatPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_META, formatDate } from "@/pages/agency/lib/portalData";
 import { isEditableApplicationStatus, nextStatusOptions } from "@/pages/agency/lib/applicationAccess";
@@ -68,7 +68,17 @@ export default function ApplicationDetailPage() {
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusNote, setStatusNote] = useState("");
-  const [wizardOpen, setWizardOpen] = useState(() => wasWizardOpen(id));
+  // ?wizard=1 (a student just added from the Students page) opens the document wizard straight away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [wizardOpen, setWizardOpen] = useState(() => wasWizardOpen(id) || searchParams.get("wizard") === "1");
+  useEffect(() => {
+    if (searchParams.get("wizard") !== "1") return;
+    try { window.sessionStorage.setItem(wizardOpenKey(id), "1"); } catch { /* session storage unavailable */ }
+    setWizardOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("wizard");
+    setSearchParams(next, { replace: true });
+  }, [id, searchParams, setSearchParams]);
   const [workspaceKey, setWorkspaceKey] = useState(0);
   const [documentBusy, setDocumentBusy] = useState("");
 
