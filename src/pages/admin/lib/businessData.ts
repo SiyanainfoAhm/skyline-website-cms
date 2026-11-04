@@ -206,6 +206,30 @@ export const listAgentDirectory = (f: { search?: string; status?: string; busine
   }, "We could not load agents. Please try again.");
 
 /** Accepts an agent id, a portal profile id or an OMARA agent id. */
+/**
+ * Invited agents of each active business in which nobody has signed in yet (no Active agent). Such a business shows as
+ * Invited; Resend invite sends these agents their invitation again. Reads every agent (100 a page).
+ */
+export async function invitedBusinesses(): Promise<Map<string, DirectoryAgent[]>> {
+  const all: DirectoryAgent[] = [];
+  for (let offset = 0; offset < 5000; offset += 100) {
+    const page = await listAgentDirectory({ limit: 100, offset });
+    all.push(...page.rows);
+    if (page.rows.length < 100 || all.length >= page.total) break;
+  }
+  const byBusiness = new Map<string, { active: boolean; invited: DirectoryAgent[] }>();
+  for (const agent of all) {
+    if (!agent.businessId || agent.businessStatus !== "Active") continue;
+    const entry = byBusiness.get(agent.businessId) ?? { active: false, invited: [] };
+    if (agent.status === "Active") entry.active = true;
+    if (agent.status === "Invited") entry.invited.push(agent);
+    byBusiness.set(agent.businessId, entry);
+  }
+  const result = new Map<string, DirectoryAgent[]>();
+  for (const [id, entry] of byBusiness) if (!entry.active && entry.invited.length) result.set(id, entry.invited);
+  return result;
+}
+
 export const getAgentOverview = (id: string) => call<AgentOverview | null>("admin_agent_overview", { p_id: id }, "We could not load this agent.");
 
 /** Adds an agent to a business, or activates an existing one. `marn` links the agent to the OMARA register when given. */

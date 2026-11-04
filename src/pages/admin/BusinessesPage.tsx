@@ -5,11 +5,13 @@ import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/component
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { listBusinesses, setBusinessStatus, type BusinessRow, type BusinessStatus, type ListCounts } from "@/pages/admin/lib/businessData";
+import { invitedBusinesses, listBusinesses, resendInvitation, setBusinessStatus, type BusinessRow, type BusinessStatus, type DirectoryAgent, type ListCounts } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
 const PAGE_SIZE = 25;
+/** Active and Invited are worked out on the device from the active businesses (up to this many). */
+const ACTIVE_LIMIT = 100;
 const KEYS = ["q", "status"] as const;
 
 /** Agencies > Businesses: one row per business (ABN), with its agents, students and applications. */
@@ -19,8 +21,11 @@ export default function BusinessesPage() {
   // Tabs and each row's dropdown use the backend's business statuses.
   const businessStatuses = useStatusCatalog().business;
   // Active is the default tab; "all" in the address shows every business.
-  const status = values.status === "all" ? "" : values.status === "Inactive" ? "Inactive" : "Active";
-  const countFor = (value: string) => (value === "Active" ? counts?.active : value === "Inactive" ? counts?.inactive : undefined) ?? null;
+  const status = values.status === "all" ? "" : values.status === "Inactive" ? "Inactive" : values.status === "Invited" ? "Invited" : "Active";
+  // Invited: active, but nobody in it has signed in yet (its agents are all still invited).
+  const [invited, setInvited] = useState<Map<string, DirectoryAgent[]>>(new Map());
+  const countFor = (value: string) => (value === "Active" ? (counts ? Math.max(0, counts.active - invited.size) : null)
+    : value === "Invited" ? (counts ? invited.size : null) : value === "Inactive" ? counts?.inactive : undefined) ?? null;
   const [rows, setRows] = useState<BusinessRow[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<ListCounts | null>(null);
@@ -34,8 +39,25 @@ export default function BusinessesPage() {
     let active = true;
     setLoading(true);
     setError("");
-    listBusinesses({ search: values.q, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
-      .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setCounts(result.counts); } })
+    const split = status === "Active" || status === "Invited";
+    Promise.all([
+      split ? listBusinesses({ search: values.q, status: "Active", limit: ACTIVE_LIMIT, offset: 0 })
+        : listBusinesses({ search: values.q, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+      invitedBusinesses().catch(() => new Map<string, DirectoryAgent[]>()),
+    ])
+      .then(([result, invitedMap]) => {
+        if (!active) return;
+        setInvited(invitedMap);
+        if (split) {
+          const kept = result.rows.filter((r) => (status === "Invited") === invitedMap.has(r.id));
+          setRows(kept.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE));
+          setTotal(kept.length);
+        } else {
+          setRows(result.rows);
+          setTotal(result.total);
+        }
+        setCounts(result.counts);
+      })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load businesses."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -55,6 +77,25 @@ export default function BusinessesPage() {
     }
   };
 
+  const resend = async (row: BusinessRow) => {
+    const people = invited.get(row.id) ?? [];
+    // The business's administrators first; when none is waiting, every invited agent.
+    const admins = people.filter((p) => p.role === "agency_admin");
+    const targets = (admins.length ? admins : people).filter((p) => p.email);
+    if (!targets.length) { push("No one in this business has an email to invite.", "error"); return; }
+    setBusyId(row.id);
+    try {
+      const messages: string[] = [];
+      for (const person of targets) messages.push(await resendInvitation(person));
+      push(messages.join(" "));
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not resend that invitation.", "error");
+    } finally {
+      setBusyId("");
+    }
+  };
+
   const filtered = Boolean(values.q || values.status);
   return (
     <div>
@@ -66,7 +107,10 @@ export default function BusinessesPage() {
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <StatusTabs label="Business status" value={status || "all"} onChange={(v) => update({ status: v === "Active" ? "" : v })}
-          tabs={[{ id: "all", label: "All", count: counts?.all ?? null }, ...businessStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
+          tabs={[{ id: "all", label: "All", count: counts?.all ?? null }, ...businessStatuses.flatMap((item) => {
+            const tab = { id: item.value, label: item.label, count: countFor(item.value) };
+            return item.value === "Active" ? [tab, { id: "Invited", label: "Invited", count: countFor("Invited") }] : [tab];
+          })]} />
         <div className="flex-1">
           <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, ABN, agent name, MARN, email or phone" />
         </div>
@@ -119,13 +163,29 @@ export default function BusinessesPage() {
                     <td>
                       {/* Activating happens at once; deactivating asks first, as it blocks everyone in the business. */}
                       <label className="sr-only" htmlFor={`business-status-${row.id}`}>Status for {row.name}</label>
-                      <select id={`business-status-${row.id}`} value={row.status} disabled={busyId === row.id}
-                        onChange={(e) => { if (e.target.value === "Inactive") setConfirm(row); else void change(row, "Active"); }}
-                        className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${row.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-background-300 bg-background-100 text-foreground-600"}`}>
-                        {businessStatuses.map((item) => (
-                          <option key={item.value} value={item.value}>{busyId === row.id && item.value === row.status ? "Saving…" : item.label}</option>
-                        ))}
-                      </select>
+                      {/* Invited is an active business nobody has signed in to yet; it is shown, never chosen. */}
+                      {(() => {
+                        const isInvited = row.status === "Active" && invited.has(row.id);
+                        const shown = isInvited ? "Invited" : row.status;
+                        return (
+                          <>
+                            <select id={`business-status-${row.id}`} value={shown} disabled={busyId === row.id}
+                              onChange={(e) => { if (e.target.value === "Inactive") setConfirm(row); else if (e.target.value === "Active" && row.status !== "Active") void change(row, "Active"); }}
+                              className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${isInvited ? "border-amber-200 bg-amber-50 text-amber-900" : row.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-background-300 bg-background-100 text-foreground-600"}`}>
+                              {isInvited ? <option value="Invited">Invited</option> : null}
+                              {businessStatuses.map((item) => (
+                                <option key={item.value} value={item.value} disabled={isInvited && item.value === "Active"}>{busyId === row.id && item.value === shown ? "Saving…" : item.label}</option>
+                              ))}
+                            </select>
+                            {isInvited ? (
+                              <button type="button" disabled={busyId === row.id} onClick={() => void resend(row)}
+                                className="mt-1.5 flex cursor-pointer items-center gap-1 whitespace-nowrap text-xs font-semibold text-primary-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60">
+                                <i className="ri-mail-send-line" aria-hidden="true" /> {busyId === row.id ? "Sending…" : "Resend invite"}
+                              </button>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </td>
                     <td>
                       <div className="flex flex-wrap justify-end gap-1.5">
