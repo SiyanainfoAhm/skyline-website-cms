@@ -18,7 +18,8 @@ export default function BusinessesPage() {
   const { values, page, update, setPage, clear } = useListParams(KEYS);
   // Tabs and each row's dropdown use the backend's business statuses.
   const businessStatuses = useStatusCatalog().business;
-  const status = values.status === "Active" || values.status === "Inactive" ? values.status : "";
+  // Active is the default tab; "all" in the address shows every business.
+  const status = values.status === "all" ? "" : values.status === "Inactive" ? "Inactive" : "Active";
   const countFor = (value: string) => (value === "Active" ? counts?.active : value === "Inactive" ? counts?.inactive : undefined) ?? null;
   const [rows, setRows] = useState<BusinessRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -54,7 +55,7 @@ export default function BusinessesPage() {
     }
   };
 
-  const filtered = Boolean(values.q || status);
+  const filtered = Boolean(values.q || values.status);
   return (
     <div>
       <PageHeader
@@ -64,8 +65,8 @@ export default function BusinessesPage() {
       />
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <StatusTabs label="Business status" value={status} onChange={(v) => update({ status: v })}
-          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, ...businessStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
+        <StatusTabs label="Business status" value={status || "all"} onChange={(v) => update({ status: v === "Active" ? "" : v })}
+          tabs={[{ id: "all", label: "All", count: counts?.all ?? null }, ...businessStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
         <div className="flex-1">
           <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, ABN, agent name, MARN, email or phone" />
         </div>

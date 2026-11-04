@@ -18,6 +18,7 @@ const SORT_KEYS: SortKey[] = ["business", "agent", "students", "applications", "
 const STATUS_RANK: Record<AgentStatus, number> = { Active: 0, Invited: 1, Inactive: 2 };
 const applicationTotal = (r: DirectoryAgent) => Object.values(r.statusCounts).reduce((sum, n) => sum + Number(n || 0), 0);
 const text = (value: string) => value.trim().toLowerCase();
+const inactiveBusiness = (r: DirectoryAgent) => Boolean(r.businessStatus) && r.businessStatus !== "Active";
 
 function compareAgents(a: DirectoryAgent, b: DirectoryAgent, key: SortKey): number {
   switch (key) {
@@ -41,7 +42,8 @@ export default function AgentsPage() {
   const { values, page, update, setPage, clear } = useListParams(KEYS);
   // Tabs and each row's dropdown use the backend's agent statuses.
   const agentStatuses = useStatusCatalog().agent;
-  const status = agentStatuses.some((item) => item.value === values.status) ? values.status : "";
+  // Active is the default tab; "all" in the address shows every agent.
+  const status = values.status === "all" ? "" : agentStatuses.some((item) => item.value === values.status) ? values.status : "Active";
   const [rows, setRows] = useState<DirectoryAgent[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<AgentCounts | null>(null);
@@ -59,7 +61,9 @@ export default function AgentsPage() {
   const sorted = useMemo(() => {
     if (!sortKey) return rows;
     const out = [...rows].sort((a, b) => compareAgents(a, b, sortKey));
-    return sortDir === "desc" ? out.reverse() : out;
+    if (sortDir === "desc") out.reverse();
+    // Agents of an inactive business always stay at the bottom.
+    return [...out.filter((r) => !inactiveBusiness(r)), ...out.filter(inactiveBusiness)];
   }, [rows, sortKey, sortDir]);
   const toggleSort = (key: SortKey) => update({ sort: key, dir: sortKey === key && sortDir === "asc" ? "desc" : "asc", page: page > 1 ? String(page) : "" });
   const sortHeader = (key: SortKey, label: string, className: string) => (
@@ -110,15 +114,15 @@ export default function AgentsPage() {
     }
   };
 
-  const filtered = Boolean(values.q || status);
+  const filtered = Boolean(values.q || values.status);
   return (
     <div>
       <PageHeader title="Agents"
         description="Every agent belongs to one business and looks after their own students. Adding an agent can send their sign-in invitation; deactivating one blocks their sign-in but keeps their students."
         actions={<Button icon="ri-user-add-line" onClick={() => openActivate(null)}>Add agent</Button>} />
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <StatusTabs label="Agent status" value={status} onChange={(v) => update({ status: v })}
-          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, ...agentStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
+        <StatusTabs label="Agent status" value={status || "all"} onChange={(v) => update({ status: v === "Active" ? "" : v })}
+          tabs={[{ id: "all", label: "All", count: counts?.all ?? null }, ...agentStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
         <div className="flex-1"><SearchBox label="Search agents" value={values.q} onSearch={(q) => update({ q })} placeholder="Search name, MARN, email, business or city" /></div>
       </div>
       <Card>
@@ -142,7 +146,7 @@ export default function AgentsPage() {
               </thead>
               <tbody>
                 {loading && !counts ? <tr><td colSpan={5} className="py-10 text-center text-foreground-500">Loading agents…</td></tr> : sorted.map((r) => (
-                  <tr key={r.key}>
+                  <tr key={r.key} className={inactiveBusiness(r) ? "bg-background-100/70 text-foreground-500 opacity-60" : ""} title={inactiveBusiness(r) ? "This agent's business is inactive" : undefined}>
                     <td>
                       <Link to={`/admin/agents/${r.key}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link>
                       <p className="mt-0.5 text-xs text-foreground-500">
@@ -152,7 +156,7 @@ export default function AgentsPage() {
                     </td>
                     <td>
                       <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link>
-                      {r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
+                      {inactiveBusiness(r) ? <p className="text-xs font-medium text-foreground-600">Business inactive</p> : null}
                     </td>
                     <td>{r.students > 0 ? <Link to={`/admin/agents/${r.key}`} className="font-bold text-foreground-900 hover:text-primary-700">{r.students}</Link> : <span className="text-xs text-foreground-500">None</span>}</td>
                     <td>

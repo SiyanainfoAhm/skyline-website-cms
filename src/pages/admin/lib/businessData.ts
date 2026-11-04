@@ -55,10 +55,15 @@ export interface ApplicationRow {
   courses: Array<{ code: string; title: string }>;
 }
 
+/** Migration 116: students per student status (the search and business/agent filters apply; the status tab does not). */
+export interface StudentCounts { all: number; active: number; inactive: number }
+
 export interface StudentRow {
   id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string; createdAt: string; lastUpdated: string | null;
   agencyId: string; businessId: string; businessName: string; agentId: string | null; agentName: string;
   applications: number; statusCounts: StatusCounts;
+  /** Migration 116: the business's status; students of an inactive business are greyed out and listed last. */
+  businessStatus?: BusinessStatus;
   /** Migration 107: nationality and each application of the student (absent on older databases). */
   nationality?: string;
   applicationRows?: StudentApplication[];
@@ -122,7 +127,7 @@ export const setBusinessStatus = (id: string, status: BusinessStatus) =>
 
 /** Students, optionally filtered by the student's own status (a value from the backend's student status list). */
 export const listStudents = (f: { search?: string; status?: string; studentStatus?: string; businessId?: string | null; agentId?: string | null; limit: number; offset: number }) =>
-  call<{ total: number; rows: StudentRow[] }>("admin_students_list", {
+  call<{ total: number; counts?: StudentCounts; rows: StudentRow[] }>("admin_students_list", {
     p_search: f.search ?? "", p_status: f.status ?? "", p_business: f.businessId ?? null, p_agent: f.agentId ?? null, p_limit: f.limit, p_offset: f.offset,
     p_student_status: f.studentStatus ?? "",
   }, "We could not load students. Please try again.");

@@ -1,11 +1,11 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, Card, ConfirmDialog, Select } from "@/pages/admin/components/ui";
+import { Button, Card, ConfirmDialog } from "@/pages/admin/components/ui";
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
-import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListControls";
+import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deleteStudentRecord, listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
+import { deleteStudentRecord, listStudents, setStudentStatus, type StudentCounts, type StudentRow } from "@/pages/admin/lib/businessData";
 import EditStudentDialog from "@/pages/admin/components/EditStudentDialog";
 import { deleteApplicationDocument, listApplicationDocuments } from "@/pages/agency/lib/portalApplications";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
@@ -17,6 +17,7 @@ const PAGE_SIZE = 100;
 type SortKey = "student" | "business" | "agent" | "applications" | "studentStatus";
 const text = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
 const studentStatusOf = (row: StudentRow) => row.status ?? "Active";
+const inactiveBusiness = (row: StudentRow) => Boolean(row.businessStatus) && row.businessStatus !== "Active";
 
 function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
   // Students without a name yet sort after named ones.
@@ -39,7 +40,9 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   const { push } = useToast();
   const statusCatalog = useStatusCatalog();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
+  // Active is the default tab; "" is All.
+  const [status, setStatus] = useState("Active");
+  const [counts, setCounts] = useState<StudentCounts | null>(null);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<StudentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -57,7 +60,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     setLoading(true);
     setError("");
     listStudents({ search, studentStatus: status, businessId: businessId ?? null, agentId: agentId ?? null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
-      .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setLoaded(true); } })
+      .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setCounts(result.counts ?? null); setLoaded(true); } })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load students."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -68,7 +71,9 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   const sorted = useMemo(() => {
     if (!sort) return rows;
     const out = [...rows].sort((a, b) => compareStudents(a, b, sort.key));
-    return sort.dir === "desc" ? out.reverse() : out;
+    if (sort.dir === "desc") out.reverse();
+    // Students of an inactive business always stay at the bottom.
+    return [...out.filter((r) => !inactiveBusiness(r)), ...out.filter(inactiveBusiness)];
   }, [rows, sort]);
   const toggleSort = (key: SortKey) => setSort((prev) => ({ key, dir: prev?.key === key && prev.dir === "asc" ? "desc" : "asc" }));
   const sortHeader = (key: SortKey, label: string, className: string) => (
@@ -138,18 +143,17 @@ This permanently deletes the student and ALL ${total} of their application${tota
     void deleteStudent(row);
   };
 
-  const filtered = Boolean(search || status);
+  const filtered = Boolean(search || status !== "Active");
   const columns = businessId ? 4 : 5;
   return (
     <div>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
+        {/* Filters on the student's own status, from the backend's list (the same one the Student status column uses). */}
+        <StatusTabs label="Student status" value={status || "all"} onChange={(v) => { setStatus(v === "all" ? "" : v); setPage(1); }}
+          tabs={[{ id: "all", label: "All", count: counts?.all ?? null },
+            ...statusCatalog.student.map((s) => ({ id: s.value, label: s.label, count: (s.value === "Active" ? counts?.active : s.value === "Inactive" ? counts?.inactive : undefined) ?? null }))]} />
         <div className="flex-1"><SearchBox label="Search students" value={search} onSearch={(v) => { setSearch(v); setPage(1); }}
           placeholder={businessId ? "Search name, email, mobile, passport, agent or application reference" : "Search name, email, mobile, passport, business, agent or application reference"} /></div>
-        {/* Filters on the student's own status, from the backend's list (the same one the Student status column uses). */}
-        <Select aria-label="Student status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-56">
-          <option value="">All student statuses</option>
-          {statusCatalog.student.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </Select>
       </div>
       <Card>
         {error ? (
@@ -174,7 +178,8 @@ This permanently deletes the student and ALL ${total} of their application${tota
                 {!loaded ? <tr><td colSpan={columns} className="py-10 text-center text-foreground-500">Loading students…</td></tr> : sorted.map((row) => {
                   const disabled = studentStatusOf(row) === "Inactive";
                   return (
-                    <tr key={row.id} className={`align-top ${disabled ? "bg-background-100/60" : ""}`}>
+                    <tr key={row.id} className={`align-top ${inactiveBusiness(row) ? "bg-background-100/70 opacity-60" : disabled ? "bg-background-100/60" : ""}`}
+                      title={inactiveBusiness(row) ? "This student's business is inactive" : undefined}>
                       <td>
                         <Link to={`/admin/students/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">
                           {row.name || <span className="italic text-foreground-500">Name not read from passport yet</span>}
@@ -193,7 +198,7 @@ This permanently deletes the student and ALL ${total} of their application${tota
                           </button>
                         </span>
                       </td>
-                      {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
+                      {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link>{inactiveBusiness(row) ? <p className="text-xs font-medium text-foreground-600">Business inactive</p> : null}</td>}
                       <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>
                       <td>
                         <label className="sr-only" htmlFor={`student-status-${row.id}`}>Status for {row.name || row.email}</label>
