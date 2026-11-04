@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
+import { useContext, useState } from "react";
+import { PortalAuthContext } from "@/pages/agency/lib/portalAuthContext";
 import { statusMeta } from "@/pages/agency/lib/portalData";
 import { nextStatusOptions } from "@/pages/agency/lib/applicationAccess";
 import { setApplicationStatus } from "@/pages/agency/lib/portalApplications";
@@ -14,14 +14,17 @@ export default function ApplicationStatusSelect({ applicationId, status, onChang
   status: string;
   onChanged?: (next: string) => void;
 }) {
-  const { role } = usePortalAuth();
+  // Inside the portal the signed-in role decides. CMS pages (Students, a business's tabs) have no portal context and
+  // are open to SLIT administrators only; the database checks every change either way.
+  const portal = useContext(PortalAuthContext);
+  const isSlitAdmin = portal ? portal.role === "slit_admin" : true;
   const [current, setCurrent] = useState(status);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [previous, setPrevious] = useState(status);
   if (previous !== status) { setPrevious(status); setCurrent(status); }
 
-  const options = role === "slit_admin" ? nextStatusOptions(current) : [];
+  const options = isSlitAdmin ? nextStatusOptions(current) : [];
   if (!options.length) return <StatusBadge status={current} />;
 
   const change = async (next: string) => {
