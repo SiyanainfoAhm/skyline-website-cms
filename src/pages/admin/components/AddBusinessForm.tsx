@@ -20,6 +20,13 @@ export interface CreatedBusiness {
   message: string;
 }
 
+
+/** Keeps only digits (at most 11) and groups them as an ABN is written: 12 345 678 901. */
+function formatAbnInput(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return [digits.slice(0, 2), digits.slice(2, 5), digits.slice(5, 8), digits.slice(8, 11)].filter(Boolean).join(" ");
+}
+
 /**
  * The one Add business form, used on Businesses > Add business and wherever a business is added on the way (new
  * application, add student). The administrator enters only the ABN; the government register fills and locks the
@@ -36,8 +43,11 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
   const suffix = useRef(Math.floor(100 + Math.random() * 900));
 
   const [abnInput, setAbnInput] = useState("");
+  const [abnTouched, setAbnTouched] = useState(false);
   const abn = normalizeAbn(abnInput);
   const abnProblem = validateAbn(abn);
+  // Shown while typing: a full ABN with wrong check digits; after leaving the field: too few digits.
+  const abnShownProblem = abn.length === 11 ? abnProblem : abnTouched && abn.length > 0 ? `An ABN has 11 digits; ${abn.length} entered.` : "";
   const [details, setDetails] = useState<AgencyAbnDetails | null>(null);
   const [existing, setExisting] = useState<{ id: string; name: string } | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -87,7 +97,9 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
     return merged;
   });
 
-  const ready = Boolean(details && details.abn === abn && !existing);
+  // Only an ABN the government register shows as active can be added.
+  const abnInactive = Boolean(details && details.abn === abn && !/^active/i.test(details.abnStatus.trim()));
+  const ready = Boolean(details && details.abn === abn && !existing && !abnInactive);
 
   const pickExisting = async () => {
     if (!existing || !onUseExisting) return;
@@ -99,7 +111,7 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
     event.preventDefault();
     event.stopPropagation();
     if (saving || lookupLoading) return;
-    if (!ready) { setErrors({ registrationNumber: abnProblem || "Look up this ABN successfully before creating the business." }); return; }
+    if (!ready) { setAbnTouched(true); setErrors({ registrationNumber: abnProblem || (abnInactive ? "This ABN is not active on the government register." : "Look up this ABN successfully before creating the business.") }); return; }
     const checked = validateAgencyForm({ ...form, registrationNumber: abn }, true);
     const next: Errors = { ...checked.errors };
     const contactName = validateName(form.primaryContact);
@@ -168,11 +180,15 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
     <form onSubmit={submit} noValidate>
       {box(<>
         <div className="max-w-md">
-          <Field label="ABN" required hint={errors.registrationNumber ? undefined : "Enter the 11-digit ABN to look up the business."}>
-            <TextInput autoFocus disabled={saving} required inputMode="numeric" placeholder="12 345 678 901" value={abnInput}
-              aria-invalid={Boolean(errors.registrationNumber || (abn.length >= 11 && abnProblem))} onChange={e => setAbnInput(e.target.value)} />
+          <Field label="ABN" required hint={errors.registrationNumber || abnShownProblem ? undefined : `Enter the 11-digit ABN to look up the business (${abn.length} of 11 digits).`}>
+            {/* Digits only, at most 11, grouped 2-3-3-3 as typed; pasted spaces, dashes and letters are dropped. */}
+            <TextInput autoFocus disabled={saving} required inputMode="numeric" autoComplete="off" placeholder="12 345 678 901" value={abnInput}
+              aria-invalid={Boolean(errors.registrationNumber || abnShownProblem)}
+              onChange={e => { setAbnInput(formatAbnInput(e.target.value)); setErrors(prev => (prev.registrationNumber ? { ...prev, registrationNumber: undefined } : prev)); }}
+              onBlur={() => setAbnTouched(true)} />
           </Field>
-          {abn.length >= 11 && abnProblem ? <p role="alert" className="mt-1 text-xs font-medium text-red-700">{abnProblem}</p> : error("registrationNumber")}
+          {abnShownProblem ? <p role="alert" className="mt-1 text-xs font-medium text-red-700">{abnShownProblem}</p> : error("registrationNumber")}
+          {abnInactive && details ? <p role="alert" className="mt-1 text-xs font-medium text-red-700">This ABN is {details.abnStatus || "not active"} on the government register, so the business cannot be added.</p> : null}
         </div>
         <div className="mt-3 text-sm" aria-live="polite">
           {lookupLoading ? <p role="status" className="text-foreground-600">Looking up the ABN…</p> : null}
