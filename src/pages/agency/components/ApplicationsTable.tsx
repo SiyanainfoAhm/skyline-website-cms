@@ -349,7 +349,7 @@ export default function ApplicationsTable({
                         {row.agentName || <span className="text-foreground-400">Unassigned</span>}
                       </td>
                       <td data-label="Status" className="px-3 py-3">
-                        <ApplicationStatusSelect applicationId={row.id} status={row.status} />
+                        <ApplicationStatusSelect applicationId={row.id} status={row.status} openHref={paths.detail(row.id)} />
                       </td>
                       <td data-label="Progress" className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1">

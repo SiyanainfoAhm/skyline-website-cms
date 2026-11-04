@@ -1,5 +1,5 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Card, Select } from "@/pages/admin/components/ui";
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
@@ -10,7 +10,22 @@ import { SELECTABLE_STATUSES, STATUS_LABELS } from "@/pages/agency/lib/applicati
 import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 
-const PAGE_SIZE = 25;
+// Up to 100 students load per page and are sorted on this device (like the Agents list).
+const PAGE_SIZE = 100;
+type SortKey = "student" | "business" | "agent" | "applications" | "activity";
+const text = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+
+function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
+  // Students without a name yet sort after named ones.
+  const byName = text(a.name || "￿").localeCompare(text(b.name || "￿")) || text(a.email).localeCompare(text(b.email));
+  switch (key) {
+    case "student": return byName;
+    case "business": return text(a.businessName).localeCompare(text(b.businessName)) || byName;
+    case "agent": return text(a.agentName || "￿").localeCompare(text(b.agentName || "￿")) || byName;
+    case "applications": return a.applications - b.applications || byName;
+    case "activity": return (a.lastUpdated ?? "").localeCompare(b.lastUpdated ?? "") || byName;
+  }
+}
 
 /**
  * Students: who they are (name, email, mobile, passport), their business and agent, and each of their applications with
@@ -39,6 +54,23 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     return () => { active = false; };
   }, [search, status, businessId, agentId, page, reload]);
 
+  // No sort chosen: the server's order (latest activity first).
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
+  const sorted = useMemo(() => {
+    if (!sort) return rows;
+    const out = [...rows].sort((a, b) => compareStudents(a, b, sort.key));
+    return sort.dir === "desc" ? out.reverse() : out;
+  }, [rows, sort]);
+  const toggleSort = (key: SortKey) => setSort((prev) => ({ key, dir: prev?.key === key && prev.dir === "asc" ? "desc" : "asc" }));
+  const sortHeader = (key: SortKey, label: string, className: string) => (
+    <th className={className} aria-sort={sort?.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 hover:text-foreground-900">
+        {label}
+        <i aria-hidden="true" className={sort?.key === key ? (sort.dir === "asc" ? "ri-arrow-up-s-line" : "ri-arrow-down-s-line") : "ri-arrow-up-down-line text-foreground-400"} />
+      </button>
+    </th>
+  );
+
   const filtered = Boolean(search || status);
   const columns = businessId ? 4 : 5;
   return (
@@ -63,15 +95,15 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
             <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr>
-                  <th className={businessId ? "w-[30%]" : "w-[26%]"}>Student</th>
-                  {businessId ? null : <th className="w-[16%]">Business</th>}
-                  <th className="w-[14%]">Agent</th>
-                  <th className="w-[34%]">Applications</th>
-                  <th className="w-[10%]">Last activity</th>
+                  {sortHeader("student", "Student", businessId ? "w-[30%]" : "w-[26%]")}
+                  {businessId ? null : sortHeader("business", "Business", "w-[16%]")}
+                  {sortHeader("agent", "Agent", "w-[14%]")}
+                  {sortHeader("applications", "Applications", "w-[34%]")}
+                  {sortHeader("activity", "Last activity", "w-[10%]")}
                 </tr>
               </thead>
               <tbody>
-                {!loaded ? <tr><td colSpan={columns} className="py-10 text-center text-foreground-500">Loading students…</td></tr> : rows.map((row) => (
+                {!loaded ? <tr><td colSpan={columns} className="py-10 text-center text-foreground-500">Loading students…</td></tr> : sorted.map((row) => (
                   <tr key={row.id} className="align-top">
                     <td>
                       <Link to={`/admin/students/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">
@@ -95,7 +127,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                                   <Link to={`/admin/applications/${application.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{application.reference || "Draft"}</Link>
                                   <span className="block text-foreground-600">{[application.course || "No course yet", application.intake ? `Intake ${application.intake}` : "", `${application.completion}%`].filter(Boolean).join(" · ")}</span>
                                 </span>
-                                <ApplicationStatusSelect applicationId={application.id} status={application.status} />
+                                <ApplicationStatusSelect applicationId={application.id} status={application.status} openHref={`/admin/applications/${application.id}`} />
                               </li>
                             ))}
                           </ul>

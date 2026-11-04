@@ -410,14 +410,19 @@ test("status model: the UI options equal the default graph in migration 91; lega
   const sql = readFileSync(new URL("../supabase/migrations/20261027050000_admissions_status_model_revision.sql", import.meta.url), "utf8");
   const workflow = /when 'workflow' then jsonb_build_object\([\s\S]*?\]'::jsonb\)/.exec(sql)?.[0] ?? "";
   const pairs = [...workflow.matchAll(/\{"from":"(\w+)","to":"(\w+)"\}/g)].map((m) => `${m[1]}>${m[2]}`).filter((p) => !p.startsWith("draft>"));
-  const fromUi = Object.keys(STATUS_LABELS).flatMap((from) => ["under_review", "offer_issued"].includes(from) ? [] : nextStatusOptions(from).map((to) => `${from}>${to}`));
+  // Drafts are compared separately: migration 108 lets an administrator close one (withdrawn / rejected).
+  const fromUi = Object.keys(STATUS_LABELS).flatMap((from) => ["under_review", "offer_issued", "draft"].includes(from) ? [] : nextStatusOptions(from).map((to) => `${from}>${to}`));
   assert.deepEqual([...pairs].sort(), [...fromUi].sort());
   assert.ok(workflow.includes('"draft","to":"submitted"'));
   assert.deepEqual([...nextStatusOptions("under_review")].sort(), ["action_required", "offer_accepted", "rejected", "withdrawn"]);
   assert.deepEqual([...nextStatusOptions("offer_issued")].sort(), ["offer_accepted", "rejected", "withdrawn"]);
   assert.deepEqual(nextStatusOptions("enrolled"), []);
   assert.deepEqual(nextStatusOptions("rejected"), []);
-  assert.deepEqual(nextStatusOptions("draft"), [], "a draft is submitted, never moved by the status command");
+  // A draft is submitted only from its form; the status command can only close it, as migration 108 allows.
+  assert.deepEqual([...nextStatusOptions("draft")].sort(), ["rejected", "withdrawn"]);
+  const draftSql = readFileSync(new URL("../supabase/migrations/20261104170000_draft_can_be_withdrawn_or_rejected.sql", import.meta.url), "utf8");
+  assert.ok(draftSql.includes("when 'draft' then p_to in ('withdrawn','rejected')"));
+  assert.ok(!nextStatusOptions("draft").includes("submitted"));
 });
 
 test("status model: only a draft can be submitted by an agent or agency admin; the status control is read-only for them", () => {

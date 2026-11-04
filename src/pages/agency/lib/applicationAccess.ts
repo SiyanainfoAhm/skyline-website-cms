@@ -25,6 +25,8 @@ export const LEGACY_STATUSES = ["under_review", "offer_issued"] as const;
 
 /** Default admissions graph (migration 91). The database enforces it; this only decides which options an administrator sees. */
 const NEXT_STATUSES: Record<string, readonly string[]> = {
+  // Migration 108: a draft can be closed; it is submitted only from its form.
+  draft: ["withdrawn", "rejected"],
   submitted: ["action_required", "offer_accepted", "rejected", "withdrawn"],
   action_required: ["submitted", "offer_accepted", "rejected", "withdrawn"],
   offer_accepted: ["coe_issued", "rejected", "withdrawn"],
