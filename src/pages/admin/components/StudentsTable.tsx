@@ -6,7 +6,7 @@ import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListControls";
 import { listStudents, type StudentRow } from "@/pages/admin/lib/businessData";
 import { formatDate } from "@/pages/agency/lib/portalData";
-import { SELECTABLE_STATUSES, STATUS_LABELS } from "@/pages/agency/lib/applicationAccess";
+import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 
@@ -33,6 +33,7 @@ function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
  * business column; with `agentId`, one agent's.
  */
 export default function StudentsTable({ businessId, agentId, emptyText }: { businessId?: string; agentId?: string; emptyText?: string }) {
+  const statusCatalog = useStatusCatalog();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -80,7 +81,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
           placeholder={businessId ? "Search name, email, mobile, passport, agent or application reference" : "Search name, email, mobile, passport, business, agent or application reference"} /></div>
         <Select aria-label="Has an application in status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-56">
           <option value="">Any application status</option>
-          {SELECTABLE_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+          {statusCatalog.application.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </Select>
       </div>
       <Card>

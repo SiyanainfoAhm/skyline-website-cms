@@ -7,6 +7,7 @@ import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/compone
 import { useToast } from "@/pages/admin/components/toastContext";
 import { listBusinesses, setBusinessStatus, type BusinessRow, type BusinessStatus, type ListCounts } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
+import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
 const PAGE_SIZE = 25;
 const KEYS = ["q", "status"] as const;
@@ -15,7 +16,10 @@ const KEYS = ["q", "status"] as const;
 export default function BusinessesPage() {
   const { push } = useToast();
   const { values, page, update, setPage, clear } = useListParams(KEYS);
+  // Tabs and each row's dropdown use the backend's business statuses.
+  const businessStatuses = useStatusCatalog().business;
   const status = values.status === "Active" || values.status === "Inactive" ? values.status : "";
+  const countFor = (value: string) => (value === "Active" ? counts?.active : value === "Inactive" ? counts?.inactive : undefined) ?? null;
   const [rows, setRows] = useState<BusinessRow[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<ListCounts | null>(null);
@@ -61,7 +65,7 @@ export default function BusinessesPage() {
 
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <StatusTabs label="Business status" value={status} onChange={(v) => update({ status: v })}
-          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, { id: "Active", label: "Active", count: counts?.active ?? null }, { id: "Inactive", label: "Inactive", count: counts?.inactive ?? null }]} />
+          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, ...businessStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
         <div className="flex-1">
           <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, ABN, agent name, MARN, email or phone" />
         </div>
@@ -117,8 +121,9 @@ export default function BusinessesPage() {
                       <select id={`business-status-${row.id}`} value={row.status} disabled={busyId === row.id}
                         onChange={(e) => { if (e.target.value === "Inactive") setConfirm(row); else void change(row, "Active"); }}
                         className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${row.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-background-300 bg-background-100 text-foreground-600"}`}>
-                        <option value="Active">{busyId === row.id ? "Saving…" : "Active"}</option>
-                        <option value="Inactive">Inactive</option>
+                        {businessStatuses.map((item) => (
+                          <option key={item.value} value={item.value}>{busyId === row.id && item.value === row.status ? "Saving…" : item.label}</option>
+                        ))}
                       </select>
                     </td>
                     <td>

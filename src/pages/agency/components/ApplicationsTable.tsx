@@ -2,9 +2,9 @@ import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { Link } from "react-router-dom";
-import { listApplicationStatuses, queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
-import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
-import { SELECTABLE_STATUSES } from "@/pages/agency/lib/applicationAccess";
+import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
+import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
+import { statusMeta, formatDate } from "@/pages/agency/lib/portalData";
 import { PortalEmpty, PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
 import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 
@@ -122,14 +122,8 @@ export default function ApplicationsTable({
     return () => { active = false; window.clearTimeout(timer); };
   }, [remote, search, status, agencyId, agentId, courseCode, intake, sort, dir, page, pageSize, retry]);
 
-  // The status filter lists the statuses the backend defines (the built-in list until it answers or if it cannot).
-  const [statusChoices, setStatusChoices] = useState<Array<{ value: string; label: string }>>(() =>
-    SELECTABLE_STATUSES.map((value) => ({ value, label: STATUS_META[value].label })));
-  useEffect(() => {
-    let active = true;
-    void listApplicationStatuses().then((list) => { if (active && list.length) setStatusChoices(list); }).catch(() => undefined);
-    return () => { active = false; };
-  }, []);
+  // The status filter and every row's status dropdown use the same backend catalogue.
+  const statusChoices = useStatusCatalog().application;
 
   const courseOptions = useMemo(() => {
     const map = new Map<string, string>();

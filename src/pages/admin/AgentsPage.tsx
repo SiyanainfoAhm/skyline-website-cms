@@ -9,6 +9,7 @@ import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/compone
 import { useToast } from "@/pages/admin/components/toastContext";
 import { deactivateAgent, listAgentDirectory, type AgentCounts, type AgentStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
+import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
 const PAGE_SIZE = 100;
 const KEYS = ["q", "status", "sort", "dir"] as const;
@@ -38,10 +39,13 @@ const STATUS_SELECT: Record<AgentStatus, string> = {
 export default function AgentsPage() {
   const { push } = useToast();
   const { values, page, update, setPage, clear } = useListParams(KEYS);
-  const status = ["Active", "Invited", "Inactive"].includes(values.status) ? values.status : "";
+  // Tabs and each row's dropdown use the backend's agent statuses.
+  const agentStatuses = useStatusCatalog().agent;
+  const status = agentStatuses.some((item) => item.value === values.status) ? values.status : "";
   const [rows, setRows] = useState<DirectoryAgent[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<AgentCounts | null>(null);
+  const countFor = (value: string) => (value === "Active" ? counts?.active : value === "Invited" ? counts?.invited : value === "Inactive" ? counts?.inactive : undefined) ?? null;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
@@ -114,8 +118,7 @@ export default function AgentsPage() {
         actions={<Button icon="ri-user-add-line" onClick={() => openActivate(null)}>Add agent</Button>} />
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <StatusTabs label="Agent status" value={status} onChange={(v) => update({ status: v })}
-          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, { id: "Active", label: "Active", count: counts?.active ?? null },
-            { id: "Invited", label: "Invited", count: counts?.invited ?? null }, { id: "Inactive", label: "Inactive", count: counts?.inactive ?? null }]} />
+          tabs={[{ id: "", label: "All", count: counts?.all ?? null }, ...agentStatuses.map((item) => ({ id: item.value, label: item.label, count: countFor(item.value) }))]} />
         <div className="flex-1"><SearchBox label="Search agents" value={values.q} onSearch={(q) => update({ q })} placeholder="Search name, MARN, email, business or city" /></div>
       </div>
       <Card>
@@ -164,9 +167,14 @@ export default function AgentsPage() {
                       <label className="sr-only" htmlFor={`status-${r.key}`}>Status for {r.name}</label>
                       <select id={`status-${r.key}`} value={r.status} disabled={busyKey === r.key} onChange={(e) => changeStatus(r, e.target.value)}
                         className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60 ${STATUS_SELECT[r.status]}`}>
-                        {r.status === "Inactive"
-                          ? <><option value="Inactive">Inactive</option><option value="Active">Activate…</option></>
-                          : <><option value={r.status}>{r.status}</option><option value="Inactive">Deactivate…</option></>}
+                        {/* The backend's agent statuses. Invited follows from the invitation, so it is never chosen here;
+                            Active from Inactive opens the activation dialog; Inactive asks first. */}
+                        {agentStatuses.map((item) => (
+                          <option key={item.value} value={item.value}
+                            disabled={item.value !== r.status && (item.value === "Invited" || (item.value === "Active" && r.status !== "Inactive"))}>
+                            {item.label}
+                          </option>
+                        ))}
                       </select>
                     </td>
                   </tr>
