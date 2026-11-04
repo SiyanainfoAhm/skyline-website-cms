@@ -119,9 +119,11 @@ export const setBusinessStatus = (id: string, status: BusinessStatus) =>
   call<{ businessId: string; status: BusinessStatus; agencyId: string; workspaceCreated: boolean }>("admin_business_set_status",
     { p_business: id, p_status: status }, "We could not change this business’s status.");
 
-export const listStudents = (f: { search?: string; status?: string; businessId?: string | null; agentId?: string | null; limit: number; offset: number }) =>
+/** Students, optionally filtered by the student's own status (a value from the backend's student status list). */
+export const listStudents = (f: { search?: string; status?: string; studentStatus?: string; businessId?: string | null; agentId?: string | null; limit: number; offset: number }) =>
   call<{ total: number; rows: StudentRow[] }>("admin_students_list", {
     p_search: f.search ?? "", p_status: f.status ?? "", p_business: f.businessId ?? null, p_agent: f.agentId ?? null, p_limit: f.limit, p_offset: f.offset,
+    p_student_status: f.studentStatus ?? "",
   }, "We could not load students. Please try again.");
 
 export const getStudent = (id: string) => call<StudentDetail | null>("admin_student_detail", { p_student: id }, "We could not load this student.");

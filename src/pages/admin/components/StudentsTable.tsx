@@ -56,7 +56,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     let active = true;
     setLoading(true);
     setError("");
-    listStudents({ search, status, businessId: businessId ?? null, agentId: agentId ?? null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+    listStudents({ search, studentStatus: status, businessId: businessId ?? null, agentId: agentId ?? null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
       .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setLoaded(true); } })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load students."); })
       .finally(() => { if (active) setLoading(false); });
@@ -125,9 +125,10 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
       <div className="mb-4 flex flex-col gap-3 sm:flex-row">
         <div className="flex-1"><SearchBox label="Search students" value={search} onSearch={(v) => { setSearch(v); setPage(1); }}
           placeholder={businessId ? "Search name, email, mobile, passport, agent or application reference" : "Search name, email, mobile, passport, business, agent or application reference"} /></div>
-        <Select aria-label="Has an application in status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-56">
-          <option value="">Any application status</option>
-          {statusCatalog.application.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        {/* Filters on the student's own status, from the backend's list (the same one the Student status column uses). */}
+        <Select aria-label="Student status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-56">
+          <option value="">All student statuses</option>
+          {statusCatalog.student.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </Select>
       </div>
       <Card>
@@ -136,7 +137,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
             action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         ) : loaded && !loading && rows.length === 0 ? (
           <ListMessage icon="ri-user-line" title={filtered ? "No students match" : "No students yet"}
-            text={filtered ? "Check the spelling or choose another status." : emptyText ?? "Students appear here when an agent adds them."} />
+            text={filtered ? "Check the spelling or choose another student status." : emptyText ?? "Students appear here when an agent adds them."} />
         ) : (
           <div className={loading && loaded ? "opacity-60 transition-opacity" : ""}>
             <ResponsiveTable aria-busy={loading}>
