@@ -18,9 +18,10 @@ const INPUT = "w-full rounded-md border border-background-300 bg-background-50 p
 
 /**
  * The student a new application is for: only their email and mobile, both unique. A student already on record with either
- * stops the step with a message; nothing is created.
+ * stops the step with a message; nothing is created. With `allowStudentWithoutApplication`, a student added earlier
+ * (Students > Add student) who matches both email and mobile and has no application yet continues as that student.
  */
-export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description }: {
+export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false }: {
   initial?: Partial<StudentDraft>;
   busy: boolean;
   error?: string;
@@ -29,6 +30,7 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   onContinue: (draft: StudentDraft, existing: StudentMatch | null) => void;
   cancel?: ReactNode;
   description?: string;
+  allowStudentWithoutApplication?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [errors, setErrors] = useState<{ email?: string; mobile?: string }>({});
@@ -51,6 +53,8 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
       // Email and mobile are unique: one student, one application. A match stops here; nothing is created.
       const rows = await findStudents(draft.email, draft.mobile);
       if (rows.length === 0) { onContinue(draft, null); return; }
+      const only = rows.length === 1 ? rows[0] : null;
+      if (allowStudentWithoutApplication && only && only.emailMatch && only.phoneMatch && only.applications === 0) { onContinue(draft, only); return; }
       const byEmail = rows.find((row) => row.emailMatch);
       const byMobile = rows.find((row) => row.phoneMatch);
       const who = (row: StudentMatch) => (row.name ? ` (${row.name}, ${row.businessName})` : ` (${row.businessName})`);

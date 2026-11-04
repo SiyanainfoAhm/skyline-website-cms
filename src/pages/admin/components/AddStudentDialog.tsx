@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button, Modal } from "@/pages/admin/components/ui";
 import { useToast } from "@/pages/admin/components/toastContext";
 import SearchPick, { type PickOption } from "@/pages/admin/components/SearchPick";
@@ -7,20 +6,15 @@ import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import AddStudentRecordDialog, { type AddStudentRecordValue } from "@/pages/admin/components/AddStudentRecordDialog";
 import StudentDetailsStep, { type StudentDraft } from "@/pages/agency/components/StudentDetailsStep";
 import { activateAgent, listBusinesses, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
-import { createApplicationForStudent, listAgentsOfBusiness, saveStudent, type BusinessAgentOption, type StudentMatch } from "@/pages/agency/lib/portalApplications";
+import { listAgentsOfBusiness, saveStudent, type BusinessAgentOption, type StudentMatch } from "@/pages/agency/lib/portalApplications";
 
 type Business = { id: string; name: string; status: BusinessStatus };
 
-function newKey(): string {
-  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `key-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 /**
  * SLIT admin: add a student down the chain. Choose the business, then the agent who looks after them, then the student's
- * details; a student already on record is offered first. The student's first application then opens as a draft.
+ * email and mobile. Only the student is created; applications are started separately.
  */
-export default function AddStudentDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const navigate = useNavigate();
+export default function AddStudentDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded?: () => void }) {
   const { push } = useToast();
   const [business, setBusiness] = useState<Business | null>(null);
   const [agent, setAgent] = useState<BusinessAgentOption | null>(null);
@@ -63,34 +57,26 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
     }
   };
 
-  // The student: reuse the one chosen from the matches, or create them under the chosen agent; then open their first application.
+  // Adding a student only creates the student record. Applications are started separately (Applications > New application).
   const finish = async (draft: StudentDraft, existing: StudentMatch | null) => {
     if (!business || !agent) return;
+    if (existing) { setError("This student is already on record. Each email and mobile can belong to one student only."); return; }
     setBusy(true);
     setError("");
     const notes: string[] = [];
     try {
-      let studentId = existing?.id ?? "";
-      if (!existing) {
-        if (business.status !== "Active") {
-          await setBusinessStatus(business.id, "Active");
-          notes.push(`${business.name} was activated.`);
-        }
-        if (agent.status === "Inactive") {
-          await activateAgent({ agentId: agent.id, businessId: business.id, name: agent.name, email: agent.email, role: agent.role });
-          notes.push(`${agent.name} was activated.`);
-        }
-        const saved = await saveStudent({ agentId: agent.id, fullName: draft.fullName, email: draft.email, mobile: draft.mobile, dateOfBirth: draft.dateOfBirth, passportNumber: draft.passportNumber });
-        studentId = saved.id;
-        if (saved.reused) notes.push(`${saved.name} was already on record with this passport or email and date of birth, so that record is used.`);
-      } else {
-        notes.push(`New application for ${existing.name || "the existing student"} with ${existing.businessName}${existing.agentName ? ` (${existing.agentName})` : ""}.`);
+      if (business.status !== "Active") {
+        await setBusinessStatus(business.id, "Active");
+        notes.push(`${business.name} was activated.`);
       }
-      const created = await createApplicationForStudent(newKey(), studentId);
-      push([existing ? "Application started as a draft." : "Student added and their application started as a draft.", ...notes].join(" "));
+      if (agent.status === "Inactive") {
+        await activateAgent({ agentId: agent.id, businessId: business.id, name: agent.name, email: agent.email, role: agent.role });
+        notes.push(`${agent.name} was activated.`);
+      }
+      const saved = await saveStudent({ agentId: agent.id, fullName: draft.fullName, email: draft.email, mobile: draft.mobile, dateOfBirth: draft.dateOfBirth, passportNumber: draft.passportNumber });
+      push([saved.reused ? `${saved.name || draft.email} is already on record, so that record is kept.` : `Student ${draft.email} added to ${agent.name}.`, ...notes].join(" "));
+      onAdded?.();
       onClose();
-      // The new application opens on the document wizard, as New application does.
-      navigate(`/admin/applications/${created.id}?wizard=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not add this student.");
     } finally {
@@ -113,7 +99,7 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
     <Modal open={open} onClose={() => { if (!busy) onClose(); }} width="max-w-2xl" title="Add student"
       footer={ready ? undefined : <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>}>
       <div className="space-y-5">
-        {!ready ? <p className="text-sm text-foreground-600">Choose the business and the agent who looks after the student, then enter the student's details. Their first application starts as a draft.</p> : null}
+        {!ready ? <p className="text-sm text-foreground-600">Choose the business and the agent who looks after the student, then enter the student's email and mobile.</p> : null}
 
         {/* Business */}
         <div>
@@ -147,8 +133,8 @@ export default function AddStudentDialog({ open, onClose }: { open: boolean; onC
         {/* Student */}
         {ready ? (
           <div className="border-t border-background-200 pt-5">
-            <StudentDetailsStep busy={busy} error={error} submitLabel="Add student and open form"
-              description="Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport on the form."
+            <StudentDetailsStep busy={busy} error={error} submitLabel="Add student"
+              description="Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport when an application is started."
               onContinue={(draft, existing) => void finish(draft, existing)}
               cancel={<Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>} />
           </div>

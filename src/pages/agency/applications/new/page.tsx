@@ -326,7 +326,7 @@ export default function NewApplicationPage() {
           description="Start with the student. A student already on record keeps one record with all their applications."
         />
         <div className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
-          <StudentDetailsStep initial={draft ?? undefined} busy={creating} error={error}
+          <StudentDetailsStep initial={draft ?? undefined} busy={creating} error={error} allowStudentWithoutApplication
             onContinue={(student, existing) => void continueFromStudent(student, existing)}
             cancel={<Link to={paths.list} className={secondary}>Cancel</Link>} />
         </div>

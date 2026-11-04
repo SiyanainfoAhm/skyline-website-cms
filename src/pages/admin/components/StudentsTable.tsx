@@ -36,7 +36,7 @@ function compareStudents(a: StudentRow, b: StudentRow, key: SortKey): number {
  * only). Disabling a student locks all of their applications until they are enabled again. With `businessId`, only
  * that business's students and no business column; with `agentId`, one agent's.
  */
-export default function StudentsTable({ businessId, agentId, emptyText }: { businessId?: string; agentId?: string; emptyText?: string }) {
+export default function StudentsTable({ businessId, agentId, emptyText, refreshKey = 0 }: { businessId?: string; agentId?: string; emptyText?: string; refreshKey?: number }) {
   const { push } = useToast();
   const statusCatalog = useStatusCatalog();
   const [search, setSearch] = useState("");
@@ -64,7 +64,7 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load students."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [search, status, businessId, agentId, page, reload]);
+  }, [search, status, businessId, agentId, page, reload, refreshKey]);
 
   // No sort chosen: the server's order (latest activity first).
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);

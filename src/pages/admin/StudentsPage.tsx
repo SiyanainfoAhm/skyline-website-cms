@@ -6,12 +6,13 @@ import AddStudentDialog from "@/pages/admin/components/AddStudentDialog";
 /** Agencies > Students: every student across businesses, with their applications by status. */
 export default function StudentsPage() {
   const [adding, setAdding] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   return (
     <div>
-      <PageHeader title="Students" description="Every student an agency has started an application for. Open a student to see all of their applications."
+      <PageHeader title="Students" description="Every student, with their business and agent. Add a student here; start their applications from Applications."
         actions={<Button icon="ri-user-add-line" onClick={() => setAdding(true)}>Add student</Button>} />
-      <StudentsTable />
-      <AddStudentDialog open={adding} onClose={() => setAdding(false)} />
+      <StudentsTable refreshKey={refresh} />
+      <AddStudentDialog open={adding} onClose={() => setAdding(false)} onAdded={() => setRefresh((n) => n + 1)} />
     </div>
   );
 }
