@@ -7,7 +7,7 @@ import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListCont
 import { useToast } from "@/pages/admin/components/toastContext";
 import { deleteStudentRecord, listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
 import EditStudentDialog from "@/pages/admin/components/EditStudentDialog";
-import { deleteApplicationDocument, deleteApplicationDraft, listApplicationDocuments } from "@/pages/agency/lib/portalApplications";
+import { deleteApplicationDocument, listApplicationDocuments } from "@/pages/agency/lib/portalApplications";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 import { StatusBadge } from "@/pages/agency/components/PortalUI";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -96,18 +96,21 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     }
   };
 
-  // Only a student with nothing but drafts can be deleted: the drafts and their files go first, then the student.
+  // Deleting a student deletes all of their applications too. Files of applications still being worked on are removed
+  // here first (the document-delete function keeps files of submitted ones); the database then deletes every
+  // application with its records and queues any remaining files for removal, then the student.
   const submittedCount = (row: StudentRow) => (row.applicationRows ?? []).filter((application) => application.status !== "draft").length;
   const deleteStudent = async (row: StudentRow) => {
     setBusyId(row.id);
     try {
       for (const application of row.applicationRows ?? []) {
-        const documents = await listApplicationDocuments(application.id);
-        for (const document of documents) await deleteApplicationDocument({ id: document.id, storagePath: document.storagePath });
-        await deleteApplicationDraft(application.id);
+        if (application.status !== "draft" && application.status !== "action_required") continue;
+        const documents = await listApplicationDocuments(application.id).catch(() => []);
+        for (const document of documents) await deleteApplicationDocument({ id: document.id, storagePath: document.storagePath }).catch(() => undefined);
       }
-      await deleteStudentRecord(row.id);
-      push(`${row.name || row.email} deleted.`);
+      const result = await deleteStudentRecord(row.id);
+      const count = result.applicationsDeleted ?? row.applications;
+      push(`${row.name || row.email} deleted, with ${count} application${count === 1 ? "" : "s"}.`);
       setReload((n) => n + 1);
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not delete this student.", "error");
@@ -121,17 +124,11 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   // The browser's own confirm box: it always shows in front of the page, however long the list is.
   const askDelete = (row: StudentRow) => {
     const who = row.name || row.email || "this student";
+    const total = row.applications;
     const submitted = submittedCount(row);
-    if (submitted > 0) {
-      window.alert(`${who} cannot be deleted: they have ${submitted} submitted application${submitted === 1 ? "" : "s"}, which are kept as admissions records.
-
-Set their Student status to Disabled instead to lock everything.`);
-      return;
-    }
-    const drafts = row.applicationRows?.length ?? 0;
     const ok = window.confirm(`Delete ${who}?
 
-The student record${drafts > 0 ? `, their ${drafts} draft application${drafts === 1 ? "" : "s"} and the uploaded files` : ""} will be permanently deleted. This cannot be undone.`);
+This permanently deletes the student and ALL ${total} of their application${total === 1 ? "" : "s"}${submitted > 0 ? `, including ${submitted} submitted or processed application${submitted === 1 ? "" : "s"}` : ""}, with their documents, history and messages. This cannot be undone.${submitted > 0 ? "\n\nTo keep the records, set the Student status to Disabled instead." : ""}`);
     if (!ok) return;
     setConfirmDelete(row);
     void deleteStudent(row);
