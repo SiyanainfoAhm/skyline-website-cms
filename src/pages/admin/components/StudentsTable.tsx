@@ -103,13 +103,17 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   const deleteStudent = async (row: StudentRow) => {
     setBusyId(row.id);
     try {
-      for (const application of row.applicationRows ?? []) {
-        if (application.status !== "draft" && application.status !== "action_required") continue;
+      // Draft files are removed in parallel; anything left over is queued by the server.
+      const editable = (row.applicationRows ?? []).filter((a) => a.status === "draft" || a.status === "action_required");
+      await Promise.all(editable.map(async (application) => {
         const documents = await listApplicationDocuments(application.id).catch(() => []);
-        for (const document of documents) await deleteApplicationDocument({ id: document.id, storagePath: document.storagePath }).catch(() => undefined);
-      }
+        await Promise.all(documents.map((document) => deleteApplicationDocument({ id: document.id, storagePath: document.storagePath }).catch(() => undefined)));
+      }));
       const result = await deleteStudentRecord(row.id);
       const count = result.applicationsDeleted ?? row.applications;
+      // Drop the row straight away so the list never shows a deleted student.
+      setRows((current) => current.filter((r) => r.id !== row.id));
+      setTotal((n) => Math.max(0, n - 1));
       push(`${row.name || row.email} deleted, with ${count} application${count === 1 ? "" : "s"}.`);
       setReload((n) => n + 1);
     } catch (e) {
