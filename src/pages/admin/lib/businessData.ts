@@ -92,8 +92,19 @@ async function call<T>(fn: string, params: Record<string, unknown>, fallback: st
 /** Database messages written for people are passed through; anything technical becomes the caller's fallback. */
 function friendly(message: string | undefined): string {
   if (!message) return "";
-  return /^(SLIT administrator|Business|Agency|That business|This business|An agency|An agent|This MARN|Say how|Portal user|OMARA agent|Status must|Agent not found|Student not found|A business with|Choose the business|This agent|This student|Another student|Enter |Role must|Only the student)/.test(message) ? message : "";
+  return /^(SLIT administrator|Business|Agency|That business|This business|An agency|An agent|This MARN|Say how|Portal user|OMARA agent|Status must|Agent not found|Student not found|A business with|Choose the business|Choose an agent|This agent|This student|Another student|Delete this|Enter |Role must|Only the student)/.test(message) ? message : "";
 }
+
+/** Edits a student's details (migration 113). Email and mobile stay unique across all students. */
+export const updateStudent = (id: string, input: {
+  fullName: string; email: string; mobile: string; dateOfBirth: string; passportNumber: string; nationality: string; agentId: string | null;
+}) => call<{ id: string }>("admin_student_update", {
+  p_student: id, p_full_name: input.fullName, p_email: input.email, p_phone: input.mobile, p_date_of_birth: input.dateOfBirth || null,
+  p_passport: input.passportNumber, p_nationality: input.nationality, p_agent: input.agentId,
+}, "We could not save this student.");
+
+/** Deletes a student who has no applications left (their drafts are removed first by the caller). */
+export const deleteStudentRecord = (id: string) => call<{ deleted: boolean }>("admin_student_delete", { p_student: id }, "We could not delete this student.");
 
 export const listBusinesses = (f: { search?: string; status?: string; limit: number; offset: number }) =>
   call<{ total: number; counts: ListCounts; rows: BusinessRow[] }>("admin_business_list", {

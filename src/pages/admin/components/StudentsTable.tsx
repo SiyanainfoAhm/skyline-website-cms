@@ -5,7 +5,9 @@ import { Button, Card, ConfirmDialog, Select } from "@/pages/admin/components/ui
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
+import { deleteStudentRecord, listStudents, setStudentStatus, type StudentRow } from "@/pages/admin/lib/businessData";
+import EditStudentDialog from "@/pages/admin/components/EditStudentDialog";
+import { deleteApplicationDocument, deleteApplicationDraft, listApplicationDocuments } from "@/pages/agency/lib/portalApplications";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 import { StatusBadge } from "@/pages/agency/components/PortalUI";
 import { formatPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -46,6 +48,8 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const [confirmDisable, setConfirmDisable] = useState<StudentRow | null>(null);
+  const [editing, setEditing] = useState<StudentRow | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<StudentRow | null>(null);
   const [busyId, setBusyId] = useState("");
 
   useEffect(() => {
@@ -89,6 +93,28 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
     } finally {
       setBusyId("");
       setConfirmDisable(null);
+    }
+  };
+
+  // Only a student with nothing but drafts can be deleted: the drafts and their files go first, then the student.
+  const submittedCount = (row: StudentRow) => (row.applicationRows ?? []).filter((application) => application.status !== "draft").length;
+  const deleteStudent = async (row: StudentRow) => {
+    setBusyId(row.id);
+    try {
+      for (const application of row.applicationRows ?? []) {
+        const documents = await listApplicationDocuments(application.id);
+        for (const document of documents) await deleteApplicationDocument({ id: document.id, storagePath: document.storagePath });
+        await deleteApplicationDraft(application.id);
+      }
+      await deleteStudentRecord(row.id);
+      push(`${row.name || row.email} deleted.`);
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not delete this student.", "error");
+      setReload((n) => n + 1);
+    } finally {
+      setBusyId("");
+      setConfirmDelete(null);
     }
   };
 
@@ -137,6 +163,14 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
                         {row.passportNumber || row.nationality ? (
                           <p className="text-xs text-foreground-500">{[row.passportNumber ? `Passport ${row.passportNumber}` : "", row.nationality ?? ""].filter(Boolean).join(" · ")}</p>
                         ) : null}
+                        <span className="mt-1.5 flex gap-3 text-xs font-semibold">
+                          <button type="button" disabled={busyId === row.id} onClick={() => setEditing(row)} className="inline-flex items-center gap-1 text-primary-700 hover:underline disabled:opacity-50">
+                            <i className="ri-edit-line" aria-hidden="true" /> Edit
+                          </button>
+                          <button type="button" disabled={busyId === row.id} onClick={() => setConfirmDelete(row)} className="inline-flex items-center gap-1 text-red-700 hover:underline disabled:opacity-50">
+                            <i className="ri-delete-bin-line" aria-hidden="true" /> {busyId === row.id && confirmDelete?.id === row.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </span>
                       </td>
                       {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
                       <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>
@@ -185,6 +219,23 @@ export default function StudentsTable({ businessId, agentId, emptyText }: { busi
         )}
         {!error ? <Pager page={page} pageSize={PAGE_SIZE} total={total} loading={loading} onPage={setPage} /> : null}
       </Card>
+
+      <EditStudentDialog student={editing} onClose={() => setEditing(null)} onSaved={() => setReload((n) => n + 1)} />
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        title={confirmDelete && submittedCount(confirmDelete) > 0 ? "This student cannot be deleted" : `Delete ${confirmDelete?.name || confirmDelete?.email || "this student"}?`}
+        message={confirmDelete && submittedCount(confirmDelete) > 0
+          ? `They have ${submittedCount(confirmDelete)} submitted application${submittedCount(confirmDelete) === 1 ? "" : "s"}, which are kept as admissions records. Disable the student instead to lock everything.`
+          : `The student record${(confirmDelete?.applicationRows?.length ?? 0) > 0 ? `, their ${confirmDelete?.applicationRows?.length} draft application${confirmDelete?.applicationRows?.length === 1 ? "" : "s"} and the uploaded files` : ""} will be permanently deleted. This cannot be undone.`}
+        confirmLabel={confirmDelete && submittedCount(confirmDelete) > 0 ? "OK" : busyId ? "Deleting…" : "Delete student"}
+        onConfirm={() => {
+          if (!confirmDelete || busyId) return;
+          if (submittedCount(confirmDelete) > 0) { setConfirmDelete(null); return; }
+          void deleteStudent(confirmDelete);
+        }}
+        onCancel={() => { if (!busyId) setConfirmDelete(null); }}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmDisable)}
