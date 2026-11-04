@@ -20,7 +20,7 @@ const text = (value: string) => value.trim().toLowerCase();
 
 function compareAgents(a: DirectoryAgent, b: DirectoryAgent, key: SortKey): number {
   switch (key) {
-    case "business": return text(a.businessName || "\uffff").localeCompare(text(b.businessName || "\uffff")) || text(a.name).localeCompare(text(b.name));
+    case "business": return text(a.businessName).localeCompare(text(b.businessName)) || text(a.name).localeCompare(text(b.name));
     case "agent": return text(a.name).localeCompare(text(b.name));
     case "students": return a.students - b.students || text(a.name).localeCompare(text(b.name));
     case "applications": return applicationTotal(a) - applicationTotal(b) || text(a.name).localeCompare(text(b.name));
@@ -34,7 +34,7 @@ const STATUS_SELECT: Record<AgentStatus, string> = {
   Inactive: "border-background-300 bg-background-100 text-foreground-600",
 };
 
-/** Agencies > Agents: every agent on the OMARA register plus agents added by hand. Inactive until a SLIT administrator activates them. */
+/** Agencies > Agents: every agent of every business, with their students and applications. */
 export default function AgentsPage() {
   const { push } = useToast();
   const { values, page, update, setPage, clear } = useListParams(KEYS);
@@ -74,7 +74,7 @@ export default function AgentsPage() {
   };
   const applicationsHref = (row: DirectoryAgent, status?: string) => {
     const query = new URLSearchParams();
-    if (row.businessId) query.set("business", row.businessId);
+    query.set("business", row.businessId);
     if (row.profileId) query.set("agent", row.profileId);
     if (status) query.set("status", status);
     return `/admin/applications?${query.toString()}`;
@@ -93,7 +93,6 @@ export default function AgentsPage() {
 
   const openActivate = (agent: AgentToActivate | null) => { setActivating(agent); setDialogOpen(true); };
   const deactivate = async (row: DirectoryAgent) => {
-    if (!row.agentId) return;
     setBusyKey(row.key);
     try {
       await deactivateAgent(row.agentId);
@@ -111,7 +110,7 @@ export default function AgentsPage() {
   return (
     <div>
       <PageHeader title="Agents"
-        description="Every agent on the OMARA register, plus agents you add. Agents are inactive until you activate them; activating attaches them to a business and can send their sign-in invitation."
+        description="Every agent belongs to one business and looks after their own students. Adding an agent can send their sign-in invitation; deactivating one blocks their sign-in but keeps their students."
         actions={<Button icon="ri-user-add-line" onClick={() => openActivate(null)}>Add agent</Button>} />
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <StatusTabs label="Agent status" value={status} onChange={(v) => update({ status: v })}
@@ -124,7 +123,7 @@ export default function AgentsPage() {
           <ListMessage icon="ri-error-warning-line" title="Agents did not load" text={error} action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         ) : !loading && rows.length === 0 ? (
           <ListMessage icon="ri-team-line" title={filtered ? "No agents match" : "No agents yet"}
-            text={filtered ? "Check the spelling, search fewer words, or clear the filter." : "Agents appear here when the OMARA register is imported or when you add one."}
+            text={filtered ? "Check the spelling, search fewer words, or clear the filter." : "Add an agent to a business to get started."}
             action={filtered ? <Button variant="outline" size="sm" onClick={clear}>Clear search and filter</Button> : undefined} />
         ) : (
           <div className={loading && counts ? "opacity-60 transition-opacity" : ""}>
@@ -142,19 +141,19 @@ export default function AgentsPage() {
                 {loading && !counts ? <tr><td colSpan={5} className="py-10 text-center text-foreground-500">Loading agents…</td></tr> : sorted.map((r) => (
                   <tr key={r.key}>
                     <td>
-                      {r.businessId ? <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link> : <span className="text-xs text-foreground-500">No business</span>}
-                      {r.businessId && r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
+                      <Link to={`/admin/businesses/${r.businessId}`} className="font-medium text-foreground-800 hover:text-primary-700">{r.businessName}</Link>
+                      {r.businessStatus !== "Active" && r.status !== "Inactive" ? <p className="text-xs font-medium text-amber-700">Business inactive</p> : null}
                     </td>
                     <td>
                       <Link to={`/admin/agents/${r.key}`} className="font-semibold text-foreground-900 hover:text-primary-700">{r.name}</Link>
                       <p className="mt-0.5 text-xs text-foreground-500">
-                        {[r.marn ? `MARN ${r.marn}` : "Not in OMARA", r.role === "agency_admin" ? "Agency admin" : null, r.place || r.email].filter(Boolean).join(", ")}
+                        {[r.marn ? `MARN ${r.marn}` : null, r.role === "agency_admin" ? "Agency admin" : null, r.email].filter(Boolean).join(", ")}
                       </p>
                       {r.registered === false ? <p className="text-xs font-medium text-amber-700">No longer registered with OMARA</p> : null}
                     </td>
-                    <td>{r.profileId ? <b className="text-foreground-900">{r.students}</b> : <span className="text-xs text-foreground-500">None</span>}</td>
+                    <td>{r.students > 0 ? <Link to={`/admin/agents/${r.key}`} className="font-bold text-foreground-900 hover:text-primary-700">{r.students}</Link> : <span className="text-xs text-foreground-500">None</span>}</td>
                     <td>
-                      {applicationTotal(r) > 0 && r.profileId ? (
+                      {applicationTotal(r) > 0 ? (
                         <div className="flex flex-col items-start gap-1">
                           <Link to={applicationsHref(r)} className="text-xs font-semibold text-primary-700 hover:underline">{applicationTotal(r)} application{applicationTotal(r) === 1 ? "" : "s"}</Link>
                           <ApplicationStatusPills counts={r.statusCounts} limit={3} hrefFor={(status) => applicationsHref(r, status)} />

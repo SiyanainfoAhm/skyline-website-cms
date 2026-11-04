@@ -36,7 +36,7 @@ export default function AgentDetailPage() {
   useEffect(() => { setState("loading"); void load(); }, [load]);
 
   const deactivate = async () => {
-    if (!agent?.agentId) return;
+    if (!agent) return;
     setBusy(true);
     try {
       await deactivateAgent(agent.agentId);
@@ -65,7 +65,6 @@ export default function AgentDetailPage() {
   const groups = groupByStudent(shown, agent.students);
   const counts: Record<string, number> = {};
   for (const a of agent.applications) counts[a.status] = (counts[a.status] ?? 0) + 1;
-  const startBusiness = agent.business ?? agent.omara?.business ?? null;
 
   return (
     <div>
@@ -74,8 +73,7 @@ export default function AgentDetailPage() {
       </Link>
       <PageHeader
         title={agent.name}
-        description={[agent.omara ? `MARN ${agent.omara.marn}` : "Not on the OMARA register", agent.role === "agency_admin" ? "Agency admin" : agent.role ? "Agent" : null,
-          agent.business ? `with ${agent.business.name}` : null].filter(Boolean).join(", ")}
+        description={[agent.omara ? `MARN ${agent.omara.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
         actions={<>
           <AgentStatusBadge status={agent.status} />
           {agent.status === "Inactive"
@@ -89,19 +87,17 @@ export default function AgentDetailPage() {
         </p>
       ) : agent.status === "Inactive" ? (
         <p role="status" className="-mt-2 mb-5 rounded-md border border-background-300 bg-background-100 px-4 py-3 text-sm text-foreground-700">
-          Inactive. Activate this agent to attach them to a business and let them sign in.
+          Inactive. Activate this agent to let them sign in.
         </p>
       ) : null}
 
       <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="p-4">
           <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">Business</h2>
-          {agent.business ? (
-            <div className="space-y-1.5 text-sm">
-              <Link to={`/admin/businesses/${agent.business.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{agent.business.name}</Link>
-              <div><AgencyStatusBadge status={agent.business.status} /></div>
-            </div>
-          ) : <p className="text-sm text-foreground-600">Not attached yet. {startBusiness ? `OMARA lists ${startBusiness.name}.` : ""}</p>}
+          <div className="space-y-1.5 text-sm">
+            <Link to={`/admin/businesses/${agent.business.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{agent.business.name}</Link>
+            <div><AgencyStatusBadge status={agent.business.status} /></div>
+          </div>
         </Card>
         <Card className="p-4">
           <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">OMARA registration</h2>
@@ -109,9 +105,9 @@ export default function AgentDetailPage() {
             <dl className="space-y-1.5 text-sm">
               <div><dt className="inline text-foreground-500">MARN </dt><dd className="inline font-semibold tabular-nums text-foreground-900">{agent.omara.marn}</dd></div>
               <dd className={agent.omara.registered ? "text-emerald-800" : "font-medium text-amber-700"}>{agent.omara.registered ? "Registered" : "No longer registered"}</dd>
-              {agent.omara.business ? <dd className="text-foreground-700">Listed with {agent.omara.business.name}{agent.omara.place ? `, ${agent.omara.place}` : ""}</dd> : null}
+              {agent.omara.place ? <dd className="text-foreground-700">{agent.omara.place}</dd> : null}
             </dl>
-          ) : <p className="text-sm text-foreground-600">Not on the OMARA register.</p>}
+          ) : <p className="text-sm text-foreground-600">No MARN recorded. Add one when activating the agent.</p>}
         </Card>
         <Card className="p-4">
           <h2 className="mb-2 font-heading text-[15px] font-semibold text-foreground-900">Contact and sign-in</h2>
@@ -137,7 +133,7 @@ export default function AgentDetailPage() {
       </div>
       {groups.length === 0 ? (
         <Card><ListMessage icon="ri-user-line" title={status ? "No applications in this status" : "No students yet"}
-          text={status ? "Choose another status." : agent.profileId ? "Students appear here when this agent starts an application." : "Students appear here once the agent has signed in and starts an application."} /></Card>
+          text={status ? "Choose another status." : "Students appear here when they are added to this agent."} /></Card>
       ) : (
         <div className="space-y-4">
           {groups.map((g) => (
@@ -156,8 +152,8 @@ export default function AgentDetailPage() {
       )}
 
       <ActivateAgentDialog open={dialog} onClose={() => setDialog(false)} onDone={() => void load()}
-        agent={{ agentId: agent.agentId, omaraId: agent.omaraId, name: agent.name, email: agent.email, marn: agent.omara?.marn, role: agent.role,
-          hasLogin: Boolean(agent.profileId), business: startBusiness }} />
+        agent={{ agentId: agent.agentId, name: agent.name, email: agent.email, phone: agent.phone, marn: agent.omara?.marn, role: agent.role,
+          hasLogin: Boolean(agent.profileId), business: agent.business }} />
       <ConfirmDialog open={confirm} title={`Deactivate ${agent.name}?`}
         message="They will not be able to sign in, and an invitation still waiting is withdrawn. Their students and applications stay with the business. You can activate them again at any time."
         confirmLabel={busy ? "Deactivating…" : "Deactivate agent"} onConfirm={() => { if (!busy) void deactivate(); }} onCancel={() => { if (!busy) setConfirm(false); }} />

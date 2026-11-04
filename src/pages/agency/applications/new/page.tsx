@@ -1,45 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
-import {
-  createAgencyRecordWithBusiness,
-  invokePortalUsers,
-  listAgencyInvitations,
-  listAgencyMembers,
-  logAgencyChange,
-  type AgencyMemberRow,
-  type InvitationRow,
-} from "@/pages/agency/lib/portalData";
-import {
-  activateAgent,
-  listBusinesses,
-  setBusinessStatus,
-  type AgentStatus,
-  type BusinessStatus,
-} from "@/pages/admin/lib/businessData";
+import { activateAgent, listBusinesses, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
 import { useToast } from "@/pages/admin/components/toastContext";
 import SearchPick, { type PickOption } from "@/pages/admin/components/SearchPick";
 import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
-import AddStudentRecordDialog, {
-  type AddStudentRecordValue,
-  type NewStudentAgent,
-} from "@/pages/admin/components/AddStudentRecordDialog";
-import type { AgencyFormState } from "@/pages/admin/lib/agencyForm";
-import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
+import AddStudentRecordDialog, { type AddStudentRecordValue } from "@/pages/admin/components/AddStudentRecordDialog";
+import StudentDetailsStep, { type StudentDraft } from "@/pages/agency/components/StudentDetailsStep";
 import {
-  createApplication,
+  createApplicationForStudent,
   deleteApplicationDocument,
   deleteApplicationDraft,
+  findAgentByProfile,
   getApplication,
+  listAgentsOfBusiness,
   listApplicationDocuments,
-  listAssignableAgents,
-  findApplicationByStudentContact,
   saveApplicationDraft,
-  type AgentOption,
+  saveStudent,
+  type BusinessAgentOption,
+  type StudentMatch,
 } from "@/pages/agency/lib/portalApplications";
-import { PhoneInput } from "@/components/feature/applicationInputs";
-import { validateEmail } from "@/pages/agency/lib/userValidation";
-import { formatPhone, parseStoredPhone, validateStoredPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
+import { formatPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import ApplicationWizard from "@/pages/agency/components/ApplicationWizard";
 import { isEditableApplicationStatus } from "@/pages/agency/lib/applicationAccess";
@@ -86,175 +67,146 @@ function clearSession(uid: string): void {
 
 type Phase = "checking" | "student" | "pick" | "wizard";
 
-type StudentContact = { email: string; mobile: string };
+type Business = { id: string; name: string; status: BusinessStatus };
 
-type BusinessSelection =
-  | { kind: "existing"; id: string; name: string; status: BusinessStatus; agencyId: string | null }
-  | { kind: "new"; name: string; details: AgencyFormState };
-
-type PortalTeamMember = {
-  id: string;
-  profileId: string | null;
-  name: string;
-  email: string;
-  role: "agent" | "agency_admin";
-  status: AgentStatus;
-};
-
-type AgentSelection =
-  | { kind: "existing"; row: PortalTeamMember }
-  | { kind: "new"; details: NewStudentAgent }
-  // Added through the shared Add agent form, which creates and invites them straight away.
-  | { kind: "created"; details: NewStudentAgent };
-
-/** The student's contact details are the first thing on every application; the form shows them prefilled. */
-async function saveContact(id: string, student: StudentContact): Promise<void> {
+/** A draft started before students were recorded separately still needs its contact details before the wizard. */
+async function saveContact(id: string, student: StudentDraft): Promise<void> {
   // Saves are version-checked; a draft created a moment ago has no known version until it is read once.
   await getApplication(id);
   return saveApplicationDraft(id, {
     data: { values: { email: student.email, confirm_email: student.email, mobile: student.mobile } },
-    studentName: "",
+    studentName: student.fullName,
     studentEmail: student.email,
     intake: "",
     completion: 0,
   });
 }
 
+/**
+ * New application, down the chain: the student first (an existing student is offered when their email, mobile or passport
+ * is on record), then — unless the person signed in is the agent — the business and agent who look after them.
+ */
 export default function NewApplicationPage() {
   const paths = useApplicationPaths();
-  const { role, agency, authUser, authLoading, identityLoading } = usePortalAuth();
+  const { role, agency, profile, authUser, authLoading, identityLoading } = usePortalAuth();
   const navigate = useNavigate();
   const { push } = useToast();
 
   const clientKeyRef = useRef(newClientKey());
   const bootRef = useRef(false);
-  const agentOptionsByBusiness = useRef(new Map<string, Promise<Array<PickOption & { raw: PortalTeamMember; searchable: string }>>>()).current;
 
   const [phase, setPhase] = useState<Phase>("checking");
   const [applicationId, setApplicationId] = useState("");
-  const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [agentId, setAgentId] = useState("");
-  const [business, setBusiness] = useState<BusinessSelection | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
+  const [draft, setDraft] = useState<StudentDraft | null>(null);
+  const [business, setBusiness] = useState<Business | null>(null);
+  const [agent, setAgent] = useState<BusinessAgentOption | null>(null);
   const [recordDialogMode, setRecordDialogMode] = useState<"business" | "agent" | null>(null);
   const [initialAgentName, setInitialAgentName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
-  const [contact, setContact] = useState<StudentContact>({ email: "", mobile: "" });
-  const [contactErrors, setContactErrors] = useState<{ email?: string; mobile?: string }>({});
-  const contactFormRef = useRef<HTMLFormElement>(null);
-  const selectedBusinessId = business?.kind === "existing" ? business.id : null;
-  const selectedAgencyId = business?.kind === "existing" ? business.agencyId : null;
+
+  // Agency users work inside their own business; SLIT administrators choose one.
+  const ownBusiness: Business | null = role !== "slit_admin" && agency ? { id: agency.id, name: agency.name, status: "Active" } : null;
+  const chosenBusiness = ownBusiness ?? business;
 
   const searchBusinesses = useCallback(async (q: string): Promise<PickOption[]> => {
     const result = await listBusinesses({ search: q, limit: 8, offset: 0 });
     return result.rows.map((row) => ({
       id: row.id,
       label: row.name,
-      meta: [row.place, `${row.agents} agent${row.agents === 1 ? "" : "s"}`, `${row.students} student${row.students === 1 ? "" : "s"}`].filter(Boolean).join(", "),
+      meta: [row.abn ? `ABN ${row.abn}` : "", `${row.agents} agent${row.agents === 1 ? "" : "s"}`, `${row.students} student${row.students === 1 ? "" : "s"}`].filter(Boolean).join(", "),
       tag: row.status === "Active" ? undefined : <span className="rounded-full bg-background-200 px-2 py-0.5 text-[11px] font-medium text-foreground-600">Inactive</span>,
       raw: row,
     })) as PickOption[];
   }, []);
 
+  const businessId = chosenBusiness?.id ?? "";
   const searchAgents = useCallback(async (q: string): Promise<PickOption[]> => {
-    if (!selectedBusinessId || !selectedAgencyId) return [];
-    let membersPromise = agentOptionsByBusiness.get(selectedBusinessId);
-    if (!membersPromise) {
-      membersPromise = (async () => {
-        const [agencyMembers, invitations] = await Promise.all([
-          listAgencyMembers(selectedAgencyId),
-          listAgencyInvitations(selectedAgencyId),
-        ]);
-        const portalMembers: PortalTeamMember[] = [
-          ...agencyMembers.map((member: AgencyMemberRow) => ({
-            id: member.profileId,
-            profileId: member.profileId,
-            name: member.fullName || member.email,
-            email: member.email,
-            role: member.role,
-            status: member.status === "Active" ? "Active" as const : "Inactive" as const,
-          })),
-          ...invitations.filter((invitation: InvitationRow) => invitation.status === "pending").map((invitation) => ({
-            id: `invitation:${invitation.id}`,
-            profileId: null,
-            name: invitation.fullName || invitation.email,
-            email: invitation.email,
-            role: invitation.role,
-            status: "Invited" as const,
-          })),
-        ];
-        return portalMembers.map((member) => {
-          const meta = [member.email, member.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", ");
-          return {
-            id: member.id,
-            label: member.name,
-            meta,
-            tag: <AgentStatusBadge status={member.status} />,
-            raw: member,
-            searchable: `${member.name} ${meta}`.toLowerCase(),
-          };
-        });
-      })();
-      agentOptionsByBusiness.set(selectedBusinessId, membersPromise);
-      void membersPromise.catch(() => {
-        if (agentOptionsByBusiness.get(selectedBusinessId) === membersPromise) agentOptionsByBusiness.delete(selectedBusinessId);
-      });
-    }
-    const members = await membersPromise;
-    const query = q.trim().toLowerCase();
-    return query ? members.filter((member) => member.searchable.includes(query)) : members;
-  }, [agentOptionsByBusiness, selectedAgencyId, selectedBusinessId]);
+    if (!businessId) return [];
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    return (await listAgentsOfBusiness(businessId))
+      // Only a SLIT administrator can activate an inactive agent, so agency administrators see active and invited agents only.
+      .filter((a) => role === "slit_admin" || a.status !== "Inactive")
+      .filter((a) => { const text = `${a.name} ${a.email} ${a.role === "agency_admin" ? "agency admin" : "agent"}`.toLowerCase(); return words.every((w) => text.includes(w)); })
+      .map((a) => ({ id: a.id, label: a.name, meta: [a.email, a.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", "), tag: <AgentStatusBadge status={a.status} />, raw: a }));
+  }, [businessId, role]);
 
-  const startDraft = useCallback(
-    async (student: StudentContact, assignedAgentId: string | null, selectedAgencyId?: string | null): Promise<string> => {
-      const { id } = await createApplication(clientKeyRef.current, assignedAgentId, selectedAgencyId);
-      clientKeyRef.current = newClientKey();
-      if (authUser?.id) writeSession(authUser.id, id);
-      await saveContact(id, student);
-      return id;
-    },
-    [authUser?.id],
-  );
+  const openWizard = (id: string) => {
+    if (authUser?.id) writeSession(authUser.id, id);
+    setApplicationId(id);
+    setPhase("wizard");
+  };
 
-  const submitContact = async () => {
-    const form = contactFormRef.current;
-    const email = String(new FormData(form ?? undefined).get("email") ?? "").trim().toLowerCase();
-    const mobile = String(new FormData(form ?? undefined).get("mobile") ?? "").trim();
-    const errors = {
-      email: validateEmail(email) ?? undefined,
-      mobile: !mobile.startsWith("+") || !parseStoredPhone(mobile)?.national ? "Enter the student's mobile number." : validateStoredPhone(mobile) || undefined,
-    };
-    setContactErrors(errors);
-    if (errors.email || errors.mobile) return;
-    const next = { email, mobile };
-    setContact(next);
-    setError("");
+  // The student record is saved (or the existing one reused) under the agent, then the application is created for them.
+  const start = useCallback(async (student: StudentDraft, existing: StudentMatch | null, chosen: { business: Business | null; agent: BusinessAgentOption } | null) => {
     setCreating(true);
+    setError("");
+    const notes: string[] = [];
     try {
-      // One application per student: a matching email or mobile stops here; nothing is created or skipped.
-      const existing = await findApplicationByStudentContact(email, mobile, applicationId || undefined);
-      if (existing) {
-        setContactErrors({
-          email: existing.emailMatch ? "Student already exists with this email." : undefined,
-          mobile: existing.mobileMatch ? "Student already exists with this mobile number." : undefined,
-        });
-        return;
+      let studentId = existing?.id ?? "";
+      if (!existing) {
+        if (!chosen) throw new Error("Choose the agent who looks after this student.");
+        if (role === "slit_admin" && chosen.business && chosen.business.status !== "Active") {
+          await setBusinessStatus(chosen.business.id, "Active");
+          notes.push(`${chosen.business.name} was activated.`);
+        }
+        if (role === "slit_admin" && chosen.agent.status === "Inactive") {
+          await activateAgent({ agentId: chosen.agent.id, businessId: chosen.business?.id ?? null, name: chosen.agent.name, email: chosen.agent.email, role: chosen.agent.role });
+          notes.push(`${chosen.agent.name} was activated.`);
+        }
+        const saved = await saveStudent({ agentId: chosen.agent.id, fullName: student.fullName, email: student.email, mobile: student.mobile, dateOfBirth: student.dateOfBirth, passportNumber: student.passportNumber });
+        studentId = saved.id;
+        if (saved.reused) notes.push(`${saved.name} was already on record with this passport or email and date of birth, so that record is used.`);
+      } else {
+        notes.push(`New application for ${existing.name || "the existing student"}${existing.agentName ? `, looked after by ${existing.agentName}` : ""}.`);
       }
-      if (!applicationId && role !== "agent") { setPhase("pick"); return; }
-      // A resumed draft keeps its business and agent; only the contact details are added to it.
-      const id = applicationId || await startDraft(next, null);
-      if (applicationId) await saveContact(applicationId, next);
-      setApplicationId(id);
-      setPhase("wizard");
+      const { id } = await createApplicationForStudent(clientKeyRef.current, studentId);
+      clientKeyRef.current = newClientKey();
+      if (notes.length) push(notes.join(" "));
+      openWizard(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not start a new application.");
     } finally {
       setCreating(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, authUser?.id]);
+
+  const continueFromStudent = async (student: StudentDraft, existing: StudentMatch | null) => {
+    setDraft(student);
+    setError("");
+    // A resumed draft keeps its student, business and agent; only the contact details are added to it.
+    if (applicationId) {
+      setCreating(true);
+      try {
+        await saveContact(applicationId, student);
+        setPhase("wizard");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "We could not start a new application.");
+      } finally {
+        setCreating(false);
+      }
+      return;
+    }
+    if (existing) { await start(student, existing, null); return; }
+    if (role === "agent") {
+      // The signed-in agent looks after their own students.
+      setCreating(true);
+      try {
+        const own = profile ? await findAgentByProfile(profile.id) : null;
+        if (!own) throw new Error("Your sign-in is not set up as an agent of this business yet. Ask your administrator.");
+        setCreating(false);
+        await start(student, null, { business: ownBusiness, agent: own });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "We could not start a new application.");
+        setCreating(false);
+      }
+      return;
+    }
+    setPhase("pick");
   };
 
-  // Resolve an existing wizard session, or create a fresh draft.
+  // Resolve an existing wizard session, or start with the student.
   useEffect(() => {
     if (authLoading || identityLoading) return;
     if (!role || !authUser) return;
@@ -269,16 +221,15 @@ export default function NewApplicationPage() {
           const app = await getApplication(existing).catch(() => null);
           if (app && isEditableApplicationStatus(app.status)) {
             setApplicationId(app.id);
-            // Drafts started before the contact step existed must still collect it before the wizard.
+            // Drafts started before the student step existed must still collect the contact details before the wizard.
             const values = (app.data?.values ?? {}) as Record<string, unknown>;
-            const saved = { email: String(values.email ?? ""), mobile: String(values.mobile ?? "") };
-            setContact(saved);
+            const saved = { fullName: app.studentName ?? "", email: String(values.email ?? ""), mobile: String(values.mobile ?? ""), dateOfBirth: "", passportNumber: "" };
+            setDraft(saved);
             setPhase(saved.email && saved.mobile ? "wizard" : "student");
             return;
           }
           clearSession(authUser.id);
         }
-
         setPhase("student");
       } catch (e) {
         setError(e instanceof Error ? e.message : "We could not start a new application.");
@@ -288,117 +239,13 @@ export default function NewApplicationPage() {
     })();
   }, [authLoading, identityLoading, role, authUser]);
 
-  useEffect(() => {
-    if (phase !== "pick") return;
-    if (role === "slit_admin") return;
-    if (!agency?.id) { setAgents([]); return; }
-    void listAssignableAgents(agency.id).then(setAgents).catch((e) => {
-      setError(e instanceof Error ? e.message : "We could not load agents for this agency.");
-    });
-  }, [phase, role, agency?.id]);
-
-  const openNewBusiness = () => {
-    setInitialAgentName("");
-    setRecordDialogMode("business");
-  };
-
-  const openNewAgent = (name: string) => {
-    setInitialAgentName(name);
-    setRecordDialogMode("agent");
-  };
-
   const saveNewRecord = (value: AddStudentRecordValue) => {
     setRecordDialogMode(null);
     if (value.kind === "business") {
-      const { agencyId, businessId, name } = value.business;
-      if (!businessId) { setError(`${name} was added; search for it by name to continue.`); return; }
-      agentOptionsByBusiness.delete(businessId);
-      setBusiness({ kind: "existing", id: businessId, name, status: "Active", agencyId });
-      setSelectedAgent(null);
+      setBusiness({ id: value.business.agencyId, name: value.business.name, status: "Active" });
+      setAgent(null);
     } else {
-      if (business?.kind === "existing") agentOptionsByBusiness.delete(business.id);
-      setSelectedAgent({ kind: "created", details: value.agent });
-    }
-  };
-
-  const handlePick = async () => {
-    setCreating(true);
-    setError("");
-    try {
-      let agencyId: string | null = role === "slit_admin" && business?.kind === "existing" ? business.agencyId : null;
-      let businessId: string | null = role === "slit_admin" && business?.kind === "existing" ? business.id : null;
-      let assignedAgentId = role === "slit_admin"
-        ? selectedAgent?.kind === "existing" && selectedAgent.row.role !== "agency_admin" ? selectedAgent.row.profileId : null
-        : agentId || null;
-      const notes: string[] = [];
-
-      if (role === "slit_admin") {
-        if (!business) throw new Error("Choose a business, or add a new one.");
-        if (!selectedAgent) throw new Error("Choose an agent, or add a new one.");
-
-        if (business.kind === "new") {
-          const created = await createAgencyRecordWithBusiness({ ...business.details, status: "Inactive" });
-          agencyId = created.agencyId;
-          businessId = created.businessId;
-          await logAgencyChange(created.agencyId, "agency_created", { code: business.details.code });
-        }
-
-        if (businessId && (business.kind === "new" || business.status !== "Active" || !agencyId)) {
-          const result = await setBusinessStatus(businessId, "Active");
-          agencyId = result.agencyId;
-          notes.push(`${business.name} was ${business.kind === "new" ? "created and " : ""}activated.`);
-        }
-
-        if (selectedAgent.kind === "new") {
-          const result = await activateAgent({
-            businessId,
-            name: selectedAgent.details.name,
-            email: selectedAgent.details.email.trim().toLowerCase(),
-            role: selectedAgent.details.role,
-          });
-          agencyId = result.agencyId ?? agencyId;
-          if (!result.hasLogin && result.email && agencyId) {
-            try {
-              const sent = await invokePortalUsers({
-                action: "invite",
-                email: result.email,
-                name: result.name,
-                role: result.role,
-                agencyId,
-                redirectTo: portalPasswordResetUrl(),
-              });
-              if (sent.emailSent) notes.push(`A sign-in invitation was emailed to ${result.email}.`);
-            } catch (e) {
-              const reason = e instanceof Error ? e.message : "";
-              notes.push(/already been invited/i.test(reason)
-                ? "An invitation is already waiting for this agent."
-                : "The agent invitation was not sent; send it from the business’s Portal team tab.");
-            }
-          }
-          assignedAgentId = null;
-          notes.push(`Assign ${selectedAgent.details.name} on the application once they have signed in.`);
-        } else if (selectedAgent.kind === "created") {
-          assignedAgentId = null;
-          notes.push(`Assign ${selectedAgent.details.name} on the application once they have signed in.`);
-        } else if (selectedAgent.row.status === "Inactive" && selectedAgent.row.profileId) {
-          await invokePortalUsers({ action: "update", profileId: selectedAgent.row.profileId, status: "Active" });
-          notes.push(`${selectedAgent.row.name} was reactivated.`);
-        } else if (!assignedAgentId) {
-          notes.push(`${selectedAgent.row.name} is an agency admin or has not signed in; assign an agent on the application.`);
-        }
-
-        if (!agencyId) throw new Error("This business has no workspace yet, so the application could not be created. Activate the business and try again.");
-      }
-
-      if (!contact.email || !contact.mobile) { setPhase("student"); throw new Error("Enter the student's email and mobile first."); }
-      const id = await startDraft(contact, assignedAgentId, role === "slit_admin" ? agencyId : null);
-      if (notes.length) push(notes.join(" "));
-      setApplicationId(id);
-      setPhase("wizard");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "We could not start a new application.");
-    } finally {
-      setCreating(false);
+      setAgent({ id: value.agent.agentId, profileId: null, name: value.agent.name, email: value.agent.email, role: value.agent.role, status: "Invited" });
     }
   };
 
@@ -421,10 +268,8 @@ export default function NewApplicationPage() {
       await Promise.all(docs.map((doc) => deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).catch(() => undefined)));
       await deleteApplicationDraft(abandoned).catch(() => undefined);
       setBusiness(null);
-      setSelectedAgent(null);
-      setAgentId("");
-      setContact({ email: "", mobile: "" });
-      setContactErrors({});
+      setAgent(null);
+      setDraft(null);
       setPhase("student");
     } catch (e) {
       setError(e instanceof Error ? e.message : "We could not start a new application.");
@@ -433,29 +278,28 @@ export default function NewApplicationPage() {
     }
   };
 
+  const secondary = "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100 disabled:cursor-not-allowed disabled:opacity-60";
+  const primary = "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60";
+
   if (authLoading || identityLoading || phase === "checking") {
     return (
       <div>
         <PageHeading
           eyebrow="Add New Form"
           title="Starting a new application"
-          description="Starting with the student's contact details; everything else is filled from the documents you upload."
+          description="Starting with the student; everything else is filled from the documents you upload."
         />
         <div className="mt-6">
           {error ? (
             <div className="space-y-3">
               <PortalError message={error} />
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="inline-flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-5 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600"
-              >
+              <button type="button" onClick={() => window.location.reload()} className={primary}>
                 <i className="ri-refresh-line" aria-hidden="true" />
                 Try again
               </button>
             </div>
           ) : (
-            <PortalLoading label={creating ? "Preparing your blank application\u2026" : "Opening\u2026"} />
+            <PortalLoading label={creating ? "Preparing your blank application…" : "Opening…"} />
           )}
         </div>
       </div>
@@ -466,7 +310,7 @@ export default function NewApplicationPage() {
     return (
       <ApplicationWizard
         applicationId={applicationId}
-        agencyName={business?.name ?? agency?.name ?? ""}
+        agencyName={chosenBusiness?.name ?? agency?.name ?? ""}
         onFinish={handleFinish}
         onCancel={() => void handleCancel()}
       />
@@ -479,114 +323,41 @@ export default function NewApplicationPage() {
         <PageHeading
           eyebrow="Add New Form"
           title="New student application"
-          description="Start with the student's contact details. Everything else is filled from the documents you upload."
+          description="Start with the student. A student already on record keeps one record with all their applications."
         />
-        <form
-          ref={contactFormRef}
-          noValidate
-          onSubmit={(event) => { event.preventDefault(); void submitContact(); }}
-          // A field's error goes as soon as it is edited; both are checked again on Next.
-          onInput={(event) => {
-            const name = (event.target as HTMLInputElement).name;
-            if (name === "email" || name === "mobile") setContactErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
-          }}
-          className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6"
-        >
-          <h2 className="font-heading text-base font-semibold text-foreground-950">Student contact details</h2>
-          <p className="mt-1.5 text-sm text-foreground-600">Both are required to start the application.</p>
-
-          <div className="mt-5 space-y-4">
-            <div>
-              <label htmlFor="new-app-email" className="mb-1.5 block text-[13px] font-medium text-foreground-800">
-                Student email <span className="text-primary-600">*</span>
-              </label>
-              <input
-                id="new-app-email"
-                name="email"
-                type="email"
-                required
-                autoFocus
-                autoComplete="off"
-                maxLength={254}
-                defaultValue={contact.email}
-                placeholder="student@example.com"
-                aria-invalid={Boolean(contactErrors.email)}
-                className="w-full rounded-md border border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-950 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
-              />
-              {contactErrors.email ? <p className="mt-1 text-xs text-primary-800" role="alert">{contactErrors.email}</p> : null}
-            </div>
-            <div>
-              <label htmlFor="new-app-mobile" className="mb-1.5 block text-[13px] font-medium text-foreground-800">
-                Student mobile <span className="text-primary-600">*</span>
-              </label>
-              <PhoneInput id="new-app-mobile" name="mobile" value={contact.mobile} required placeholder="041 234 5678" />
-              {contactErrors.mobile ? <p className="mt-1 text-xs text-primary-800" role="alert">{contactErrors.mobile}</p> : null}
-            </div>
-          </div>
-
-          {error ? (
-            <div className="mt-4">
-              <PortalError message={error} />
-            </div>
-          ) : null}
-
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button
-              type="submit"
-              disabled={creating}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {creating ? (
-                <>
-                  <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
-                  Creating&hellip;
-                </>
-              ) : (
-                <>
-                  Next
-                  <i className="ri-arrow-right-line" aria-hidden="true" />
-                </>
-              )}
-            </button>
-            <Link
-              to={paths.list}
-              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100"
-            >
-              Cancel
-            </Link>
-          </div>
-        </form>
+        <div className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
+          <StudentDetailsStep initial={draft ?? undefined} busy={creating} error={error}
+            onContinue={(student, existing) => void continueFromStudent(student, existing)}
+            cancel={<Link to={paths.list} className={secondary}>Cancel</Link>} />
+        </div>
       </div>
     );
   }
 
-  const businessNeedsActivation = business?.kind === "new" || (business?.kind === "existing" && business.status !== "Active");
-
+  const ready = Boolean(chosenBusiness && agent);
   return (
     <div>
       <PageHeading
         eyebrow="Add New Form"
         title="New student application"
-        description="Choose the business and agent for this application."
+        description={role === "slit_admin" ? "Choose the business and the agent who looks after this student." : "Choose the agent who looks after this student."}
       />
 
-      <div className="mt-6 flex max-w-2xl items-center justify-between gap-3 rounded-card border border-background-200 bg-background-50 px-4 py-3">
-        <span className="min-w-0 text-sm text-foreground-700">
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground-500">Student</span>{" "}
-          <b className="font-medium text-foreground-900">{contact.email}</b> &middot; {formatPhone(contact.mobile)}
-        </span>
-      </div>
+      {draft ? (
+        <div className="mt-6 flex max-w-2xl items-center justify-between gap-3 rounded-card border border-background-200 bg-background-50 px-4 py-3">
+          <span className="min-w-0 text-sm text-foreground-700">
+            <span className="text-xs font-semibold uppercase tracking-wide text-foreground-500">Student</span>{" "}
+            <b className="font-medium text-foreground-900">{draft.fullName}</b> &middot; {draft.email} &middot; {formatPhone(draft.mobile)}
+          </span>
+        </div>
+      ) : null}
 
       <div className="mt-4 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
-        <h2 className="font-heading text-base font-semibold text-foreground-950">Who is this application for?</h2>
-        <p className="mt-1.5 text-sm text-foreground-600">
-          {role === "slit_admin"
-            ? "Choose an existing business and one of its portal team members, or add them here. Next opens the document wizard."
-            : `Assign the application to an active agent in ${agency?.name ?? "your agency"}, or leave it unassigned and allocate it later. Next opens the document wizard.`}
-        </p>
+        <h2 className="font-heading text-base font-semibold text-foreground-950">Who looks after this student?</h2>
+        <p className="mt-1.5 text-sm text-foreground-600">The student is recorded under this agent. Next opens the document wizard.</p>
 
-        {role === "slit_admin" ? (
-          <div className="mt-5 space-y-5">
+        <div className="mt-5 space-y-5">
+          {role === "slit_admin" ? (
             <div>
               {business ? (
                 <>
@@ -594,145 +365,65 @@ export default function NewApplicationPage() {
                   <div className="flex items-center justify-between gap-3 rounded-md border border-background-300 bg-background-50 px-3 py-2.5">
                     <span className="min-w-0">
                       <b className="block truncate text-sm text-foreground-900">{business.name}</b>
-                      <span className="block truncate text-xs text-foreground-500">
-                        {business.kind === "new" ? "New business, created when you start the application" : business.status === "Active" ? "Active business" : "Inactive, activated when you start the application"}
-                      </span>
+                      <span className="block truncate text-xs text-foreground-500">{business.status === "Active" ? "Active business" : "Inactive, activated when you start the application"}</span>
                     </span>
-                    <button type="button" disabled={creating} onClick={() => { setBusiness(null); setSelectedAgent(null); }} className="rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
+                    <button type="button" disabled={creating} onClick={() => { setBusiness(null); setAgent(null); }} className="rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
                   </div>
                 </>
               ) : (
-                <SearchPick
-                  label="Business"
-                  addNoun="business"
-                  autoFocus
-                  placeholder="Search business name, place or email"
+                <SearchPick label="Business" addNoun="business" autoFocus placeholder="Search business name, ABN or agent"
                   search={searchBusinesses}
-                  onPick={(option) => {
-                    const row = (option as PickOption & { raw: { id: string; name: string; status: BusinessStatus; agencyId: string | null } }).raw;
-                    setBusiness({ kind: "existing", id: row.id, name: row.name, status: row.status, agencyId: row.agencyId });
-                    setSelectedAgent(null);
-                  }}
-                  onAddNew={openNewBusiness}
-                />
+                  onPick={(option) => { const row = (option as PickOption & { raw: { id: string; name: string; status: BusinessStatus } }).raw; setBusiness({ id: row.id, name: row.name, status: row.status }); setAgent(null); }}
+                  onAddNew={() => { setInitialAgentName(""); setRecordDialogMode("business"); }} />
               )}
             </div>
+          ) : null}
 
-            {business ? (
-              <div>
-                {selectedAgent ? (
-                  <>
-                    <p className="mb-1.5 text-[13px] font-medium text-foreground-800">Portal team member</p>
-                    <div className="flex items-center justify-between gap-3 rounded-md border border-background-300 bg-background-50 px-3 py-2.5">
-                      <span className="min-w-0">
-                        <span className="flex items-center gap-2">
-                          <b className="truncate text-sm text-foreground-900">{selectedAgent.kind === "existing" ? selectedAgent.row.name : selectedAgent.details.name}</b>
-                          {selectedAgent.kind === "existing" ? <AgentStatusBadge status={selectedAgent.row.status} /> : null}
-                        </span>
-                        <span className="block truncate text-xs text-foreground-500">
-                          {selectedAgent.kind === "existing"
-                            ? [selectedAgent.row.email, selectedAgent.row.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", ")
-                            : [selectedAgent.details.email, selectedAgent.details.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", ")}
-                        </span>
-                      </span>
-                      <button type="button" disabled={creating} onClick={() => setSelectedAgent(null)} className="rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
-                    </div>
-                  </>
-                ) : business.kind === "new" || !business.agencyId ? (
-                  <div className="rounded-md border border-dashed border-background-300 px-3 py-3 text-sm text-foreground-600">
-                    This business has no portal team yet.{" "}
-                    <button type="button" disabled={creating} className="font-semibold text-primary-700 hover:text-primary-800 disabled:opacity-60" onClick={() => openNewAgent("")}>Add its first agent</button>
+          {chosenBusiness ? (
+            <div>
+              {agent ? (
+                <>
+                  <p className="mb-1.5 text-[13px] font-medium text-foreground-800">Agent</p>
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-background-300 bg-background-50 px-3 py-2.5">
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2"><b className="truncate text-sm text-foreground-900">{agent.name}</b><AgentStatusBadge status={agent.status} /></span>
+                      <span className="block truncate text-xs text-foreground-500">{[agent.email, agent.role === "agency_admin" ? "Agency admin" : "Agent"].filter(Boolean).join(", ")}</span>
+                    </span>
+                    <button type="button" disabled={creating} onClick={() => setAgent(null)} className="rounded px-2 py-1 text-sm font-medium text-primary-700 hover:bg-background-100 disabled:opacity-60">Change</button>
                   </div>
-                ) : (
-                  <SearchPick
-                    label="Portal team member"
-                    addNoun="team member"
-                    placeholder={`Search team members at ${business.name}`}
-                    resetKey={business.id}
-                    autoFocus
-                    searchWhenEmpty
-                    openOnMount
-                    search={searchAgents}
-                    onPick={(option) => setSelectedAgent({ kind: "existing", row: (option as PickOption & { raw: PortalTeamMember }).raw })}
-                    onAddNew={openNewAgent}
-                  />
-                )}
-              </div>
-            ) : null}
+                </>
+              ) : (
+                <SearchPick label="Agent" addNoun="agent" placeholder={`Search or pick an agent at ${chosenBusiness.name}`} resetKey={chosenBusiness.id} autoFocus searchWhenEmpty openOnMount
+                  search={searchAgents}
+                  onPick={(option) => setAgent((option as PickOption & { raw: BusinessAgentOption }).raw)}
+                  onAddNew={role === "slit_admin" ? (name) => { setInitialAgentName(name); setRecordDialogMode("agent"); } : undefined} />
+              )}
+            </div>
+          ) : null}
 
-            {businessNeedsActivation && selectedAgent ? (
-              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{business?.name} will be activated so it gets a workspace for this application.</p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-5">
-            <label htmlFor="new-app-agent" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-foreground-700">
-              Assigned agent
-            </label>
-            <select
-              id="new-app-agent"
-              value={agentId}
-              onChange={(event) => setAgentId(event.target.value)}
-              className="w-full rounded-md border border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-950 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
-            >
-              <option value="">Leave unassigned</option>
-              {agents.map((agent) => (
-                <option key={agent.profileId} value={agent.profileId}>
-                  {agent.fullName}
-                  {agent.email ? ` (${agent.email})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+          {business && business.status !== "Active" && agent ? (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{business.name} will be activated when the application starts.</p>
+          ) : null}
+        </div>
 
-        {error ? (
-          <div className="mt-4">
-            <PortalError message={error} />
-          </div>
-        ) : null}
+        {error ? <div className="mt-4"><PortalError message={error} /></div> : null}
 
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center">
-          <Link
-            to={paths.list}
-            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100"
-          >
-            Cancel
-          </Link>
+          <Link to={paths.list} className={secondary}>Cancel</Link>
           <div className="flex flex-col-reverse gap-3 sm:ml-auto sm:flex-row">
-            <button
-              type="button"
-              disabled={creating}
-              onClick={() => { setError(""); setPhase("student"); }}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+            <button type="button" disabled={creating} onClick={() => { setError(""); setPhase("student"); }} className={secondary}>
               <i className="ri-arrow-left-line" aria-hidden="true" />
               Back
             </button>
-            <button
-              type="button"
-              disabled={creating || (role === "slit_admin" && (!business || !selectedAgent))}
-              onClick={() => void handlePick()}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {creating ? (
-                <>
-                  <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
-                  Creating&hellip;
-                </>
-              ) : (
-                <>
-                  Next
-                  <i className="ri-arrow-right-line" aria-hidden="true" />
-                </>
-              )}
+            <button type="button" disabled={creating || !ready || !draft} onClick={() => { if (draft && agent) void start(draft, null, { business: chosenBusiness, agent }); }} className={primary}>
+              {creating ? <><i className="ri-loader-4-line animate-spin" aria-hidden="true" /> Creating&hellip;</> : <>Next <i className="ri-arrow-right-line" aria-hidden="true" /></>}
             </button>
           </div>
         </div>
       </div>
       <AddStudentRecordDialog
         mode={recordDialogMode}
-        business={business?.kind === "existing" ? { id: business.id, name: business.name, status: business.status } : null}
+        business={chosenBusiness ? { id: chosenBusiness.id, name: chosenBusiness.name, status: chosenBusiness.status } : null}
         initialAgentName={initialAgentName}
         onCancel={() => setRecordDialogMode(null)}
         onSave={saveNewRecord}

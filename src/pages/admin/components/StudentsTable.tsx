@@ -10,8 +10,8 @@ import { SELECTABLE_STATUSES, STATUS_LABELS } from "@/pages/agency/lib/applicati
 
 const PAGE_SIZE = 25;
 
-/** Students with their application status counts. With `businessId`, only that business's students and no business column. */
-export default function StudentsTable({ businessId, emptyText }: { businessId?: string; emptyText?: string }) {
+/** Students with their application status counts. With `businessId`, only that business's students and no business column; with `agentId`, one agent's. */
+export default function StudentsTable({ businessId, agentId, emptyText }: { businessId?: string; agentId?: string; emptyText?: string }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -26,19 +26,19 @@ export default function StudentsTable({ businessId, emptyText }: { businessId?: 
     let active = true;
     setLoading(true);
     setError("");
-    listStudents({ search, status, businessId: businessId ?? null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+    listStudents({ search, status, businessId: businessId ?? null, agentId: agentId ?? null, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
       .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setLoaded(true); } })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load students."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [search, status, businessId, page, reload]);
+  }, [search, status, businessId, agentId, page, reload]);
 
   const filtered = Boolean(search || status);
   return (
     <div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row">
         <div className="flex-1"><SearchBox label="Search students" value={search} onSearch={(v) => { setSearch(v); setPage(1); }}
-          placeholder={businessId ? "Search student, email, agent or application reference" : "Search student, email, business, agent or application reference"} /></div>
+          placeholder={businessId ? "Search student, email, passport, agent or application reference" : "Search student, email, passport, business, agent or application reference"} /></div>
         <Select aria-label="Has an application in status" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="sm:w-56">
           <option value="">Any application status</option>
           {SELECTABLE_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
@@ -50,7 +50,7 @@ export default function StudentsTable({ businessId, emptyText }: { businessId?: 
             action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         ) : loaded && !loading && rows.length === 0 ? (
           <ListMessage icon="ri-user-line" title={filtered ? "No students match" : "No students yet"}
-            text={filtered ? "Check the spelling or choose another status." : emptyText ?? "Students appear here when an agent starts their first application."} />
+            text={filtered ? "Check the spelling or choose another status." : emptyText ?? "Students appear here when an agent adds them."} />
         ) : (
           <div className={loading && loaded ? "opacity-60 transition-opacity" : ""}>
             <ResponsiveTable aria-busy={loading}>
@@ -68,7 +68,7 @@ export default function StudentsTable({ businessId, emptyText }: { businessId?: 
                   <tr key={row.id}>
                     <td>
                       <Link to={`/admin/students/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{row.name || "Unnamed student"}</Link>
-                      {row.email ? <p className="mt-0.5 text-xs text-foreground-500">{row.email}</p> : null}
+                      {row.email || row.passportNumber ? <p className="mt-0.5 text-xs text-foreground-500">{[row.email, row.passportNumber ? `Passport ${row.passportNumber}` : ""].filter(Boolean).join(" · ")}</p> : null}
                     </td>
                     {businessId ? null : <td><Link to={`/admin/businesses/${row.businessId}`} className="text-foreground-800 hover:text-primary-700">{row.businessName}</Link></td>}
                     <td>{row.agentId ? <Link to={`/admin/agents/${row.agentId}`} className="text-foreground-800 hover:text-primary-700">{row.agentName}</Link> : <span className="text-xs text-foreground-500">Not assigned</span>}</td>

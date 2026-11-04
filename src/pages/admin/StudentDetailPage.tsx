@@ -35,7 +35,6 @@ export default function StudentDetailPage() {
 
   const counts: Record<string, number> = {};
   for (const a of student.applications) counts[a.status] = (counts[a.status] ?? 0) + 1;
-  const agents = [...new Map(student.applications.filter((a) => a.agentId).map((a) => [a.agentId as string, a.agentName])).entries()];
 
   return (
     <div>
@@ -45,7 +44,7 @@ export default function StudentDetailPage() {
         <span className="text-foreground-900">Student</span>
       </nav>
       <PageHeader title={student.name || "Unnamed student"}
-        description={`Student of ${student.business.name}${agents.length ? `, handled by ${agents.map(([, n]) => n).join(" and ")}` : ""}.`} />
+        description={`Student of ${student.business.name}${student.agent ? `, looked after by ${student.agent.name}` : ""}.`} />
 
       <div className="flex flex-wrap items-start gap-5">
         <Card className="min-w-0 flex-[999_1_560px]">
@@ -62,8 +61,10 @@ export default function StudentDetailPage() {
             <Row label="Email" value={student.email} />
             <Row label="Phone" value={student.phone} />
             <Row label="Date of birth" value={student.dateOfBirth ? formatDate(student.dateOfBirth) : ""} />
+            <Row label="Passport number" value={student.passportNumber} />
+            <Row label="Nationality" value={student.nationality} />
             <div><dt className="text-xs text-foreground-500">Business</dt><dd className="flex flex-wrap items-center gap-2"><Link to={`/admin/businesses/${student.business.id}`} className="text-foreground-900 hover:text-primary-700">{student.business.name}</Link><AgencyStatusBadge status={student.business.status} /></dd></div>
-            <div><dt className="text-xs text-foreground-500">Agent</dt><dd>{agents.length ? agents.map(([aid, n]) => <Link key={aid} to={`/admin/agents/${aid}`} className="mr-2 text-foreground-900 hover:text-primary-700">{n}</Link>) : <span className="text-foreground-500">Not assigned</span>}</dd></div>
+            <div><dt className="text-xs text-foreground-500">Agent</dt><dd>{student.agent ? <Link to={`/admin/agents/${student.agent.id}`} className="text-foreground-900 hover:text-primary-700">{student.agent.name}</Link> : <span className="text-foreground-500">Not assigned</span>}</dd></div>
             <Row label="First recorded" value={formatDate(student.createdAt)} />
           </dl>
         </Card>

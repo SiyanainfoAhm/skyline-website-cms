@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
-import { agencyIdForBusiness, listAgencies } from "@/pages/agency/lib/portalData";
+import { listAgencies } from "@/pages/agency/lib/portalData";
 import {
   listApplications,
   listAssignableAgents,
@@ -27,17 +27,8 @@ export default function AllApplicationsPage() {
   const businessParam = params.get("business") ?? "";
   const agentParam = params.get("agent") ?? "";
   const statusParam = params.get("status") ?? "";
-  const [resolved, setResolved] = useState<{ business: string; agencyId: string } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!businessParam) return;
-    agencyIdForBusiness(businessParam)
-      .then(id => { if (!cancelled) setResolved({ business: businessParam, agencyId: id ?? "" }); })
-      .catch(() => { if (!cancelled) setResolved({ business: businessParam, agencyId: "" }); });
-    return () => { cancelled = true; };
-  }, [businessParam]);
-  const initialAgencyId = businessParam && resolved?.business === businessParam ? resolved.agencyId : "";
-  const filtersReady = !businessParam || resolved?.business === businessParam;
+  // The business is the agency record, so the id in the link is the agency id.
+  const initialAgencyId = businessParam;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +67,7 @@ export default function AllApplicationsPage() {
       />
 
       <div className="mt-6">
-        {filtersReady ? <ApplicationsTable remote
+        <ApplicationsTable remote
           key={`${businessParam}|${agentParam}|${statusParam}`}
           initialAgencyId={initialAgencyId}
           initialAgentId={agentParam}
@@ -89,7 +80,7 @@ export default function AllApplicationsPage() {
           agents={agents.map((a) => ({ id: a.profileId, name: `${a.fullName}${a.agencyName ? ` · ${a.agencyName}` : ""}` }))}
           emptyTitle="No applications across any agency yet"
           emptyMessage="Applications created by agencies and agents will appear here for review."
-        /> : <p role="status" className="text-sm text-foreground-500">Loading applications…</p>}
+        />
       </div>
     </div>
   );

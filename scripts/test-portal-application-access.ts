@@ -555,13 +555,14 @@ test("business, agent and student screens fit the page: no horizontal scrolling 
 import { toActivate } from "../src/pages/admin/lib/agentActivation.ts";
 
 test("agents: the Activate dialog starts from the agent's business and knows whether they already have a login", () => {
-  const base = { key: "o1", agentId: null, omaraId: "o1", profileId: null, name: "Anna Lee", email: "", phone: "", role: null, status: "Inactive" as const,
-    marn: "1100001", registered: true, place: "Melbourne VIC", businessId: "b1", businessName: "Bright Futures", businessStatus: "Inactive" as const, students: 0, statusCounts: {} };
+  const base = { key: "g1", agentId: "g1", omaraId: "o1", profileId: null, invitationId: null, name: "Anna Lee", email: "", phone: "0412 000 000", role: "agent" as const, status: "Inactive" as const,
+    statusChangedAt: null, marn: "1100001", registered: true, businessId: "b1", businessName: "Bright Futures", businessStatus: "Inactive" as const, students: 0, statusCounts: {} };
   const start = toActivate(base);
-  assert.deepEqual(start.business, { id: "b1", name: "Bright Futures", status: "Inactive" });
+  assert.deepEqual(start.business, { id: "b1", name: "Bright Futures", status: "Inactive" }, "every agent belongs to one business");
   assert.equal(start.hasLogin, false);
-  assert.equal(start.omaraId, "o1");
-  assert.equal(toActivate({ ...base, businessId: null }).business, null, "an agent OMARA lists without a business starts with no business chosen");
+  assert.equal(start.agentId, "g1");
+  assert.equal(start.marn, "1100001", "the MARN is kept so activation keeps the OMARA link");
+  assert.equal(start.phone, "0412 000 000");
   assert.equal(toActivate({ ...base, profileId: "p1", role: "agency_admin" }).hasLogin, true);
 });
 

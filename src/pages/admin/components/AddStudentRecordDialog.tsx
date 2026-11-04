@@ -6,6 +6,8 @@ import { useToast } from "@/pages/admin/components/toastContext";
 import type { BusinessStatus } from "@/pages/admin/lib/businessData";
 
 export interface NewStudentAgent {
+  /** The agent record created, so the student can be attached to it straight away. */
+  agentId: string;
   name: string;
   email: string;
   role: "agent" | "agency_admin";
@@ -59,7 +61,7 @@ export default function AddStudentRecordDialog({
         open={mode === "agent"}
         agent={agent}
         onClose={onCancel}
-        onDone={(result) => onSave({ kind: "agent", agent: { name: result.name, email: result.email, role: result.role } })}
+        onDone={(result) => onSave({ kind: "agent", agent: { agentId: result.agentId, name: result.name, email: result.email, role: result.role } })}
       />
     </>
   );

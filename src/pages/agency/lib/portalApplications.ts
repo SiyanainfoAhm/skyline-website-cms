@@ -424,26 +424,87 @@ export async function listApplicationDocuments(applicationId: string): Promise<D
  * The most recently updated application, visible to the caller under RLS, whose student has this email or mobile.
  * Mobiles are stored as E.164; older drafts may hold the national 0-prefixed form, so both are matched.
  */
-export async function findApplicationByStudentContact(
-  email: string,
-  mobileE164: string,
-  excludeId?: string,
-): Promise<{ id: string; reference: string; studentName: string; emailMatch: boolean; mobileMatch: boolean } | null> {
-  const cols = "id, reference, student_name, updated_at";
-  const nationalMobile = mobileE164.startsWith("+61") ? `0${mobileE164.slice(3)}` : "";
-  const mobiles = [mobileE164, nationalMobile].filter(Boolean);
-  const [byEmail, byMobile] = await Promise.all([
-    email ? supabase.from("enrollment_applications").select(cols).ilike("student_email", email.replace(/[\\%_]/g, "\\$&")).order("updated_at", { ascending: false }).limit(5) : null,
-    mobiles.length ? supabase.from("enrollment_applications").select(cols).in("data->values->>mobile", mobiles).order("updated_at", { ascending: false }).limit(5) : null,
-  ]);
-  if (byEmail?.error) throw new Error(byEmail.error.message);
-  if (byMobile?.error) throw new Error(byMobile.error.message);
-  const pick = (rows: Array<Record<string, unknown>> | null | undefined) => (rows ?? []).find((row) => String(row.id) !== excludeId);
-  const emailHit = pick(byEmail?.data as Array<Record<string, unknown>> | null);
-  const mobileHit = pick(byMobile?.data as Array<Record<string, unknown>> | null);
-  const hit = emailHit ?? mobileHit;
-  if (!hit) return null;
-  return { id: str(hit.id), reference: str(hit.reference), studentName: str(hit.student_name), emailMatch: Boolean(emailHit), mobileMatch: Boolean(mobileHit) };
+/* ------------------------------------------------------------ Students */
+// One chain: business -> agent -> student -> applications. A student is created once and reused for every application.
+
+export interface StudentMatch {
+  id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string;
+  businessId: string; businessName: string; agentId: string | null; agentName: string; applications: number;
+  emailMatch: boolean; phoneMatch: boolean; passportMatch: boolean;
+}
+
+/** Students the caller may see with this email, mobile or passport number, newest first. */
+export async function findStudents(email: string, mobileE164: string, passport = ""): Promise<StudentMatch[]> {
+  const { data, error } = await supabase.rpc("portal_student_find", { p_email: email, p_phone: mobileE164, p_passport: passport });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: str(r.id), name: str(r.name), email: str(r.email), phone: str(r.phone), dateOfBirth: r.dateOfBirth ? str(r.dateOfBirth) : null,
+    passportNumber: str(r.passportNumber), businessId: str(r.businessId), businessName: str(r.businessName),
+    agentId: r.agentId ? str(r.agentId) : null, agentName: str(r.agentName), applications: Number(r.applications ?? 0),
+    emailMatch: Boolean(r.emailMatch), phoneMatch: Boolean(r.phoneMatch), passportMatch: Boolean(r.passportMatch),
+  }));
+}
+
+export interface StudentInput {
+  studentId?: string | null;
+  /** The agent (agents.id) who looks after the student; the business follows from it. */
+  agentId: string;
+  fullName: string;
+  email: string;
+  mobile: string;
+  dateOfBirth?: string;
+  passportNumber?: string;
+  nationality?: string;
+}
+
+/** Creates or updates a student. A new student matching an existing one of the business comes back as that student (`reused`). */
+export async function saveStudent(input: StudentInput): Promise<{ id: string; name: string; email: string; phone: string; businessId: string; agentId: string | null; reused: boolean }> {
+  const { data, error } = await supabase.rpc("portal_student_save", {
+    p_student: input.studentId ?? null, p_agent: input.agentId, p_full_name: input.fullName, p_email: input.email, p_phone: input.mobile,
+    p_date_of_birth: input.dateOfBirth || null, p_passport: input.passportNumber ?? "", p_nationality: input.nationality ?? "",
+  });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as Record<string, unknown>;
+  return { id: str(r.id), name: str(r.name), email: str(r.email), phone: str(r.phone), businessId: str(r.businessId), agentId: r.agentId ? str(r.agentId) : null, reused: Boolean(r.reused) };
+}
+
+/** A new draft application for a student; its business and assigned agent come from the student. */
+export async function createApplicationForStudent(clientKey: string, studentId: string): Promise<{ id: string; reference: string }> {
+  const { data, error } = await supabase.rpc("portal_create_student_application", { p_client_key: clientKey, p_student: studentId });
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : data) as { application_id?: string; application_reference?: string } | null | undefined;
+  if (!row?.application_id) throw new Error("The application could not be created.");
+  return { id: String(row.application_id), reference: String(row.application_reference ?? "") };
+}
+
+export interface BusinessAgentOption {
+  id: string;
+  profileId: string | null;
+  name: string;
+  email: string;
+  role: "agent" | "agency_admin";
+  /** Active: approved and signed in. Invited: approved, no login yet. Inactive: cannot be given students until activated. */
+  status: "Active" | "Invited" | "Inactive";
+}
+
+const toAgentOption = (r: Record<string, unknown>): BusinessAgentOption => ({
+  id: str(r.id), profileId: r.profile_id ? str(r.profile_id) : null, name: str(r.full_name), email: str(r.email),
+  role: r.role === "agency_admin" ? "agency_admin" : "agent",
+  status: r.status !== "Active" ? "Inactive" : r.profile_id ? "Active" : "Invited",
+});
+
+/** The agents of one business (SLIT administrators see every business; portal users their own). */
+export async function listAgentsOfBusiness(businessId: string): Promise<BusinessAgentOption[]> {
+  const { data, error } = await supabase.from("agents").select("id, profile_id, full_name, email, role, status").eq("business_id", businessId).order("full_name");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => toAgentOption(r as Record<string, unknown>));
+}
+
+/** The agent record behind a portal login, if any. */
+export async function findAgentByProfile(profileId: string): Promise<BusinessAgentOption | null> {
+  const { data, error } = await supabase.from("agents").select("id, profile_id, full_name, email, role, status").eq("profile_id", profileId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toAgentOption(data as Record<string, unknown>) : null;
 }
 
 /* ------------------------------------------------------------ Mutation */
@@ -528,28 +589,6 @@ export async function uploadConsentDocument(applicationId: string, file: File): 
 }
 
 /* -------------------------------------------------------------- RPCs */
-
-export async function createApplication(
-  clientKey: string,
-  assignedAgentId?: string | null,
-  agencyId?: string | null,
-): Promise<{ id: string; reference: string }> {
-  const input: Record<string, string | null> = {
-    p_client_key: clientKey,
-    p_assigned_agent_id: assignedAgentId ?? null,
-  };
-  // Omit this key for the deployed two-argument RPC until the safe incremental
-  // migration is applied; agency users never get to supply an agency id.
-  if (agencyId) input.p_agency_id = agencyId;
-  const { data, error } = await supabase.rpc("portal_create_application", input);
-  if (error) throw new Error(error.message);
-  const row = (Array.isArray(data) ? data[0] : data) as
-    | { application_id?: string; application_reference?: string }
-    | null
-    | undefined;
-  if (!row?.application_id) throw new Error("The application could not be created.");
-  return { id: String(row.application_id), reference: String(row.application_reference ?? "") };
-}
 
 export async function assignApplicationAgent(applicationId: string, agentProfileId: string | null): Promise<void> {
   const { error } = await supabase.rpc("portal_assign_agent", {

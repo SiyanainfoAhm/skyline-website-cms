@@ -1,7 +1,7 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, Card, ConfirmDialog, PageHeader, Select } from "@/pages/admin/components/ui";
+import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/components/ui";
 import { AgencyStatusBadge, ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
@@ -9,9 +9,9 @@ import { listBusinesses, setBusinessStatus, type BusinessRow, type BusinessStatu
 import { useListParams } from "@/pages/admin/lib/listParams";
 
 const PAGE_SIZE = 25;
-const KEYS = ["q", "status", "source", "workspace"] as const;
+const KEYS = ["q", "status"] as const;
 
-/** Agencies > Businesses: every OMARA business plus businesses added by SLIT. */
+/** Agencies > Businesses: one row per business (ABN), with its agents, students and applications. */
 export default function BusinessesPage() {
   const { push } = useToast();
   const { values, page, update, setPage, clear } = useListParams(KEYS);
@@ -29,19 +29,18 @@ export default function BusinessesPage() {
     let active = true;
     setLoading(true);
     setError("");
-    listBusinesses({ search: values.q, status, source: values.source, workspace: values.workspace, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+    listBusinesses({ search: values.q, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
       .then((result) => { if (active) { setRows(result.rows); setTotal(result.total); setCounts(result.counts); } })
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "We could not load businesses."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [values.q, status, values.source, values.workspace, page, reload]);
+  }, [values.q, status, page, reload]);
 
   const change = async (row: BusinessRow, next: BusinessStatus) => {
     setBusyId(row.id);
     try {
-      const result = await setBusinessStatus(row.id, next);
-      push(next === "Inactive" ? `${row.name} deactivated. Its people can no longer sign in.`
-        : result.workspaceCreated ? `${row.name} activated and its workspace created. Invite its first admin from the business page.` : `${row.name} activated.`);
+      await setBusinessStatus(row.id, next);
+      push(next === "Inactive" ? `${row.name} deactivated. Its people can no longer sign in.` : `${row.name} activated.`);
       setReload((n) => n + 1);
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not change this business’s status.", "error");
@@ -51,33 +50,21 @@ export default function BusinessesPage() {
     }
   };
 
-  const filtered = Boolean(values.q || status || values.source || values.workspace);
+  const filtered = Boolean(values.q || status);
   return (
     <div>
       <PageHeader
         title="Businesses"
-        description="Every agency business from the OMARA register, plus businesses added by SLIT. Activate a business to give it a workspace; deactivate it to block everyone in it."
+        description="Every business, identified by its ABN. A business has agents; each agent has students; each student has applications. Deactivate a business to block everyone in it."
         actions={<Link to="/admin/agencies/new"><Button icon="ri-add-line">Add business</Button></Link>}
       />
 
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
         <StatusTabs label="Business status" value={status} onChange={(v) => update({ status: v })}
           tabs={[{ id: "", label: "All", count: counts?.all ?? null }, { id: "Active", label: "Active", count: counts?.active ?? null }, { id: "Inactive", label: "Inactive", count: counts?.inactive ?? null }]} />
-        <div className="flex flex-wrap gap-2">
-          <Select aria-label="Source" value={values.source} onChange={(e) => update({ source: e.target.value })} className="w-auto">
-            <option value="">All sources</option>
-            <option value="omara">Imported from OMARA</option>
-            <option value="manual">Added by SLIT</option>
-          </Select>
-          <Select aria-label="Workspace" value={values.workspace} onChange={(e) => update({ workspace: e.target.value })} className="w-auto">
-            <option value="">Any workspace</option>
-            <option value="yes">Has a workspace</option>
-            <option value="no">No workspace</option>
-          </Select>
+        <div className="flex-1">
+          <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, ABN, agent name, MARN, email or phone" />
         </div>
-      </div>
-      <div className="mb-4">
-        <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, agent name, MARN, email, phone or city" />
       </div>
 
       <Card>
@@ -86,45 +73,36 @@ export default function BusinessesPage() {
             action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         ) : !loading && rows.length === 0 ? (
           <ListMessage icon="ri-building-line" title={filtered ? "No businesses match" : "No businesses yet"}
-            text={filtered ? "Check the spelling, search fewer words, or clear the filters." : "Businesses appear here when the OMARA import runs or when you add one."}
+            text={filtered ? "Check the spelling, search fewer words, or clear the filters." : "Add a business with its ABN to get started."}
             action={filtered ? <Button variant="outline" size="sm" onClick={clear}>Clear search and filters</Button> : undefined} />
         ) : (
           <div className={loading && counts ? "opacity-60 transition-opacity" : ""}>
             <ResponsiveTable aria-busy={loading}>
               <thead>
                 <tr>
-                  <th className="w-[26%]">Business</th>
-                  <th className="w-[11%]">OMARA agents</th>
-                  <th className="w-[11%]">Portal team</th>
-                  <th className="w-[8%]">Students</th>
-                  <th className="w-[20%]">Applications</th>
+                  <th className="w-[30%]">Business</th>
+                  <th className="w-[13%]">Agents</th>
+                  <th className="w-[9%]">Students</th>
+                  <th className="w-[22%]">Applications</th>
                   <th className="w-[10%]">Status</th>
-                  <th className="w-[14%]"><span className="sr-only">Actions</span></th>
+                  <th className="w-[16%]"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {loading && !counts ? <tr><td colSpan={7} className="py-10 text-center text-foreground-500">Loading businesses…</td></tr> : rows.map((row) => (
+                {loading && !counts ? <tr><td colSpan={6} className="py-10 text-center text-foreground-500">Loading businesses…</td></tr> : rows.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <Link to={`/admin/businesses/${row.id}`} className="font-semibold text-foreground-900 hover:text-primary-700">{row.name}</Link>
-                      <p className="mt-0.5 text-xs text-foreground-500">
-                        {row.agencyCode || (row.source === "omara" ? "Imported from OMARA" : "Added by SLIT")}{row.place ? `, ${row.place}` : ""}
-                      </p>
-                      {row.omaraEnded > 0 ? <p className="mt-1 text-xs font-medium text-amber-700">{row.omaraEnded} agent{row.omaraEnded === 1 ? "" : "s"} no longer listed</p> : null}
+                      <p className="mt-0.5 text-xs text-foreground-500">{[row.abn ? `ABN ${row.abn}` : row.agencyCode, row.contact].filter(Boolean).join(", ")}</p>
                     </td>
-                    <td>{row.source === "manual" && row.omaraAgents === 0 ? <span className="text-xs text-foreground-500">Not linked</span> : <><b className="text-foreground-900">{row.omaraAgents}</b> <span className="text-xs">registered</span></>}</td>
                     <td className="text-xs">
-                      {!row.agencyId ? <span className="text-foreground-500">No workspace</span> : (
-                        <>
-                          <p><b className="text-foreground-900">{row.admins}</b> admin{row.admins === 1 ? "" : "s"}</p>
-                          <p><b className="text-foreground-900">{row.agents}</b> agent{row.agents === 1 ? "" : "s"}</p>
-                          {row.admins === 0 ? <p className="mt-0.5 font-medium text-amber-700">No admin yet</p> : null}
-                        </>
-                      )}
+                      <p><b className="text-foreground-900">{row.agents}</b> agent{row.agents === 1 ? "" : "s"}</p>
+                      <p><b className="text-foreground-900">{row.admins}</b> admin{row.admins === 1 ? "" : "s"}</p>
+                      {row.admins === 0 ? <p className="mt-0.5 font-medium text-amber-700">No admin yet</p> : null}
                     </td>
-                    <td>{row.agencyId ? <b className="text-foreground-900">{row.students}</b> : <span className="text-xs text-foreground-500">None</span>}</td>
+                    <td><Link to={`/admin/businesses/${row.id}?tab=students`} className="font-bold text-foreground-900 hover:text-primary-700">{row.students}</Link></td>
                     <td>
-                      {row.applications === 0 ? <span className="text-xs text-foreground-500">{row.agencyId ? "No applications" : "None"}</span> : (
+                      {row.applications === 0 ? <span className="text-xs text-foreground-500">No applications</span> : (
                         <div className="space-y-1.5">
                           <Link to={`/admin/businesses/${row.id}?tab=applications`} className="text-xs font-semibold text-foreground-900 hover:text-primary-700">
                             {row.applications} application{row.applications === 1 ? "" : "s"}

@@ -204,10 +204,11 @@ export async function createAgencyRecordWithBusiness(input: AgencyPatch & { stat
       name: input.name.trim(), code: input.code.trim(), registration_number: normalizeAbn(input.registrationNumber), business_email: input.businessEmail.trim(),
       phone: input.phone.trim(), address: input.address.trim(), country: input.country.trim(), primary_contact: input.primaryContact.trim(), status: input.status,
     })
-    .select("id, business_id")
+    .select("id")
     .single();
   if (error) throw new Error(error.message);
-  return { agencyId: String(data.id), businessId: String(data.business_id) };
+  // The business is the agency record, so both ids are the same.
+  return { agencyId: String(data.id), businessId: String(data.id) };
 }
 
 export async function createAgencyRecord(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<string> {
@@ -272,20 +273,6 @@ export async function findAgencyByAbn(abn: string): Promise<{ id: string; name: 
   if (error) throw new Error("We could not check whether this business already exists. Please try again.");
   const row = data?.[0];
   return row ? { id: String(row.id), name: String(row.name ?? "") } : null;
-}
-
-/** The business record behind an agency workspace. */
-export async function agencyBusinessId(agencyId: string): Promise<string | null> {
-  const { data, error } = await supabase.from("agencies").select("business_id").eq("id", agencyId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data?.business_id ? String(data.business_id) : null;
-}
-
-/** The agency workspace of a business, if it has one. */
-export async function agencyIdForBusiness(businessId: string): Promise<string | null> {
-  const { data, error } = await supabase.from("agencies").select("id").eq("business_id", businessId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data?.id ? String(data.id) : null;
 }
 
 /** Delete an agency (SLIT Admin only). Blocked if it still owns applications. */

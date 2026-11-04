@@ -7,7 +7,7 @@ import { Button, Card, Field, TextInput } from "@/pages/admin/components/ui";
 import { EMPTY_AGENCY_FORM, suggestAgencyCode, validateAgencyForm, type AgencyFormErrors, type AgencyFormState } from "@/pages/admin/lib/agencyForm";
 import { setBusinessStatus } from "@/pages/admin/lib/businessData";
 import { validateName } from "@/pages/agency/lib/userValidation";
-import { agencyBusinessId, findAgencyByAbn, invokePortalUsers } from "@/pages/agency/lib/portalData";
+import { findAgencyByAbn, invokePortalUsers } from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 
 type Errors = AgencyFormErrors & { form?: string };
@@ -91,8 +91,8 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
 
   const pickExisting = async () => {
     if (!existing || !onUseExisting) return;
-    const businessId = await agencyBusinessId(existing.id).catch(() => null);
-    onUseExisting({ agencyId: existing.id, businessId, name: existing.name });
+    // The business is the agency record, so both ids are the same.
+    onUseExisting({ agencyId: existing.id, businessId: existing.id, name: existing.name });
   };
 
   const submit = async (event: FormEvent) => {
@@ -129,17 +129,15 @@ export default function AddBusinessForm({ onCreated, onUseExisting, cancel, inDi
       const id = String(data.agencyId ?? "");
       if (!id) throw new Error("The business was created but could not be opened. Find it in Businesses.");
       let message = data.warning ? String(data.warning) : `Business created and active. An admin invitation was ${data.emailSent ? "emailed" : "saved"} for ${email}.`;
-      let businessId: string | null = null;
       try {
-        businessId = await agencyBusinessId(id);
-        if (businessId) await setBusinessStatus(businessId, "Active");
+        await setBusinessStatus(id, "Active");
       } catch {
-        message += " Its business record could not be marked active; activate it in Businesses.";
+        message += " It could not be marked active; activate it in Businesses.";
       }
-      onCreated({ agencyId: id, businessId, name: form.name.trim(), message });
+      onCreated({ agencyId: id, businessId: id, name: form.name.trim(), message });
     } catch (e) {
       const text = e instanceof Error ? e.message : "";
-      setErrors({ form: /agencies_directory_business_unique|duplicate key|already exists/i.test(text) ? text.includes("code") ? "This agency code is already used. Edit the details and choose another code." : "This business already exists. Open it from Businesses." : text || "We could not create this business." });
+      setErrors({ form: /agencies_abn_unique|duplicate key|already exists/i.test(text) ? text.includes("code") ? "This agency code is already used. Edit the details and choose another code." : "A business with this ABN already exists. Open it from Businesses." : text || "We could not create this business." });
     } finally {
       setSaving(false);
     }
