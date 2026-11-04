@@ -117,6 +117,10 @@ end $do$;
 drop function if exists public.omara_attach_directory_business();
 drop table if exists public.agent_directory_links, public.business_agent_affiliations, public.omara_agents;
 drop table public.business_agents;
+-- The read rules of businesses refer to agencies.business_id, so they go before the column does.
+drop policy if exists businesses_scoped_read on public.businesses;
+drop policy if exists businesses_admin_create_unverified on public.businesses;
+drop policy if exists businesses_directory_read on public.businesses;
 alter table public.agencies drop column business_id;
 drop table public.businesses;
 
