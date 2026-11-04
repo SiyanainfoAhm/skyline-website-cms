@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, useLayoutEffect } from "react";
 import AddressSearch from "@/pages/agency/components/AddressSearch";
+import { openDeclarationKey } from "@/pages/agency/lib/wizardConfig";
 import CourseSearchField from "@/pages/agency/components/CourseSearchField";
 import { validateUsi } from "../../../../supabase/functions/_shared/validation/identifiers";
 import type { AppField, AppSection } from "@/data/applicationForms";
@@ -62,7 +63,7 @@ const IDENTIFIER_DEFAULTS: Record<string, string> = {
 };
 // Later-page answers that start with a default when empty (plain, editable).
 const FORM_DEFAULTS: Record<string, string | string[]> = {
-  study_reason: "To get a job - 01",
+  study_reason: "For personal interest or self-development - 09",
   rpl: "No",
   oshc_require: "No",
   oshc_self_confirm: ["I understand I must arrange and maintain my own Overseas Student Health Cover for the full duration of my student visa and provide proof when requested."],
@@ -228,7 +229,19 @@ export default function ApplicationWorkspace({
     return out;
   });
 
-  const [step, setStep] = useState(0);
+  // Straight after the document wizard the form opens on its Student declaration page.
+  const [step, setStep] = useState(() => {
+    try {
+      if (!readOnly && window.sessionStorage.getItem(openDeclarationKey(application.id))) {
+        const declaration = sections.findIndex((section) => section.fields.some((field) => field.name === "declaration"));
+        if (declaration >= 0) return declaration;
+      }
+    } catch { /* session storage unavailable */ }
+    return 0;
+  });
+  useEffect(() => {
+    try { window.sessionStorage.removeItem(openDeclarationKey(application.id)); } catch { /* session storage unavailable */ }
+  }, [application.id]);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);

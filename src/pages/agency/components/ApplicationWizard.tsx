@@ -4,11 +4,18 @@ import {
   flushApplicationEdits,
   getApplication,
   listApplicationDocuments,
+  listInstitutionCourses,
   queueDocumentExtraction,
+  saveApplicationDraft,
   saveDocumentReview,
   uploadApplicationDocument,
+  type ApplicationCourseRow,
   type DocumentRow,
 } from "@/pages/agency/lib/portalApplications";
+import { portalCourseOptions, resolveCourseOption } from "@/pages/agency/lib/portalSections";
+import WizardQuestionStep from "@/pages/agency/components/WizardQuestionStep";
+import { OTHER_LANGUAGE, WIZARD_QUESTIONS, openDeclarationKey, type WizardQuestion } from "@/pages/agency/lib/wizardConfig";
+import { normalizeUsi, parseStoredPhone, validateStoredPhone, validateUsi } from "../../../../supabase/functions/_shared/validation/identifiers";
 import {
   WIZARD_STEPS,
   wizardExtractionState,
@@ -36,7 +43,9 @@ interface Props {
 }
 
 const WIZARD_CATEGORIES = new Set(WIZARD_STEPS.map((step) => step.category));
-const LAST_STEP = WIZARD_STEPS.length - 1;
+// Document screens first, then the answer screens (language, USI, emergency contact, course).
+const DOC_STEPS = WIZARD_STEPS.length;
+const LAST_STEP = DOC_STEPS + WIZARD_QUESTIONS.length - 1;
 const PASSPORT_STEP = WIZARD_STEPS.findIndex((step) => step.id === "passport");
 
 function wizardStepKey(applicationId: string): string {
@@ -46,7 +55,7 @@ function wizardStepKey(applicationId: string): string {
 function savedWizardStep(applicationId: string): number {
   try {
     const value = Number(window.sessionStorage.getItem(wizardStepKey(applicationId)));
-    return Number.isInteger(value) && value >= 0 && value < WIZARD_STEPS.length ? value : 0;
+    return Number.isInteger(value) && value >= 0 && value <= LAST_STEP ? value : 0;
   } catch {
     return 0;
   }
@@ -120,6 +129,13 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   const documentsRef = useRef<WizardDoc[]>([]);
   const refreshSequenceRef = useRef(0);
   const completingRef = useRef(false);
+  // Answer screens: the current answers, their messages, the courses on offer, and the form holding the phone control.
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answerErrors, setAnswerErrors] = useState<Record<string, string>>({});
+  const [savingAnswers, setSavingAnswers] = useState(false);
+  const [answerSaveError, setAnswerSaveError] = useState("");
+  const [institutionCourses, setInstitutionCourses] = useState<ApplicationCourseRow[] | null>(null);
+  const questionFormRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -131,7 +147,9 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     return () => window.removeEventListener("portal-before-scope-switch", flush);
   }, [applicationId]);
 
-  const current = WIZARD_STEPS[step];
+  // On an answer screen the document logic below keeps working on the last document step and stays out of the way.
+  const question: WizardQuestion | null = step >= DOC_STEPS ? WIZARD_QUESTIONS[step - DOC_STEPS] ?? null : null;
+  const current = WIZARD_STEPS[Math.min(step, DOC_STEPS - 1)];
   useEffect(() => {
     try { window.sessionStorage.setItem(wizardStepKey(applicationId), String(step)); } catch { /* session storage unavailable */ }
   }, [applicationId, step]);
@@ -160,6 +178,21 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
         }
         const stored = await listApplicationDocuments(applicationId);
         if (active) setDocuments(wizardDocs(stored));
+        // What the answer screens start from: answers already given (on this application or the student's record).
+        const values = (application.data.values ?? {}) as Record<string, unknown>;
+        const pick = (name: string) => (typeof values[name] === "string" ? String(values[name]) : "");
+        const courses = Array.isArray(values.courses_of_interest) ? (values.courses_of_interest as unknown[]).map(String) : [];
+        if (active) {
+          setAnswers({
+            language_home: pick("language_home"), language_other: pick("language_other"), usi_number: pick("usi_number"),
+            ec_name: pick("ec_name"), ec_phone: pick("ec_phone"), ec_relationship: pick("ec_relationship"),
+            course: courses[0] ?? "", preferred_intake: pick("preferred_intake"),
+          });
+        }
+        if (application.tenantId) {
+          const offered = await listInstitutionCourses().catch(() => []);
+          if (active) setInstitutionCourses(offered);
+        }
       } catch (error) {
         if (active) setLoadError(error instanceof Error ? error.message : "We could not load this draft.");
       } finally {
@@ -339,6 +372,8 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
         updatedAt: new Date().toISOString(),
       };
       await saveDocumentReview({ applicationId, values: {}, provenance: {}, confirmed: [], wizard: meta as unknown as Record<string, unknown>, studentName: studentName || undefined });
+      // The full form opens on its Student declaration page (step 14).
+      try { window.sessionStorage.setItem(openDeclarationKey(applicationId), "1"); } catch { /* session storage unavailable */ }
       onFinish();
     } catch (error) {
       setFinishError(error instanceof Error ? error.message : "We could not open the application form.");
@@ -374,6 +409,78 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
     if (missing >= 0) setStep(missing);
   }, [loading, passportRequired, step, documents]);
 
+  /* ------------------------------------------------------- answer screens */
+
+  const courseLabels = institutionCourses ? institutionCourses.map((course) => `${course.code} - ${course.title}`) : portalCourseOptions;
+  const setAnswer = (name: string, value: string) => {
+    setAnswers((prev) => ({ ...prev, [name]: value }));
+    setAnswerErrors((prev) => (prev[name] ? { ...prev, [name]: "" } : prev));
+  };
+
+  /** Checks the screen's answers and saves them to the draft; false when something is missing or the save failed. */
+  const saveAnswers = async (target: WizardQuestion): Promise<boolean> => {
+    const errors: Record<string, string> = {};
+    const values: Record<string, unknown> = {};
+    const patch: Record<string, unknown> = {};
+    const filled = (name: string) => String(answers[name] ?? "").trim();
+    if (target.id === "language") {
+      if (!filled("language_home")) errors.language_home = "Choose Yes or No.";
+      else if (answers.language_home === OTHER_LANGUAGE && !filled("language_other")) errors.language_other = "Enter the language the student speaks.";
+      values.language_home = answers.language_home;
+      values.language_other = answers.language_home === OTHER_LANGUAGE ? filled("language_other") : "";
+    } else if (target.id === "usi") {
+      const usi = normalizeUsi(answers.usi_number ?? "");
+      const problem = usi ? validateUsi(usi) : "Enter the student's USI.";
+      if (problem) errors.usi_number = problem;
+      values.has_usi = "Yes";
+      values.usi_number = usi;
+    } else if (target.id === "emergency") {
+      const phone = String(new FormData(questionFormRef.current ?? undefined).get("ec_phone") ?? "").trim();
+      if (!filled("ec_name")) errors.ec_name = "Enter the emergency contact's name.";
+      if (!phone.startsWith("+") || !parseStoredPhone(phone)?.national) errors.ec_phone = "Enter the emergency contact's phone number.";
+      else if (validateStoredPhone(phone)) errors.ec_phone = validateStoredPhone(phone);
+      if (!filled("ec_relationship")) errors.ec_relationship = "Enter how they are related to the student.";
+      values.ec_name = filled("ec_name");
+      values.ec_phone = phone;
+      values.ec_relationship = filled("ec_relationship");
+      // An Australian number means the contact is in Australia (the form no longer asks).
+      values.ec_in_au = phone.startsWith("+61") ? "Yes" : "No";
+      setAnswers((prev) => ({ ...prev, ec_phone: phone }));
+    } else {
+      if (!filled("course")) errors.course = "Choose the course.";
+      if (!filled("preferred_intake")) errors.preferred_intake = "Choose the preferred intake.";
+      if (filled("course")) {
+        const course = institutionCourses ? institutionCourses.find((item) => `${item.code} - ${item.title}` === answers.course) : resolveCourseOption(answers.course);
+        if (!course) errors.course = "This course is no longer offered. Choose another.";
+        else patch.courses = [course];
+      }
+      values.courses_of_interest = filled("course") ? [answers.course] : [];
+      values.preferred_intake = filled("preferred_intake");
+    }
+    setAnswerErrors(errors);
+    if (Object.values(errors).some(Boolean)) return false;
+    setSavingAnswers(true);
+    setAnswerSaveError("");
+    try {
+      await flushApplicationEdits(applicationId);
+      // Reading documents moves the draft on; take its current version before saving.
+      await getApplication(applicationId, true);
+      await saveApplicationDraft(applicationId, { data: { values, ...patch }, studentName: "", studentEmail: "", intake: "", completion: 0 });
+      return true;
+    } catch (error) {
+      setAnswerSaveError(error instanceof Error ? error.message : "We could not save these answers. Try again.");
+      return false;
+    } finally {
+      setSavingAnswers(false);
+    }
+  };
+
+  const nextFromQuestion = async () => {
+    if (!question || !(await saveAnswers(question))) return;
+    if (step === LAST_STEP) setFinishing(true);
+    else goTo(step + 1);
+  };
+
   const stepDocs = documents.filter((doc) => doc.category === current.category);
   const stepPending = pending.filter((item) => item.category === current.category);
   const hasFile = stepDocs.length > 0 || stepPending.length > 0;
@@ -386,12 +493,14 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
   // While this step's file uploads or is read, the wizard is locked so nothing else can be clicked.
   const removingExpired = !expiredPassport?.error && stepDocs.some(isExpiredPassport);
   const removingWrong = !rejectedDocs[current.category]?.error && stepDocs.some(isWrongDocument);
-  const locked = ready && (stepBusy(current) || removingExpired || removingWrong);
+  const locked = ready && !question && (stepBusy(current) || removingExpired || removingWrong);
   // A file read too slowly unlocks the wizard but still holds Next until its result is in (or it is deleted).
   const slowHere = stepDocs.filter((doc) => isReading(doc) && slowDocs.has(doc.id));
   const rejectedHere = rejectedDocs[current.category];
   const stepCheck = STEP_CHECKS[current.category];
   const blockedByPassport = passportRequired && step === PASSPORT_STEP;
+  // The document notices below belong to document screens only.
+  const onDocStep = !question;
 
   const primaryClass =
     "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-5 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60";
@@ -412,6 +521,14 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
             Close
           </button>
         </div>
+      );
+    }
+    if (question) {
+      return (
+        <form ref={questionFormRef} noValidate onSubmit={(event) => { event.preventDefault(); void nextFromQuestion(); }}>
+          <WizardQuestionStep question={question} answers={answers} errors={answerErrors} courseOptions={courseLabels} onChange={setAnswer} />
+          {answerSaveError ? <div className="mt-4"><PortalError message={answerSaveError} /></div> : null}
+        </form>
       );
     }
     return (
@@ -470,7 +587,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
         {/* Step indicator */}
         <div className="flex flex-wrap gap-2 border-b border-background-200 px-5 py-3.5 md:px-6">
-          {WIZARD_STEPS.map((item, index) => {
+          {[...WIZARD_STEPS, ...WIZARD_QUESTIONS].map((item, index) => {
             const active = index === step;
             const done = index < step;
             return (
@@ -486,7 +603,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
                       : "border-background-200 bg-background-50 text-foreground-400"
                 }`}
               >
-                {stepBusy(item) ? (
+                {"category" in item && stepBusy(item) ? (
                   <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
                 ) : (
                   <i className={done ? "ri-check-line" : item.icon} aria-hidden="true" />
@@ -526,7 +643,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
 
           {ready ? (
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-              {!isLast && !hasFile && !blockedByPassport && !current.required ? (
+              {onDocStep && !hasFile && !blockedByPassport && !current.required ? (
                 <button
                   type="button"
                   onClick={() => goTo(step + 1)}
@@ -535,14 +652,18 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
                   {current.skipLabel}
                 </button>
               ) : null}
-              {isLast ? (
+              {question && !isLast ? (
+                <button type="button" onClick={() => void nextFromQuestion()} disabled={savingAnswers} className={primaryClass}>
+                  {savingAnswers ? <><i className="ri-loader-4-line animate-spin" aria-hidden="true" /> Saving&hellip;</> : <>Next <i className="ri-arrow-right-line" aria-hidden="true" /></>}
+                </button>
+              ) : isLast ? (
                 <>
                   {finishing ? (
                     <button type="button" onClick={() => void complete()} className="cursor-pointer text-xs font-semibold text-primary-700 underline">
                       Continue now
                     </button>
                   ) : null}
-                  <button type="button" onClick={() => setFinishing(true)} disabled={finishing} className={primaryClass}>
+                  <button type="button" onClick={() => void nextFromQuestion()} disabled={finishing || savingAnswers} className={primaryClass}>
                     {finishing ? (
                       <>
                         <i className="ri-loader-4-line animate-spin" aria-hidden="true" />
@@ -566,7 +687,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           ) : null}
         </div>
 
-        {blockedByPassport && !passportExpired && !locked ? (
+        {onDocStep && blockedByPassport && !passportExpired && !locked ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p className="flex items-start gap-2 text-sm text-foreground-600">
               <i className="ri-information-line mt-0.5" aria-hidden="true" />
@@ -575,7 +696,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           </div>
         ) : null}
 
-        {current.required && step !== PASSPORT_STEP && !hasFile && !locked ? (
+        {onDocStep && current.required && step !== PASSPORT_STEP && !hasFile && !locked ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p className="flex items-start gap-2 text-sm text-foreground-600">
               <i className="ri-information-line mt-0.5" aria-hidden="true" />
@@ -584,7 +705,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           </div>
         ) : null}
 
-        {rejectedHere && stepCheck ? (
+        {onDocStep && rejectedHere && stepCheck ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
@@ -595,7 +716,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           </div>
         ) : null}
 
-        {slowHere.length > 0 && !locked ? (
+        {onDocStep && slowHere.length > 0 && !locked ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="status" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <i className="ri-time-line mt-0.5" aria-hidden="true" />
@@ -604,7 +725,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           </div>
         ) : null}
 
-        {current.id === "licence" && rejectedLicence ? (
+        {onDocStep && current.id === "licence" && rejectedLicence ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />
@@ -615,7 +736,7 @@ export default function ApplicationWizard({ applicationId, agencyName, onFinish,
           </div>
         ) : null}
 
-        {blockedByPassport && passportExpired && !locked ? (
+        {onDocStep && blockedByPassport && passportExpired && !locked ? (
           <div className="border-t border-background-200 px-5 py-3 md:px-6">
             <p role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               <i className="ri-error-warning-line mt-0.5" aria-hidden="true" />

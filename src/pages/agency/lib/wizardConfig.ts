@@ -85,6 +85,30 @@ export const WIZARD_STEPS: WizardStep[] = [
   },
 ];
 
+/** The answer screens that follow the document screens of the wizard. */
+export type WizardQuestionId = "language" | "usi" | "emergency" | "course";
+
+export interface WizardQuestion {
+  id: WizardQuestionId;
+  title: string;
+  short: string;
+  subtitle: string;
+  icon: string;
+}
+
+export const WIZARD_QUESTIONS: WizardQuestion[] = [
+  { id: "language", title: "Language spoken at home", short: "Language", subtitle: "Does the student speak a language other than English at home?", icon: "ri-chat-3-line" },
+  { id: "usi", title: "Unique Student Identifier (USI)", short: "USI", subtitle: "Required. The student's 10-character USI from usi.gov.au.", icon: "ri-fingerprint-line" },
+  { id: "emergency", title: "Emergency contact", short: "Emergency", subtitle: "Required. Who to contact in an emergency.", icon: "ri-phone-line" },
+  { id: "course", title: "Course and intake", short: "Course", subtitle: "Required. The course the student is applying for and when they want to start.", icon: "ri-book-open-line" },
+];
+
+export const ENGLISH_ONLY = "No, English only - 1201";
+export const OTHER_LANGUAGE = "Yes, language other than English";
+
+/** Set when the wizard finishes: the full form then opens on its Student declaration page. */
+export const openDeclarationKey = (applicationId: string) => `slit-open-declaration:${applicationId}`;
+
 export type WizardExtractionState = "queued" | "processing" | "done" | "empty" | "failed";
 
 /** One stored document as shown on a wizard step. */
