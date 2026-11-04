@@ -266,8 +266,15 @@ export interface ApplicationDetail {
   submittedByName: string;
   studentName: string;
   studentEmail: string;
+  /** The student record (enrollment_students) this application belongs to. */
+  studentId: string | null;
   intake: string;
   completion: number;
+  /**
+   * The form as one map: `values` holds the student's answers (kept on the student record) merged with this
+   * application's own answers; `academicQualifications` is the student's list. Saves send the whole map and the
+   * database routes each answer to the student or the application.
+   */
   data: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -307,13 +314,21 @@ export async function getApplication(id: string, refreshDraftRevision = true): P
   countPortalMetric("applications.detail");
   const { data, error } = await supabase
     .from("enrollment_applications")
-    .select(`${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id`)
+    .select(`${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id, student:enrollment_students!enrollment_applications_student_fk(id, details, qualifications)`)
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
 
   const r = data as Record<string, unknown>;
+  // Student answers live on the student record; the form works on one merged map.
+  const studentRow = (Array.isArray(r.student) ? r.student[0] : r.student) as { id?: string; details?: Record<string, unknown>; qualifications?: unknown } | null | undefined;
+  const rawData = (r.data as Record<string, unknown>) ?? {};
+  const merged: Record<string, unknown> = {
+    ...rawData,
+    values: { ...(studentRow?.details ?? {}), ...((rawData.values as Record<string, unknown> | undefined) ?? {}) },
+  };
+  if (merged.academicQualifications === undefined && Array.isArray(studentRow?.qualifications)) merged.academicQualifications = studentRow.qualifications;
   if (refreshDraftRevision) draftVersions.set(id, Number(r.draft_version ?? 0));
   const agencyId = str(r.agency_id);
   const [nameMap, agencyMap, courseMap, consents, agentContact] = await Promise.all([
@@ -339,9 +354,10 @@ export async function getApplication(id: string, refreshDraftRevision = true): P
     submittedByName: nameMap.get(str(r.submitted_by)) ?? "",
     studentName: str(r.student_name),
     studentEmail: str(r.student_email),
+    studentId: studentRow?.id ? String(studentRow.id) : null,
     intake: str(r.intake),
     completion: Number(r.completion ?? 0),
-    data: (r.data as Record<string, unknown>) ?? {},
+    data: merged,
     createdAt: str(r.created_at),
     updatedAt: str(r.updated_at),
     submittedAt: r.submitted_at ? str(r.submitted_at) : null,
