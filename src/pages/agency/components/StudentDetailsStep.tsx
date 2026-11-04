@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { PhoneInput } from "@/components/feature/applicationInputs";
+import { Button, Modal } from "@/pages/admin/components/ui";
 import { validateEmail } from "@/pages/agency/lib/userValidation";
 import { findStudents, type StudentMatch } from "@/pages/agency/lib/portalApplications";
 import { parseStoredPhone, validateStoredPhone } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -21,8 +22,8 @@ const INPUT = "w-full rounded-md border border-background-300 bg-background-50 p
 
 /**
  * The student a new application is for: only their email and mobile, both unique. A student already on record with either
- * stops the step with a message; nothing is created. With `allowStudentWithoutApplication`, a student added earlier
- * (Students > Add student) who matches both email and mobile and has no application yet continues as that student.
+ * stops the step with a message; nothing is created. With `allowStudentWithoutApplication` (New application), one student
+ * found by email or mobile is shown in a popup; once confirmed, the application continues for that student.
  */
 export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false, askName = false }: {
   initial?: Partial<StudentDraft>;
@@ -41,6 +42,8 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   const [errors, setErrors] = useState<{ email?: string; mobile?: string; firstName?: string; lastName?: string }>({});
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState("");
+  // The one student found by email or mobile, waiting for "Yes, this is the student".
+  const [found, setFound] = useState<{ draft: StudentDraft; row: StudentMatch } | null>(null);
   const start = { ...EMPTY, ...initial };
 
   const submit = async () => {
@@ -66,7 +69,7 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
       const rows = await findStudents(draft.email, draft.mobile);
       if (rows.length === 0) { onContinue(draft, null); return; }
       const only = rows.length === 1 ? rows[0] : null;
-      if (allowStudentWithoutApplication && only && only.emailMatch && only.phoneMatch && only.applications === 0) { onContinue(draft, only); return; }
+      if (allowStudentWithoutApplication && only) { setFound({ draft, row: only }); return; }
       const byEmail = rows.find((row) => row.emailMatch);
       const byMobile = rows.find((row) => row.phoneMatch);
       const who = (row: StudentMatch) => (row.name ? ` (${row.name}, ${row.businessName})` : ` (${row.businessName})`);
@@ -83,6 +86,17 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
 
   const waiting = busy || checking;
 
+  const notThisStudent = () => {
+    if (!found) return;
+    const { row } = found;
+    const who = row.name ? ` (${row.name}, ${row.businessName})` : ` (${row.businessName})`;
+    setErrors({
+      email: row.emailMatch ? `A student with this email already exists${who}. Enter a different email.` : undefined,
+      mobile: row.phoneMatch ? `A student with this mobile already exists${who}. Enter a different mobile.` : undefined,
+    });
+    setFound(null);
+  };
+
 
   return (
     <form ref={formRef} noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}
@@ -92,7 +106,9 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
         if (name === "email" || name === "mobile" || name === "firstName" || name === "lastName") setErrors((prev) => (prev[name] ? { ...prev, [name]: undefined } : prev));
       }}>
       <h2 className="font-heading text-base font-semibold text-foreground-950">{askName ? "Student details" : "Student contact details"}</h2>
-      <p className="mt-1.5 text-sm text-foreground-600">{description ?? "Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport you upload next."}</p>
+      <p className="mt-1.5 text-sm text-foreground-600">{description ?? (allowStudentWithoutApplication
+        ? "Email and mobile only. A student already on record with either is shown so you can confirm it is them. The name and other details are read from the passport you upload next."
+        : "Email and mobile only. Each must be new: a student already on record with either cannot be added again. The name and other details are read from the passport you upload next.")}</p>
 
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
         {askName ? (
@@ -120,6 +136,27 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
           {errors.mobile ? <p className="mt-1 text-xs text-primary-800" role="alert">{errors.mobile}</p> : null}
         </div>
       </div>
+
+      <Modal open={Boolean(found)} title="Is this the student?" onClose={notThisStudent}
+        footer={<>
+          <Button type="button" variant="outline" onClick={notThisStudent}>No, a different student</Button>
+          <Button type="button" onClick={() => { if (found) { const next = found; setFound(null); onContinue(next.draft, next.row); } }}>Yes, continue</Button>
+        </>}>
+        {found ? (
+          <div className="text-sm text-foreground-700">
+            <p>A student already on record has this {found.row.emailMatch && found.row.phoneMatch ? "email and mobile" : found.row.emailMatch ? "email" : "mobile"}:</p>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-background-200 bg-background-100 px-4 py-3">
+              <dt className="text-foreground-500">Name</dt><dd className="font-semibold text-foreground-950">{found.row.name || "Not read from a passport yet"}</dd>
+              <dt className="text-foreground-500">Email</dt><dd>{found.row.email || "None"}</dd>
+              <dt className="text-foreground-500">Mobile</dt><dd>{found.row.phone || "None"}</dd>
+              <dt className="text-foreground-500">Business</dt><dd>{found.row.businessName || "None"}</dd>
+              {found.row.agentName ? <><dt className="text-foreground-500">Agent</dt><dd>{found.row.agentName}</dd></> : null}
+              <dt className="text-foreground-500">Applications</dt><dd>{found.row.applications}</dd>
+            </dl>
+            <p className="mt-3">Choose <b>Yes</b> to start a new application for this student. Their record is kept, and the name is updated from the passport you upload next.</p>
+          </div>
+        ) : null}
+      </Modal>
 
       {error || checkError ? <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error || checkError}</p> : null}
 
