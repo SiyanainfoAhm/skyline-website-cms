@@ -50,12 +50,12 @@ export function isEditableApplicationStatus(status: ApplicationStatus | string):
 export type PortalAccessState = "org_admin" | "active" | "agency_suspended" | "user_suspended" | "invite_expired" | "no_access";
 
 /** Landing page per database-resolved role. Navigation convenience only; RLS and the edge function decide access. */
-export function portalLanding(role: "slit_admin" | "agency_admin" | "agent" | null): string {
-  return role === "slit_admin" ? "/agency/dashboard" : "/agency/workspace";
+export function portalLanding(role: "slit_admin" | "agency_admin" | "agent" | "student" | null): string {
+  return role === "slit_admin" ? "/agency/dashboard" : role === "student" ? "/agency/applications" : "/agency/workspace";
 }
 
 /** Only organization and agency administrators see user management. The server enforces the same rule. */
-export function canManagePortalUsers(role: "slit_admin" | "agency_admin" | "agent" | null): boolean {
+export function canManagePortalUsers(role: "slit_admin" | "agency_admin" | "agent" | "student" | null): boolean {
   return role === "slit_admin" || role === "agency_admin";
 }
 

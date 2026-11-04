@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(219);
+select plan(244);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -446,6 +446,52 @@ select is((select array_agg(user_id::text) from public.agency_memberships where 
 select is((select array_agg(user_id::text) from public.agency_memberships where agency_id='1c000000-0000-0000-0000-00000000000b'),array['2c000000-0000-0000-0000-00000000000b'],'agency B lists only its own agents');
 select is((select array_agg(r->>'id') from jsonb_array_elements(public.portal_query_applications('','','1c000000-0000-0000-0000-00000000000a',null,'','','updated','desc',25,0)->'rows') r),array['4c000000-0000-0000-0000-00000000000a'],'agency A lists only its own applications');
 select is((public.portal_query_applications('','','1c000000-0000-0000-0000-00000000000b',null,'','','updated','desc',25,0)->>'total')::int,1,'agency B count covers only its own applications');
+-- Migration 118: student sign-in. A student is invited from their record, accepts, sees only their own applications and starts their own.
+reset role;
+insert into public.enrollment_students(id,agency_id,full_name,email,status) values
+ ('73000000-0000-0000-0000-000000000001','13000000-0000-0000-0000-000000000001','Stu Dent','stu.dent@example.test','Active'),
+ ('73000000-0000-0000-0000-000000000002','13000000-0000-0000-0000-000000000002','Other Stu','other.stu@example.test','Active'),
+ ('73000000-0000-0000-0000-000000000003','13000000-0000-0000-0000-000000000001','No Mail',null,'Active');
+select lives_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'stu.dent@example.test','Stu Dent','student','73000000-0000-0000-0000-000000000001')$$,'agency admin invites their student to sign in');
+select is((select role||':'||student_id::text from public.agency_invitations where email='stu.dent@example.test'),'student:73000000-0000-0000-0000-000000000001','student invitation carries the role and the student record');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'other.stu@example.test','Other Stu','student','73000000-0000-0000-0000-000000000002')$$,'42501',null,'a student of another business cannot be invited');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'','No Mail','student','73000000-0000-0000-0000-000000000003')$$,'22023',null,'a student without an email cannot be invited');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'x@example.test','X','student')$$,'22023',null,'a student invitation names the student');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'x@example.test','X','agent','73000000-0000-0000-0000-000000000001')$$,'22023',null,'an agent invitation names no student');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'stu.dent@example.test','Stu Dent','student','73000000-0000-0000-0000-000000000001')$$,'23505',null,'an already-invited student is not invited twice');
+select throws_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000010',null,'wrong@example.test','Stu Dent','student','73000000-0000-0000-0000-000000000001')$$,'22023',null,'the invitation goes to the email on the student record');
+insert into auth.users(id,email,email_confirmed_at) values ('33000000-0000-0000-0000-000000000020','stu.dent@example.test',now());
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000020';
+select is((public.portal_resolve_access()->>'accepted')::boolean,true,'the student accepts their invitation on first sign-in');
+select is((select m.role||':'||m.student_id::text from public.agency_memberships m join public.portal_profiles p on p.id=m.user_id where p.auth_user_id='33000000-0000-0000-0000-000000000020'),'student:73000000-0000-0000-0000-000000000001','the membership is a student membership tied to the record');
+select is(public.portal_identity()->>'role','student','the student signs in as a student');
+select is(public.portal_identity()->>'student_id','73000000-0000-0000-0000-000000000001','identity names the student record');
+select lives_ok($$select public.portal_create_student_application('stu-key-1','73000000-0000-0000-0000-000000000001')$$,'the student starts their own application');
+reset role;
+select ok((select student_id='73000000-0000-0000-0000-000000000001' and assigned_agent_id is null from public.enrollment_applications where client_key='stu-key-1'),'the application belongs to the student and is not assigned to them as an agent');
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000020';
+select is((select count(*)::int from public.portal_scoped_applications()),1,'the student is scoped to their own application only');
+select is(public.portal_can_access_application('43000000-0000-0000-0000-000000000001'),false,'another student''s application in the same business is out of reach');
+select throws_ok($$select public.portal_create_student_application('stu-key-2','73000000-0000-0000-0000-000000000003')$$,'42501',null,'a student cannot start another student''s application');
+select is((select count(*)::int from public.enrollment_applications),1,'direct reads show the student only their own application');
+reset role;
+update public.enrollment_students set status='Inactive' where id='73000000-0000-0000-0000-000000000001';
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000020';
+select is(public.portal_resolve_access()->>'state','user_suspended','a disabled student is suspended');
+select is(public.portal_identity()->>'role',null::text,'a disabled student has no portal role');
+reset role;
+update public.enrollment_students set status='Active' where id='73000000-0000-0000-0000-000000000001';
+select is(public.student_login_state('73000000-0000-0000-0000-000000000001')->>'status','active','the CMS sees the student as able to sign in');
+select is(public.student_login_state('73000000-0000-0000-0000-000000000003')->>'status','none','a student never invited has no sign-in');
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
+select is((select r->'login'->>'status' from jsonb_array_elements(public.admin_students_list('stu.dent','',null,null,25,0,'')->'rows') r limit 1),'active','the Students list reports the sign-in state');
+reset role;
+select lives_ok($$select public.portal_invitation_create('33000000-0000-0000-0000-000000000011',null,'other.stu@example.test','Other Stu','student','73000000-0000-0000-0000-000000000002')$$,'the other business''s admin invites their own student');
+select lives_ok($$select public.portal_invitation_resend('33000000-0000-0000-0000-000000000002',(select id from public.agency_invitations where email='other.stu@example.test'))$$,'organization admin resends a student invitation');
 reset role;
 select * from finish();
 rollback;

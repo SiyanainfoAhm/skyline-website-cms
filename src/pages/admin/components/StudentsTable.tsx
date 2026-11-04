@@ -5,7 +5,8 @@ import { Button, Card, ConfirmDialog } from "@/pages/admin/components/ui";
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deleteStudentRecord, listStudents, setStudentStatus, type StudentCounts, type StudentRow } from "@/pages/admin/lib/businessData";
+import { deleteStudentRecord, listStudents, sendStudentInvitation, setStudentStatus, type StudentCounts, type StudentRow } from "@/pages/admin/lib/businessData";
+import StudentLoginCell from "@/pages/admin/components/StudentLoginCell";
 import EditStudentDialog from "@/pages/admin/components/EditStudentDialog";
 import { deleteApplicationDocument, listApplicationDocuments } from "@/pages/agency/lib/portalApplications";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
@@ -85,6 +86,18 @@ export default function StudentsTable({ businessId, agentId, emptyText, refreshK
     </th>
   );
 
+  const invite = async (row: StudentRow) => {
+    setBusyId(row.id);
+    try {
+      push(await sendStudentInvitation({ id: row.id, email: row.email, name: row.name, agencyId: row.agencyId, login: row.login }));
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not send the invitation.", "error");
+    } finally {
+      setBusyId("");
+    }
+  };
+
   const changeStudentStatus = async (row: StudentRow, next: "Active" | "Inactive") => {
     setBusyId(row.id);
     try {
@@ -144,7 +157,7 @@ This permanently deletes the student and ALL ${total} of their application${tota
   };
 
   const filtered = Boolean(search || status !== "Active");
-  const columns = businessId ? 4 : 5;
+  const columns = businessId ? 5 : 6;
   return (
     <div>
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -170,8 +183,9 @@ This permanently deletes the student and ALL ${total} of their application${tota
                   {sortHeader("student", "Student", businessId ? "w-[30%]" : "w-[25%]")}
                   {businessId ? null : sortHeader("business", "Business", "w-[16%]")}
                   {sortHeader("agent", "Agent", "w-[13%]")}
-                  {sortHeader("studentStatus", "Student status", "w-[12%]")}
-                  {sortHeader("applications", "Application status", "w-[34%]")}
+                  {sortHeader("studentStatus", "Student status", "w-[11%]")}
+                  <th className="w-[12%]">Sign-in</th>
+                  {sortHeader("applications", "Application status", "w-[23%]")}
                 </tr>
               </thead>
               <tbody>
@@ -209,6 +223,9 @@ This permanently deletes the student and ALL ${total} of their application${tota
                             <option key={item.value} value={item.value}>{busyId === row.id && item.value === studentStatusOf(row) ? "Saving…" : item.label}</option>
                           ))}
                         </select>
+                      </td>
+                      <td>
+                        <StudentLoginCell login={row.login} email={row.email} busy={busyId === row.id} disabled={disabled} onInvite={() => void invite(row)} />
                       </td>
                       <td>
                         {row.applicationRows ? (

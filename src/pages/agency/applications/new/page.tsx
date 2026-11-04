@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
-import { activateAgent, listBusinesses, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
+import { activateAgent, listBusinesses, sendStudentInvitation, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
 import { useToast } from "@/pages/admin/components/toastContext";
 import SearchPick, { type PickOption } from "@/pages/admin/components/SearchPick";
 import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
@@ -88,7 +88,7 @@ async function saveContact(id: string, student: StudentDraft): Promise<void> {
  */
 export default function NewApplicationPage() {
   const paths = useApplicationPaths();
-  const { role, agency, profile, authUser, authLoading, identityLoading } = usePortalAuth();
+  const { role, studentId, agency, profile, authUser, authLoading, identityLoading } = usePortalAuth();
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -157,6 +157,10 @@ export default function NewApplicationPage() {
         const saved = await saveStudent({ agentId: chosen.agent.id, fullName: student.fullName, email: student.email, mobile: student.mobile, dateOfBirth: student.dateOfBirth, passportNumber: student.passportNumber });
         studentId = saved.id;
         if (saved.reused) notes.push(`${saved.name} was already on record with this passport or email and date of birth, so that record is used.`);
+        else if (student.invite) {
+          try { notes.push(await sendStudentInvitation({ id: saved.id, email: saved.email || student.email, name: saved.name || student.fullName, agencyId: saved.businessId })); }
+          catch (e) { notes.push(`The student's sign-in invitation was not sent${e instanceof Error && e.message ? `: ${e.message}` : "."} Send it from Students.`); }
+        }
       } else {
         notes.push(`New application for ${existing.name || "the existing student"}${existing.agentName ? `, looked after by ${existing.agentName}` : ""}.`);
       }
@@ -230,14 +234,23 @@ export default function NewApplicationPage() {
           }
           clearSession(authUser.id);
         }
+        if (role === "student") {
+          // A student starts their own application: no student step, no agent to choose.
+          if (!studentId) throw new Error("Your student record could not be found. Ask your agent or SLIT Administration.");
+          const { id } = await createApplicationForStudent(clientKeyRef.current, studentId);
+          clientKeyRef.current = newClientKey();
+          openWizard(id);
+          return;
+        }
         setPhase("student");
       } catch (e) {
         setError(e instanceof Error ? e.message : "We could not start a new application.");
-        setPhase("student");
+        setPhase(role === "student" ? "checking" : "student");
         bootRef.current = false;
       }
     })();
-  }, [authLoading, identityLoading, role, authUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, identityLoading, role, studentId, authUser]);
 
   const saveNewRecord = (value: AddStudentRecordValue) => {
     setRecordDialogMode(null);
@@ -267,6 +280,7 @@ export default function NewApplicationPage() {
       const docs = await listApplicationDocuments(abandoned).catch(() => []);
       await Promise.all(docs.map((doc) => deleteApplicationDocument({ id: doc.id, storagePath: doc.storagePath }).catch(() => undefined)));
       await deleteApplicationDraft(abandoned).catch(() => undefined);
+      if (role === "student") { navigate(paths.list, { replace: true }); return; }
       setBusiness(null);
       setAgent(null);
       setDraft(null);
@@ -326,7 +340,7 @@ export default function NewApplicationPage() {
           description="Start with the student. A student already on record keeps one record with all their applications."
         />
         <div className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
-          <StudentDetailsStep initial={draft ?? undefined} busy={creating} error={error} allowStudentWithoutApplication
+          <StudentDetailsStep initial={draft ?? undefined} busy={creating} error={error} allowStudentWithoutApplication offerInvite={role !== "agent"}
             onContinue={(student, existing) => void continueFromStudent(student, existing)}
             cancel={<Link to={paths.list} className={secondary}>Cancel</Link>} />
         </div>

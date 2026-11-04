@@ -5,7 +5,7 @@ import SearchPick, { type PickOption } from "@/pages/admin/components/SearchPick
 import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import AddStudentRecordDialog, { type AddStudentRecordValue } from "@/pages/admin/components/AddStudentRecordDialog";
 import StudentDetailsStep, { type StudentDraft } from "@/pages/agency/components/StudentDetailsStep";
-import { activateAgent, listBusinesses, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
+import { activateAgent, listBusinesses, sendStudentInvitation, setBusinessStatus, type BusinessStatus } from "@/pages/admin/lib/businessData";
 import { listAgentsOfBusiness, saveStudent, type BusinessAgentOption, type StudentMatch } from "@/pages/agency/lib/portalApplications";
 
 type Business = { id: string; name: string; status: BusinessStatus };
@@ -74,6 +74,11 @@ export default function AddStudentDialog({ open, onClose, onAdded }: { open: boo
         notes.push(`${agent.name} was activated.`);
       }
       const saved = await saveStudent({ agentId: agent.id, fullName: draft.fullName, firstName: draft.firstName, lastName: draft.lastName, email: draft.email, mobile: draft.mobile, dateOfBirth: draft.dateOfBirth, passportNumber: draft.passportNumber });
+      if (!saved.reused && draft.invite) {
+        // The sign-in invitation goes to the email on the record; a failure here leaves the student added (resend from Students).
+        try { notes.push(await sendStudentInvitation({ id: saved.id, email: saved.email || draft.email, name: saved.name || draft.fullName, agencyId: saved.businessId })); }
+        catch (e) { notes.push(`The sign-in invitation was not sent${e instanceof Error && e.message ? `: ${e.message}` : "."} Send it from the student's row.`); }
+      }
       push([saved.reused ? `${saved.name || draft.email} is already on record, so that record is kept.` : `${draft.fullName || draft.email} added to ${agent.name}.`, ...notes].join(" "));
       onAdded?.();
       onClose();
@@ -133,7 +138,7 @@ export default function AddStudentDialog({ open, onClose, onAdded }: { open: boo
         {/* Student */}
         {ready ? (
           <div className="border-t border-background-200 pt-5">
-            <StudentDetailsStep askName busy={busy} error={error} submitLabel="Add student"
+            <StudentDetailsStep askName offerInvite busy={busy} error={error} submitLabel="Add student"
               description="Name, email and mobile. Email and mobile must be new: a student already on record with either cannot be added again. When an application is started, the name read from the passport replaces the one typed here."
               onContinue={(draft, existing) => void finish(draft, existing)}
               cancel={<Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>} />

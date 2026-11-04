@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { listAgencyMembers, ROLE_LABELS, formatDate, type AgencyMemberRow } from "@/pages/agency/lib/portalData";
 import { listApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
@@ -178,6 +178,7 @@ export default function AgencyWorkspacePage() {
       ].filter((d) => d.value)
     : [];
 
+  if (role === "student") return <Navigate to="/agency/applications" replace />;
   return (
     <div className="mx-auto max-w-5xl">
       {/* Business profile */}

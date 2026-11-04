@@ -41,15 +41,18 @@ export default function PortalApplicationsPage() {
   }, [load]);
 
   const isAgentOnly = role === "agent";
+  const isStudent = role === "student";
 
   return (
     <div>
       <SubmittedBanner />
       <PageHeading
-        eyebrow="Applications"
-        title="Student applications"
+        eyebrow={isStudent ? "My applications" : "Applications"}
+        title={isStudent ? "Your applications" : "Student applications"}
         description={
-          isAgentOnly
+          isStudent
+            ? `Your applications with ${agency?.name ?? "your agency"}. Open one to upload documents and fill in the form, or start a new one.`
+            : isAgentOnly
             ? "Applications assigned to you. You only ever see your own students — never another agent's."
             : `Every application belonging to ${agency?.name ?? "your agency"}, with filtering by agent, course, intake and status.`
         }
@@ -70,7 +73,7 @@ export default function PortalApplicationsPage() {
           loading={loading}
           error={error}
           onRetry={() => void load()}
-          agents={isAgentOnly ? undefined : agents.map((a) => ({ id: a.profileId, name: a.fullName }))}
+          agents={isAgentOnly || isStudent ? undefined : agents.map((a) => ({ id: a.profileId, name: a.fullName }))}
           emptyAction={
             <Link
               to="/agency/applications/new"

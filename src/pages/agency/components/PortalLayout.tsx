@@ -18,6 +18,12 @@ const AGENCY_NAV: NavEntry[] = [
   { to: "/agency/documents", label: "Documents", icon: "ri-folder-3-line" },
 ];
 
+// A student sees their own applications and documents only.
+const STUDENT_NAV: NavEntry[] = [
+  { to: "/agency/applications", label: "My applications", icon: "ri-file-list-3-line", end: true },
+  { to: "/agency/documents", label: "My documents", icon: "ri-folder-3-line" },
+];
+
 const SLIT_NAV: NavEntry[] = [
   { to: "/agency/dashboard", label: "Dashboard", icon: "ri-dashboard-3-line" },
   { to: "/agency/agencies", label: "Agencies", icon: "ri-building-2-line" },
@@ -86,9 +92,10 @@ export default function PortalLayout() {
 
   const displayName = profile?.fullName?.trim() || authUser?.name || "User";
   const isSlit = role === "slit_admin";
-  const nav = isSlit ? SLIT_NAV : role === "agency_admin" ? [...AGENCY_NAV, { to: "/agency/users", label: selectedScope?.tenantId ? "Institution agents" : "Agents", icon: "ri-group-line" }] : AGENCY_NAV;
-  const crumbs = buildCrumbs(location.pathname);
-  const workspaceName = isSlit ? selectedScope?.tenantId ? selectedScope.name : "SLIT Administration" : agency?.name || "Agency";
+  const isStudent = role === "student";
+  const nav = isSlit ? SLIT_NAV : isStudent ? STUDENT_NAV : role === "agency_admin" ? [...AGENCY_NAV, { to: "/agency/users", label: selectedScope?.tenantId ? "Institution agents" : "Agents", icon: "ri-group-line" }] : AGENCY_NAV;
+  const crumbs = buildCrumbs(location.pathname).map((crumb, index) => (index === 0 && isStudent ? { ...crumb, label: "Student Portal" } : crumb));
+  const workspaceName = isSlit ? selectedScope?.tenantId ? selectedScope.name : "SLIT Administration" : isStudent ? "My applications" : agency?.name || "Agency";
 
   const handleSignOut = async () => {
     try { await signOut(); navigate("/login"); }
@@ -103,7 +110,7 @@ export default function PortalLayout() {
         </span>
         <div className="leading-tight">
           <p className="font-heading text-sm font-bold text-foreground-950">Skyline</p>
-          <p className="font-label text-[11px] uppercase tracking-wide text-foreground-500">Agency Portal</p>
+          <p className="font-label text-[11px] uppercase tracking-wide text-foreground-500">{isStudent ? "Student Portal" : "Agency Portal"}</p>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">

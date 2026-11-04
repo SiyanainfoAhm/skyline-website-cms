@@ -3,6 +3,19 @@ import { invokePortalUsers } from "@/pages/agency/lib/portalData";
 import { portalPasswordResetUrl } from "@/pages/agency/lib/portalAuthContext";
 
 /**
+ * Emails a student their sign-in invitation: the waiting one again when there is one, otherwise a new one. The email
+ * and name come from the student record (the database checks them). Returns the message to show.
+ */
+export async function sendStudentInvitation(student: { id: string; email: string; name: string; agencyId: string; login?: StudentLogin }): Promise<string> {
+  if (!student.email) throw new Error("Add the student's email before inviting them to sign in.");
+  if (student.login?.status === "active") return `${student.name || student.email} can already sign in.`;
+  const data = student.login?.invitationId
+    ? await invokePortalUsers({ action: "resend", invitationId: student.login.invitationId, redirectTo: portalPasswordResetUrl() })
+    : await invokePortalUsers({ action: "invite", role: "student", studentId: student.id, email: student.email, name: student.name || student.email, agencyId: student.agencyId, redirectTo: portalPasswordResetUrl() });
+  return data.warning ? String(data.warning) : `Sign-in invitation sent to ${student.email}.`;
+}
+
+/**
  * Sends an Invited agent their sign-in invitation again: the waiting one when there is one, otherwise a new one (the
  * first was never sent, or it expired or was withdrawn). Returns the message to show.
  */
@@ -72,6 +85,27 @@ export interface ApplicationRow {
 /** Migration 116: students per student status (the search and business/agent filters apply; the status tab does not). */
 export interface StudentCounts { all: number; active: number; inactive: number }
 
+/** A student's sign-in (migration 118): none, invited (expired after 7 days), active, or disabled. */
+export interface StudentLogin {
+  status: "none" | "invited" | "expired" | "active" | "disabled";
+  invitationId: string | null;
+  invitedAt: string | null;
+  expiresAt: string | null;
+  profileId: string | null;
+  email: string | null;
+}
+
+/** "can sign in", "invited, not accepted yet", "invitation expired", "sign-in disabled" or "no sign-in yet". */
+export function studentLoginLabel(login: StudentLogin | undefined): string {
+  switch (login?.status) {
+    case "active": return "can sign in";
+    case "invited": return "invited, not accepted yet";
+    case "expired": return "invitation expired";
+    case "disabled": return "sign-in disabled";
+    default: return "no sign-in yet";
+  }
+}
+
 export interface StudentRow {
   id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string; createdAt: string; lastUpdated: string | null;
   agencyId: string; businessId: string; businessName: string; agentId: string | null; agentName: string;
@@ -81,6 +115,8 @@ export interface StudentRow {
   /** Migration 107: nationality and each application of the student (absent on older databases). */
   nationality?: string;
   applicationRows?: StudentApplication[];
+  /** Migration 118: whether the student can sign in (absent on older databases). */
+  login?: StudentLogin;
   /** Migration 112: Active, or Inactive (Disabled: every application of the student is locked). */
   status?: "Active" | "Inactive";
 }
@@ -100,6 +136,7 @@ export interface StudentDetail {
   business: { id: string; name: string; status: BusinessStatus }; agencyId: string;
   agent: null | { id: string; name: string; email: string };
   applications: ApplicationRow[];
+  login?: StudentLogin;
 }
 
 async function call<T>(fn: string, params: Record<string, unknown>, fallback: string): Promise<T> {

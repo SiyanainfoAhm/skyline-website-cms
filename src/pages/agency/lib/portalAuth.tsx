@@ -67,6 +67,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const identitySequence = useRef(0);
   const [authUser, setAuthUser] = useState<{ id: string; email: string; name: string } | null>(null);
   const [role, setRole] = useState<PortalRole | null>(null);
+  const [studentId, setStudentId] = useState<string | null>(null);
   const [profile, setProfile] = useState<PortalProfile | null>(null);
   const [agency, setAgency] = useState<PortalAgency | null>(null);
   const [membership, setMembership] = useState<PortalMembership | null>(null);
@@ -81,7 +82,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setScopes([]);
     setPortalScope(null);
     setSelectedScope(null);
-    setRole(null);
+    setRole(null); setStudentId(null);
     setProfile(null);
     setAgency(null);
     setMembership(null);
@@ -120,13 +121,13 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         if (!selected && available.length === 0 && !["active", "org_admin"].includes(accessState)) throw new Error(portalAccessMessage(accessState));
         if (!selected) {
           setPortalScope({ key: "denied", tenantId: null, name: "Unavailable", domain: "unavailable.invalid", userId: u.id });
-          setRole(null); setProfile(null); setAgency(null); setMembership(null); setSelectedScope(null);
+          setRole(null); setStudentId(null); setProfile(null); setAgency(null); setMembership(null); setSelectedScope(null);
           throw new Error("The selected institution is no longer authorized. Choose an available institution.");
         }
         setPortalScope(selected);
         const { data, error } = await supabase.rpc("portal_identity");
         if (error) throw new Error(error.message);
-        const identity = (data ?? {}) as { role?: PortalRole | null; profile_id?: string | null; agency_id?: string | null };
+        const identity = (data ?? {}) as { role?: PortalRole | null; profile_id?: string | null; agency_id?: string | null; student_id?: string | null };
         if (!identity.role) throw new Error(accessState === "active" || accessState === "org_admin" ? "Access to this institution is not granted." : portalAccessMessage(accessState));
         const [p, a, m] = await Promise.all([
           identity.profile_id ? supabase.from("portal_profiles").select("id,full_name,email,phone,job_title,status").eq("id", identity.profile_id).maybeSingle() : Promise.resolve({data:null,error:null}),
@@ -136,14 +137,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         if (sequence !== identitySequence.current) return;
         if (p.error || a.error || m.error) throw new Error("Could not load authorized portal details.");
         setRole(identity.role);
+        setStudentId(identity.role === "student" && identity.student_id ? String(identity.student_id) : null);
         setProfile(p.data ? mapProfile(p.data as Record<string, unknown>) : null);
         setAgency(a.data ? mapAgency(a.data as Record<string, unknown>) : null);
-        setMembership(m.data ? { role: m.data.role === "agency_admin" ? "agency_admin" : "agent", status: String(m.data.status) } : null);
+        setMembership(m.data ? { role: m.data.role === "agency_admin" ? "agency_admin" : m.data.role === "student" ? "student" : "agent", status: String(m.data.status) } : null);
         setSelectedScope(selected);
         try { sessionStorage.setItem("skyline-portal-scope:" + u.id, selected.key); } catch { /* storage unavailable */ }
       } catch (e) {
         if (sequence !== identitySequence.current) return;
-        setRole(null); setProfile(null); setAgency(null); setMembership(null);
+        setRole(null); setStudentId(null); setProfile(null); setAgency(null); setMembership(null);
         setIdentityError(e instanceof Error ? e.message : "Could not verify institution access.");
       } finally {
         if (sequence === identitySequence.current) { setIdentityLoading(false); identityRef.current.pending = null; }
@@ -156,7 +158,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     if (!authUser || !scopes.some((option) => option.key === key)) return;
     try {
       await flushPortalBeforeSwitch();
-      setRole(null); setProfile(null); setAgency(null); setMembership(null);
+      setRole(null); setStudentId(null); setProfile(null); setAgency(null); setMembership(null);
       await resolveIdentity(authUser, key, true);
       setScopeEpoch((epoch) => epoch + 1);
       navigate("/agency/dashboard", { replace: true });
@@ -285,6 +287,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       authUser,
       scopes, selectedScope, scopeEpoch, selectScope,
       role,
+      studentId,
       profile,
       agency,
       membership,
@@ -302,6 +305,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       authUser,
       scopes, selectedScope, scopeEpoch, selectScope,
       role,
+      studentId,
       profile,
       agency,
       membership,

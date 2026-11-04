@@ -165,12 +165,14 @@ Deno.serve(async (req) => {
         const nameCheck = cleanName(parsed.name);
         if (!nameCheck.ok) return json({ error: nameCheck.error }, 400);
         // For an agency admin the database ignores any agencyId other than their own membership's agency.
+        // A student invitation (role student, studentId) takes the email and name from the student record.
         const { data, error } = await admin.rpc("portal_invitation_create", {
           p_actor: caller.id,
           p_agency: optionalText("agencyId"),
           p_email: emailCheck.value,
           p_name: nameCheck.value,
           p_role: String(parsed.role ?? "agent"),
+          p_student: optionalText("studentId"),
         });
         if (error) return rpcFailure(error);
         return respondDelivered(data);

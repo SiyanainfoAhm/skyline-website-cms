@@ -15,6 +15,8 @@ export interface StudentDraft {
   /** Asked only by Students > Add student (no passport yet); the passport replaces them when read. */
   firstName?: string;
   lastName?: string;
+  /** Email the student a sign-in invitation once their record is created (administrators only). */
+  invite?: boolean;
 }
 
 const EMPTY: StudentDraft = { fullName: "", email: "", mobile: "", dateOfBirth: "", passportNumber: "" };
@@ -25,7 +27,7 @@ const INPUT = "w-full rounded-md border border-background-300 bg-background-50 p
  * stops the step with a message; nothing is created. With `allowStudentWithoutApplication` (New application), one student
  * found by email or mobile is shown in a popup; once confirmed, the application continues for that student.
  */
-export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false, askName = false }: {
+export default function StudentDetailsStep({ initial, busy, error, submitLabel = "Next", onContinue, cancel, description, allowStudentWithoutApplication = false, askName = false, offerInvite = false }: {
   initial?: Partial<StudentDraft>;
   busy: boolean;
   error?: string;
@@ -37,6 +39,8 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   allowStudentWithoutApplication?: boolean;
   /** Also asks first and last name (both required). */
   askName?: boolean;
+  /** Offers to email the student a sign-in invitation (ticked by default). */
+  offerInvite?: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [errors, setErrors] = useState<{ email?: string; mobile?: string; firstName?: string; lastName?: string }>({});
@@ -49,6 +53,7 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
   const submit = async () => {
     const data = new FormData(formRef.current ?? undefined);
     const draft: StudentDraft = { ...EMPTY, email: String(data.get("email") ?? "").trim().toLowerCase(), mobile: String(data.get("mobile") ?? "").trim() };
+    if (offerInvite) draft.invite = data.get("invite") === "on";
     if (askName) {
       draft.firstName = String(data.get("firstName") ?? "").replace(/\s+/g, " ").trim();
       draft.lastName = String(data.get("lastName") ?? "").replace(/\s+/g, " ").trim();
@@ -157,6 +162,13 @@ export default function StudentDetailsStep({ initial, busy, error, submitLabel =
           </div>
         ) : null}
       </Modal>
+
+      {offerInvite ? (
+        <label className="mt-4 flex items-start gap-2 text-sm text-foreground-800">
+          <input type="checkbox" name="invite" className="mt-0.5" defaultChecked={initial?.invite ?? true} />
+          <span>Email the student a sign-in invitation so they can see their application, upload documents and fill in the form themselves.</span>
+        </label>
+      ) : null}
 
       {error || checkError ? <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error || checkError}</p> : null}
 

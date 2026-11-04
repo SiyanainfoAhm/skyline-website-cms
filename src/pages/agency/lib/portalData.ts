@@ -34,6 +34,7 @@ export const ROLE_LABELS: Record<string, string> = {
   slit_admin: "SLIT Admin",
   agency_admin: "Agency Admin",
   agent: "Agent",
+  student: "Student",
 };
 
 export function statusMeta(status: string) {
@@ -63,7 +64,7 @@ export interface PortalUserRow {
   email: string;
   phone: string;
   status: string;
-  role: "agency_admin" | "agent" | null;
+  role: "agency_admin" | "agent" | "student" | null;
   agencyId: string | null;
   agencyName: string;
 }
@@ -308,7 +309,7 @@ export async function listPortalUsers(): Promise<PortalUserRow[]> {
     .select("id, auth_user_id, full_name, email, phone, status, agency_memberships(role, status, agency_id, agencies(name))")
     .order("full_name", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => {
+  return (data ?? []).map((row): PortalUserRow => {
     const r = row as Record<string, unknown>;
     // PostgREST returns a single object (not an array) because agency_memberships.user_id is unique; accept both shapes.
     const embedded = r.agency_memberships as Record<string, unknown> | Array<Record<string, unknown>> | null | undefined;
@@ -321,11 +322,12 @@ export async function listPortalUsers(): Promise<PortalUserRow[]> {
       email: String(r.email ?? ""),
       phone: String(r.phone ?? ""),
       status: String(r.status ?? "Active"),
-      role: m ? (m.role === "agency_admin" ? "agency_admin" : "agent") : null,
+      role: m ? (m.role === "agency_admin" ? "agency_admin" : m.role === "student" ? "student" : "agent") : null,
       agencyId: m ? String(m.agency_id ?? "") || null : null,
       agencyName: String(agency?.name ?? ""),
     };
-  });
+  // Students sign in too, but they are managed from the Students list, not as portal users.
+  }).filter((row) => row.role !== "student");
 }
 
 /** Totals for the signed-in user's authorized scope (RLS decides the rows). */

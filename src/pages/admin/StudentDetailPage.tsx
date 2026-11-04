@@ -1,26 +1,44 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Card, PageHeader } from "@/pages/admin/components/ui";
+import { Button, Card, PageHeader } from "@/pages/admin/components/ui";
+import { useToast } from "@/pages/admin/components/toastContext";
+import StudentLoginCell from "@/pages/admin/components/StudentLoginCell";
 import { AgencyStatusBadge, ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import ApplicationsList from "@/pages/admin/components/ApplicationsList";
 import { ListMessage } from "@/pages/admin/components/ListControls";
-import { getStudent, type StudentDetail } from "@/pages/admin/lib/businessData";
+import { getStudent, sendStudentInvitation, studentLoginLabel, type StudentDetail } from "@/pages/admin/lib/businessData";
 import { formatDate } from "@/pages/agency/lib/portalData";
 
 /** Agencies > Students > {name}: every application this student has, across statuses. */
 export default function StudentDetailPage() {
   const { id = "" } = useParams();
+  const { push } = useToast();
   const [student, setStudent] = useState<StudentDetail | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [error, setError] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     let active = true;
-    setState("loading");
+    if (reload === 0) setState("loading");
     getStudent(id).then((s) => { if (active) { setStudent(s); setState(s ? "ready" : "missing"); } })
       .catch((e) => { if (active) { setError(e instanceof Error ? e.message : "We could not load this student."); setState("error"); } });
     return () => { active = false; };
-  }, [id]);
+  }, [id, reload]);
+
+  const invite = async () => {
+    if (!student) return;
+    setInviting(true);
+    try {
+      push(await sendStudentInvitation({ id: student.id, email: student.email, name: student.name, agencyId: student.agencyId, login: student.login }));
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not send the invitation.", "error");
+    } finally {
+      setInviting(false);
+    }
+  };
 
   if (state === "loading") return <p className="p-6 text-sm text-foreground-600">Loading student&hellip;</p>;
   if (!student) {
@@ -44,7 +62,12 @@ export default function StudentDetailPage() {
         <span className="text-foreground-900">Student</span>
       </nav>
       <PageHeader title={student.name || "Unnamed student"}
-        description={`Student of ${student.business.name}${student.agent ? `, looked after by ${student.agent.name}` : ""}.`} />
+        description={`Student of ${student.business.name}${student.agent ? `, looked after by ${student.agent.name}` : ""}. Sign-in: ${studentLoginLabel(student.login)}.`}
+        actions={student.login?.status === "active" ? undefined : (
+          <Button icon="ri-mail-send-line" disabled={inviting || !student.email} onClick={() => void invite()}>
+            {inviting ? "Sending…" : student.login?.invitationId ? "Resend invite" : "Invite to sign in"}
+          </Button>
+        )} />
 
       <div className="flex flex-wrap items-start gap-5">
         <Card className="min-w-0 flex-[999_1_560px]">
@@ -63,6 +86,7 @@ export default function StudentDetailPage() {
             <Row label="Date of birth" value={student.dateOfBirth ? formatDate(student.dateOfBirth) : ""} />
             <Row label="Passport number" value={student.passportNumber} />
             <Row label="Nationality" value={student.nationality} />
+            <div><dt className="text-xs text-foreground-500">Sign-in</dt><dd><StudentLoginCell login={student.login} email={student.email} busy={inviting} onInvite={() => void invite()} /></dd></div>
             <div><dt className="text-xs text-foreground-500">Business</dt><dd className="flex flex-wrap items-center gap-2"><Link to={`/admin/businesses/${student.business.id}`} className="text-foreground-900 hover:text-primary-700">{student.business.name}</Link><AgencyStatusBadge status={student.business.status} /></dd></div>
             <div><dt className="text-xs text-foreground-500">Agent</dt><dd>{student.agent ? <Link to={`/admin/agents/${student.agent.id}`} className="text-foreground-900 hover:text-primary-700">{student.agent.name}</Link> : <span className="text-foreground-500">Not assigned</span>}</dd></div>
             <Row label="First recorded" value={formatDate(student.createdAt)} />
