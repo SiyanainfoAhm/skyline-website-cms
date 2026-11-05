@@ -6,6 +6,8 @@ import { PhoneInput } from "@/components/feature/applicationInputs";
 import { formatAbn, mobileProblem } from "@/lib/enrolForm";
 import { readSignUpBusiness, rememberSignUpBusiness } from "@/lib/authProviders";
 import AgentBusinessStep, { type ChosenBusiness } from "@/pages/login/AgentBusinessStep";
+import ContactConflictPopup from "@/pages/login/ContactConflictPopup";
+import { isContactConflict } from "@/lib/enrolForm";
 
 /**
  * After an agent signs up with Google: the business they confirmed before leaving (or, when they started from the Sign in
@@ -23,6 +25,7 @@ export default function CompleteAgentProfile({ user, onDone }: { user: User; onD
   const [contact, setContact] = useState(googleName);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState("");
 
   if (!business) {
     return (
@@ -47,7 +50,16 @@ export default function CompleteAgentProfile({ user, onDone }: { user: User; onD
       p_input: { abn: business.abn, businessName: business.businessName, contactName: contact.trim(), email: emailVerified ? String(user.email) : "", phone },
     });
     setBusy(false);
-    if (error) { setErrors({ form: error.message || "We could not submit your application. Please try again." }); return; }
+    if (error) {
+      const message = error.message || "We could not submit your application. Please try again.";
+      if (isContactConflict(message)) {
+        setConflict(message);
+        // The email comes from Google and cannot be changed here: an email clash means signing up with another account.
+        setErrors(/phone/i.test(message) && !/email/i.test(message) ? { phone: "Already linked to another company." }
+          : { form: "Your Google email is already linked to another company. Sign out and use a different Google account, or register with a company email instead." });
+      } else setErrors({ form: message });
+      return;
+    }
     rememberSignUpBusiness(null);
     onDone(business.businessName);
   };
@@ -83,6 +95,7 @@ export default function CompleteAgentProfile({ user, onDone }: { user: User; onD
           By submitting you agree to the <a href="/forms-policies" target="_blank" rel="noopener" className="font-medium text-primary-700 hover:underline">terms</a> and <a href="/forms-policies" target="_blank" rel="noopener" className="font-medium text-primary-700 hover:underline">privacy policy</a>.
         </p>
       </div>
+      <ContactConflictPopup message={conflict} onClose={() => setConflict("")} />
     </form>
   );
 }

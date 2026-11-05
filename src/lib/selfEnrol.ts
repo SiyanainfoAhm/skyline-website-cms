@@ -32,6 +32,11 @@ async function invoke(body: Record<string, unknown>): Promise<Record<string, unk
   return (data ?? {}) as Record<string, unknown>;
 }
 
+/** Throws the server's message when the ABN is already in the system (used when the business is entered by hand). */
+export async function checkAbnFree(abn: string): Promise<void> {
+  await invoke({ action: "check_abn", abn });
+}
+
 export async function lookupAbn(abn: string): Promise<AbnDetails> {
   const data = await invoke({ action: "lookup_abn", abn });
   const business = data.business as AbnDetails | undefined;

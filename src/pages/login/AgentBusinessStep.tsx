@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { abnProblem, formatAbn } from "@/lib/enrolForm";
-import { lookupAbn, type AbnDetails } from "@/lib/selfEnrol";
+import { checkAbnFree, lookupAbn, type AbnDetails } from "@/lib/selfEnrol";
 
 /** The business an agent chose: from ABN Lookup, or typed by hand when the lookup is unavailable. */
 export interface ChosenBusiness { abn: string; businessName: string; details: AbnDetails | null }
@@ -56,6 +56,9 @@ export default function AgentBusinessStep({ initial, onChosen }: { initial: Chos
   const [error, setError] = useState("");
   const [manual, setManual] = useState(Boolean(initial && !initial.details));
   const [manualName, setManualName] = useState(initial && !initial.details ? initial.businessName : "");
+  const [checking, setChecking] = useState(false);
+  // The ABN is already a business here: nothing else on this step applies, so it is shown on its own.
+  const taken = /already exists in our system/i.test(error);
 
   const search = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -79,11 +82,19 @@ export default function AgentBusinessStep({ initial, onChosen }: { initial: Chos
     onChosen({ abn: abn.replace(/\s/g, ""), businessName: (tradingName || found.legalName).trim(), details: found });
   };
 
-  const submitManual = (event: FormEvent) => {
+  const submitManual = async (event: FormEvent) => {
     event.preventDefault();
     const problem = abnProblem(abn);
     if (problem) { setError(problem); return; }
     if (manualName.trim().length < 2) { setError("Enter the agency or company name."); return; }
+    setChecking(true); setError("");
+    try { await checkAbnFree(abn); }
+    catch (e) {
+      const message = e instanceof Error ? e.message : "";
+      // Only a definite "already exists" stops a hand-entered business; SLIT still checks the ABN in its review.
+      if (/already exists in our system/i.test(message)) { setError(message); setChecking(false); return; }
+    }
+    setChecking(false);
     onChosen({ abn: abn.replace(/\s/g, ""), businessName: manualName.trim(), details: null });
   };
 
@@ -91,6 +102,11 @@ export default function AgentBusinessStep({ initial, onChosen }: { initial: Chos
     <div>
       <p className="text-sm text-foreground-600">Enter your ABN and we'll fill in the rest from the Australian Business Register.</p>
       <form onSubmit={(e) => void (manual ? submitManual(e) : search(e))} noValidate className="mt-4 space-y-4">
+        {taken ? (
+          <div className="flex items-start gap-2 rounded-md border border-primary-200 bg-primary-50 px-3 py-2.5 text-[13px] text-primary-900" role="alert">
+            <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>{error}</span>
+          </div>
+        ) : null}
         <Field label="ABN" required>
           <div className="flex gap-2">
             <TextInput inputMode="numeric" value={abn} autoComplete="off" placeholder="12 345 678 901" aria-invalid={Boolean(error)}
@@ -104,15 +120,15 @@ export default function AgentBusinessStep({ initial, onChosen }: { initial: Chos
             <Field label="Agency / company name" required hint="As registered against this ABN. SLIT checks it when reviewing your application.">
               <TextInput value={manualName} onChange={(e) => { setManualName(e.target.value); setError(""); }} autoComplete="organization" />
             </Field>
-            {error ? <p className="text-xs text-primary-700" role="alert">{error}</p> : null}
-            <Button type="submit" className="w-full">Continue</Button>
+            {error && !taken ? <p className="text-xs text-primary-700" role="alert">{error}</p> : null}
+            <Button type="submit" className="w-full" disabled={checking}>{checking ? "Checking…" : "Continue"}</Button>
             <button type="button" onClick={() => { setManual(false); setError(""); }} className="w-full cursor-pointer text-center text-sm font-medium text-primary-700 hover:text-primary-800">
               Search ABN Lookup instead
             </button>
           </>
         ) : (
           <>
-            {error ? <p className="text-xs text-primary-700" role="alert">{error}</p> : null}
+            {error && !taken ? <p className="text-xs text-primary-700" role="alert">{error}</p> : null}
             {found ? (
               <>
                 <AbnCard details={found} />

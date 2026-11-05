@@ -685,3 +685,11 @@ test("enrol: only Google, Facebook and phone accounts are offered the student de
   assert.equal(isSelfSignUpAccount(null), false);
 });
 
+test("enrol: the agent's email or phone already used by another company is shown as a popup, other errors are not", async () => {
+  const { isContactConflict } = await import("../src/lib/enrolForm.ts");
+  assert.equal(isContactConflict("The email you entered is already linked to another company. Please enter a different email, since this will be the admin account for your company."), true);
+  assert.equal(isContactConflict("The phone number you entered is already linked to another company. Please enter a different phone number, since this will be the admin account for your company."), true);
+  assert.equal(isContactConflict("The ABN you entered already exists in our system. Please contact Skyline to get registered."), false);
+  assert.equal(isContactConflict("Enter a phone number."), false);
+});
+

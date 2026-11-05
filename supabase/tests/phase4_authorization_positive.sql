@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(292);
+select plan(298);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -511,7 +511,7 @@ select lives_ok($$select public.portal_self_register('agent','{"businessName":"S
 select is((select status||':'||(registration_requested_at is not null)::text||':'||(registration_reviewed_at is null)::text from public.agencies where registration_number='85165345717'),'Inactive:true:true','the business waits inactive and unreviewed');
 select is((select role from public.agency_invitations where email='reg.istrar@example.test'),'agency_admin','the registrant is invited as its administrator');
 select is((select role||':'||status||':'||(profile_id is null)::text from public.agents where email='reg.istrar@example.test'),'agency_admin:Active:true','the registrant is listed as the business''s agent straight away (Invited until they sign in)');
-select throws_ok($$select public.portal_self_register('agent','{"businessName":"Again","abn":"85 165 345 717","contactName":"Some One","email":"some.one@example.test","phone":"0398765432"}')$$,'23505','A business with this ABN is already registered. Ask its administrator to invite you, or contact SLIT Administration.','the same ABN cannot register twice, and the message says so');
+select throws_ok($$select public.portal_self_register('agent','{"businessName":"Again","abn":"85 165 345 717","contactName":"Some One","email":"some.one@example.test","phone":"0398765432"}')$$,'23505','The ABN you entered already exists in our system. Please contact Skyline to get registered.','the same ABN cannot register twice, and the message says so');
 set local role authenticated;
 set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
 select is((select count(*)::int from jsonb_array_elements(public.admin_registration_list()) r where r->>'abn'='85165345717'),1,'the CMS lists the pending registration');
@@ -582,6 +582,17 @@ set local role authenticated;
 set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
 select is((select r->>'status' from jsonb_array_elements(public.admin_business_agents('13000000-0000-0000-0000-000000000001')) r where r->>'email'='no.password@example.test'),'Active','an approved agent without a password yet is Active');
 select is((select r->>'status' from jsonb_array_elements(public.admin_business_agents('13000000-0000-0000-0000-000000000090')) r where r->>'email'='waiting.admin@example.test'),'Invited','an agent of a business waiting for approval is Invited');
+-- Agent sign-up checks (20261105140000): the ABN first, then the email and phone against agents of other companies.
+reset role;
+select is(public.portal_abn_registered('85 165 345 717'),true,'a registered ABN is found, spaces or not');
+select is(public.portal_abn_registered('33102417032'),false,'a new ABN is not');
+select throws_ok($$select public.portal_self_register('agent','{"businessName":"Clash Email","abn":"33102417032","contactName":"Some One","email":"reg.istrar@example.test","phone":"0390000001"}')$$,'23505',
+ 'The email you entered is already linked to another company. Please enter a different email, since this will be the admin account for your company.','an email already used by another company''s agent is refused, naming the email');
+select throws_ok($$select public.portal_self_register('agent','{"businessName":"Clash Phone","abn":"33102417032","contactName":"Some One","email":"fresh.one@example.test","phone":"+61 3 9876 5432"}')$$,'23505',
+ 'The phone number you entered is already linked to another company. Please enter a different phone number, since this will be the admin account for your company.','a phone already used by another company''s agent is refused, in any spelling');
+select throws_ok($$select public.portal_self_register('agent','{"businessName":"Clash Both","abn":"33102417032","contactName":"Some One","email":"reg.istrar@example.test","phone":"03 9876 5432"}')$$,'23505',
+ 'The email and phone number you entered are already linked to another company. Please enter a different email and phone number, since this will be the admin account for your company.','both matching are named together');
+select lives_ok($$select public.portal_self_register('agent','{"businessName":"Clean Agency","abn":"33102417064","contactName":"Clean Contact","email":"clean.contact@example.test","phone":"0390000002"}')$$,'a new ABN with a new email and phone registers');
 reset role;
 select * from finish();
 rollback;

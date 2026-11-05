@@ -5,6 +5,8 @@ import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import QuickSignIn from "@/pages/login/QuickSignIn";
 import AgentBusinessStep, { type ChosenBusiness } from "@/pages/login/AgentBusinessStep";
+import ContactConflictPopup from "@/pages/login/ContactConflictPopup";
+import { isContactConflict } from "@/lib/enrolForm";
 import { rememberSignUpBusiness } from "@/lib/authProviders";
 import {
   EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
@@ -230,6 +232,7 @@ function QuickStart({ onSignedIn, intent }: { onSignedIn: (userId: string) => vo
 function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone: (r: EnrolResult) => void; onSignedIn: (userId: string) => void }) {
   // First the business (ABN Lookup, confirmed by the agent), then how they sign up: Google / Facebook / phone or company email.
   const [business, setBusiness] = useState<ChosenBusiness | null>(null);
+  const [conflict, setConflict] = useState("");
   const [form, setForm] = useState<AgentEnrolForm>(EMPTY_AGENT_ENROL);
   const [errors, setErrors] = useState<EnrolErrors<AgentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
@@ -251,7 +254,13 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
     if (Object.keys(checked).length) return;
     setBusy(true);
     try { const result = await enrolAgent(current, website); rememberSignUpBusiness(null); onDone(result); }
-    catch (e) { setErrors({ form: e instanceof Error ? e.message : "We could not submit your application. Please try again." }); }
+    catch (e) {
+      const message = e instanceof Error ? e.message : "We could not submit your application. Please try again.";
+      if (isContactConflict(message)) {
+        setConflict(message);
+        setErrors({ email: /email/i.test(message) ? "Already linked to another company." : undefined, phone: /phone/i.test(message) ? "Already linked to another company." : undefined });
+      } else setErrors({ form: message });
+    }
     finally { setBusy(false); }
   };
 
@@ -299,6 +308,7 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
         <FormError text={errors.form} />
         <Button type="submit" className="w-full" disabled={busy}>{busy ? "Submitting…" : "Submit application"}</Button>
       </div>
+      <ContactConflictPopup message={conflict} onClose={() => setConflict("")} />
     </form>
   );
 }

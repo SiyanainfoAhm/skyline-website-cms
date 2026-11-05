@@ -60,6 +60,7 @@ function safeRedirect(value: unknown): string | undefined {
 }
 
 const abnCache = new Map<string, { expires: number; business: AgencyAbnDetails }>();
+const ABN_REGISTERED = "The ABN you entered already exists in our system. Please contact Skyline to get registered.";
 // The shared phone field sends E.164 (+ country code, 8 to 15 digits in all).
 const MOBILE = /^\+[1-9]\d{7,14}$/;
 
@@ -76,17 +77,22 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
   const callerKey = await hash(req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "anonymous");
-  if (!(await withinLimit(admin, `self-register:caller:${callerKey}`, action === "lookup_abn" ? 20 : 8, 600))) {
+  if (!(await withinLimit(admin, `self-register:caller:${callerKey}`, action === "lookup_abn" || action === "check_abn" ? 20 : 8, 600))) {
     return json({ error: "Please wait a few minutes before trying again." }, 429, { "Retry-After": "600" });
   }
   // A filled honeypot field is a bot: answer as if it worked and record nothing.
   if (text("website")) return json({ ok: true, kind: text("kind"), emailSent: true, existingIdentity: false });
 
   try {
-    if (action === "lookup_abn") {
+    if (action === "lookup_abn" || action === "check_abn") {
       const abn = normalizeAbn(text("abn", 20));
       const problem = validateAbn(abn);
       if (problem) return json({ error: problem }, 400);
+      // An ABN already in the system is refused before anything else (the business registers once, through Skyline).
+      const { data: registered, error: registeredError } = await admin.rpc("portal_abn_registered", { p_abn: abn });
+      if (registeredError) return json({ error: "We could not check this ABN right now. Please try again shortly." }, 503);
+      if (registered === true) return json({ error: ABN_REGISTERED, registered: true }, 409);
+      if (action === "check_abn") return json({ registered: false });
       const cached = abnCache.get(abn);
       if (cached && cached.expires > Date.now()) return json({ business: cached.business });
       try {

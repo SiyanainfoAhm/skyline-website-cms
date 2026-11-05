@@ -139,3 +139,8 @@ export function agentEnrolPayload(form: AgentEnrolForm) {
     email: form.email.trim().toLowerCase(), phone: form.phone.trim(),
   };
 }
+
+/** True for the server's "already linked to another company" message (agent email or phone), shown as a popup. */
+export function isContactConflict(message: string): boolean {
+  return /already linked to another company/i.test(message);
+}
