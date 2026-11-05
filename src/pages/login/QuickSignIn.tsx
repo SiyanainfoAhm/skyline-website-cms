@@ -4,6 +4,9 @@ import { PhoneInput } from "@/components/feature/applicationInputs";
 import { mobileProblem } from "@/lib/enrolForm";
 import { loadAuthProviders, rememberSignUpIntent, sendPhoneCode, signInWithProvider, verifyPhoneCode, type AuthProviders, type SignUpIntent } from "@/lib/authProviders";
 
+/** Facebook and phone sign-in are not offered (owner's decision, 2026-11-05); Google is. */
+const SHOW_MORE = false;
+
 const NOT_ON: Record<"google" | "facebook" | "phone", string> = {
   google: "Google sign-in isn't switched on yet. Use your email for now, or ask SLIT Administration.",
   facebook: "Facebook sign-in isn't switched on yet. Use your email for now, or ask SLIT Administration.",
@@ -37,15 +40,19 @@ export default function QuickSignIn({ create, onSignedIn, label, intent }: { cre
       <Button type="button" variant="outline" className="w-full" disabled={Boolean(busy)} onClick={() => void oauth("google")}>
         <GoogleMark /> {busy === "google" ? "Opening Google…" : "Continue with Google"}
       </Button>
-      <Button type="button" variant="outline" className="w-full" disabled={Boolean(busy)} onClick={() => void oauth("facebook")}>
-        <i className="ri-facebook-circle-fill text-lg text-[#1877F2]" aria-hidden="true" /> {busy === "facebook" ? "Opening Facebook…" : "Continue with Facebook"}
-      </Button>
-      {phoneOpen ? <PhoneCode create={create} onSignedIn={(id) => { rememberSignUpIntent(intent ?? null); onSignedIn(id); }} onCancel={() => setPhoneOpen(false)} /> : (
-        <Button type="button" variant="outline" className="w-full" icon="ri-smartphone-line" disabled={Boolean(busy)}
-          onClick={() => { if (providers && !providers.phone) { setError(NOT_ON.phone); return; } setError(""); setPhoneOpen(true); }}>
-          Continue with phone number
-        </Button>
-      )}
+      {/* Facebook and phone sign-in are switched off for now; turning one back on is a matter of offering its button again. */}
+      {SHOW_MORE && phoneOpen ? <PhoneCode create={create} onSignedIn={(id) => { rememberSignUpIntent(intent ?? null); onSignedIn(id); }} onCancel={() => setPhoneOpen(false)} /> : null}
+      {SHOW_MORE && !phoneOpen ? (
+        <>
+          <Button type="button" variant="outline" className="w-full" disabled={Boolean(busy)} onClick={() => void oauth("facebook")}>
+            <i className="ri-facebook-circle-fill text-lg text-[#1877F2]" aria-hidden="true" /> {busy === "facebook" ? "Opening Facebook…" : "Continue with Facebook"}
+          </Button>
+          <Button type="button" variant="outline" className="w-full" icon="ri-smartphone-line" disabled={Boolean(busy)}
+            onClick={() => { if (providers && !providers.phone) { setError(NOT_ON.phone); return; } setError(""); setPhoneOpen(true); }}>
+            Continue with phone number
+          </Button>
+        </>
+      ) : null}
       {error ? <p className="text-xs text-primary-700" role="alert">{error}</p> : null}
     </div>
   );

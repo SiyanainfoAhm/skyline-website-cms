@@ -217,7 +217,7 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
 function QuickStart({ onSignedIn, intent }: { onSignedIn: (userId: string) => void; intent: "student" | "agent" }) {
   return (
     <div className="mt-6">
-      <QuickSignIn create intent={intent} label="Sign up faster" onSignedIn={onSignedIn} />
+      <QuickSignIn create intent={intent} onSignedIn={onSignedIn} />
       <div className="mt-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
         <span className="h-px flex-1 bg-background-300" />or fill in your details<span className="h-px flex-1 bg-background-300" />
       </div>
@@ -281,7 +281,7 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
         <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>Agent accounts are reviewed by our team before you can sign in.</span>
       </div>
       <div className="mt-5">
-        <QuickSignIn create intent="agent" label="Sign up with" onSignedIn={onSignedIn} />
+        <QuickSignIn create intent="agent" onSignedIn={onSignedIn} />
         <div className="mt-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
           <span className="h-px flex-1 bg-background-300" />or use your company email<span className="h-px flex-1 bg-background-300" />
         </div>

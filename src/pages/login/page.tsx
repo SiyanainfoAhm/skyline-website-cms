@@ -5,7 +5,6 @@ import { supabase } from "@/pages/admin/lib/supabase";
 import { AdminLoading, Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { resolveTenantSite } from "@/lib/tenantSite";
-import { publicSiteOrigin } from "@/lib/siteUrl";
 import { readCachedBrand, tenantBrandKey } from "@/lib/brandCache";
 import { tenantThemeStyle } from "@/lib/tenantTheme";
 import type { PortalAccessState } from "@/pages/agency/lib/applicationAccess";
@@ -44,11 +43,6 @@ async function fetchAccess(authUserId: string): Promise<AccessSummary> {
   return { cms, portal };
 }
 
-/** Where the magic link lands: this deployment's /login, which routes the new session like any other. */
-function magicLinkUrl(): string {
-  const base = __BASE_PATH__.split("/").filter(Boolean).join("/");
-  return `${publicSiteOrigin()}${base ? `/${base}` : ""}/login`;
-}
 
 type Tab = "signin" | "enroll";
 
@@ -77,7 +71,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [linkBusy, setLinkBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState(notice);
   const [choice, setChoice] = useState<{ userId: string; options: LoginDestination[] } | null>(null);
@@ -187,19 +180,6 @@ export default function LoginPage() {
     if (authError || !data.user) { setBusy(false); setError(loginErrorMessage(authError)); return; }
     await route(data.user.id);
     setBusy(false);
-  };
-
-  // A one-time sign-in link for an existing account; it never creates one (sign-up is the Enroll now tab).
-  const emailLink = async () => {
-    setError(""); setInfo("");
-    if (!email.trim()) { setError("Enter your email address first, then choose “Email me a sign-in link”."); return; }
-    setLinkBusy(true);
-    try {
-      const { error: linkError } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false, emailRedirectTo: magicLinkUrl() } });
-      if (linkError) setError(/rate|too many/i.test(linkError.message) ? "Please wait before requesting another sign-in link." : "If that email belongs to an account, a sign-in link is on its way.");
-      else setInfo("If that email belongs to an account, a sign-in link is on its way. It works once and expires soon.");
-    } catch { setError("We could not send a sign-in link. Please try again later."); }
-    finally { setLinkBusy(false); }
   };
 
   if (checking) {
@@ -340,12 +320,7 @@ export default function LoginPage() {
                   <div className="my-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
                     <span className="h-px flex-1 bg-background-300" />or<span className="h-px flex-1 bg-background-300" />
                   </div>
-                  <Button type="button" variant="outline" className="w-full" icon="ri-mail-line" disabled={linkBusy} onClick={() => void emailLink()}>
-                    {linkBusy ? "Sending…" : "Email me a sign-in link"}
-                  </Button>
-                  <div className="mt-2.5">
-                    <QuickSignIn create={false} onSignedIn={(id) => { setChecking(true); void route(id); }} />
-                  </div>
+                  <QuickSignIn create={false} onSignedIn={(id) => { setChecking(true); void route(id); }} />
 
                   <p className="mt-8 text-center text-xs text-foreground-500">
                     {enrolAllowed ? "You’ll be taken to your Student, Agent or Staff portal automatically." : "Need help signing in? Contact your administrator."}
