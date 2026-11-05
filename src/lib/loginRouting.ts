@@ -100,7 +100,8 @@ export function loginNotice(reason: string | null): string {
 
 /** Public header account control: a Dashboard link once signed in, Sign In otherwise. Both go through /login, which routes by role. */
 export function headerAccountLink(signedIn: boolean): { label: string; to: string } {
-  return signedIn ? { label: "Dashboard", to: "/login" } : { label: "Sign In", to: "/login" };
+  // One button for everyone: /login has Sign in and Enroll now (sign up) side by side.
+  return signedIn ? { label: "Dashboard", to: "/login" } : { label: "Sign in / Sign up", to: "/login" };
 }
 
 const SEEN_KEY = "skyline.session.seen";

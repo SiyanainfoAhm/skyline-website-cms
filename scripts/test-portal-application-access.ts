@@ -313,12 +313,12 @@ test("login: failures are generic, rate limits and unaccepted invitations are ex
   assert.equal(loginNotice(null), "");
 });
 
-test("header: signed-in visitors see Dashboard instead of Sign In, and the Agency Portal button is gone", () => {
-  assert.deepEqual(headerAccountLink(false), { label: "Sign In", to: "/login" });
+test("header: one button, Sign in / Sign up (Dashboard once signed in), and no Agency Portal or Enroll Now button", () => {
+  assert.deepEqual(headerAccountLink(false), { label: "Sign in / Sign up", to: "/login" });
   assert.deepEqual(headerAccountLink(true), { label: "Dashboard", to: "/login" });
   const header = readFileSync(new URL("../src/components/feature/SiteHeader.tsx", import.meta.url), "utf8");
   for (const gone of ["Agency Portal", "/agency/login", "/admin/login"]) assert.ok(!header.includes(gone), gone);
-  assert.ok(header.includes("Enroll Now"));
+  assert.ok(!header.includes("Enroll Now"), "Enroll Now is the same page as Sign in / Sign up");
 });
 
 // ---- user dialogs: pure validation, self / last-admin guards and safe server-error mapping ----
