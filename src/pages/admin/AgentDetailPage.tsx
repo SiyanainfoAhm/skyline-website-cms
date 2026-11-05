@@ -7,7 +7,7 @@ import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import ApplicationsList from "@/pages/admin/components/ApplicationsList";
 import { ListMessage } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deactivateAgent, getAgentOverview, resendInvitation, type AgentOverview } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, getAgentOverview, resendInvitation, type AgentOverview, awaitingPassword } from "@/pages/admin/lib/businessData";
 import { groupByStudent } from "@/pages/admin/lib/businessGroups";
 import { formatDate } from "@/pages/agency/lib/portalData";
 
@@ -89,7 +89,7 @@ export default function AgentDetailPage() {
         description={[agent.marn ? `MARN ${agent.marn}` : null, agent.role === "agency_admin" ? "Agency admin" : "Agent", `with ${agent.business.name}`].filter(Boolean).join(", ")}
         actions={<>
           <AgentStatusBadge status={agent.status} />
-          {agent.status === "Invited" && agent.email
+          {awaitingPassword(agent) && agent.email
             ? <Button variant="outline" icon="ri-mail-send-line" disabled={busy} onClick={() => void resend()}>{busy ? "Sending…" : "Resend invite"}</Button>
             : null}
           {agent.status === "Inactive"
@@ -97,9 +97,9 @@ export default function AgentDetailPage() {
             : <Button variant="outline" disabled={busy} onClick={() => setConfirm(true)}>Deactivate agent</Button>}
         </>}
       />
-      {agent.status === "Invited" ? (
+      {awaitingPassword(agent) ? (
         <p role="status" className="-mt-2 mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Approved{agent.statusChangedAt ? ` on ${formatDate(agent.statusChangedAt)}` : ""}. Waiting for {agent.email || "them"} to accept the sign-in invitation; until then they cannot sign in.
+          {agent.status === "Active" ? "Active" : "Waiting for their business to be approved"}{agent.statusChangedAt ? ` since ${formatDate(agent.statusChangedAt)}` : ""}. {agent.email || "They"} hasn't set a password yet, so they cannot sign in until they open the invitation email. Use Resend invite if they lost it.
         </p>
       ) : agent.status === "Inactive" ? (
         <p role="status" className="-mt-2 mb-5 rounded-md border border-background-300 bg-background-100 px-4 py-3 text-sm text-foreground-700">
@@ -126,7 +126,7 @@ export default function AgentDetailPage() {
           <dl className="space-y-1.5 text-sm">
             <dd className={agent.email ? "text-foreground-900" : "text-foreground-500"}>{agent.email || "No email"}</dd>
             {agent.phone ? <dd className="text-foreground-900">{agent.phone}</dd> : null}
-            <dd className="text-foreground-600">{agent.profileId ? "Has a portal login" : agent.status === "Invited" ? "Invitation sent, not accepted yet" : "No portal login"}</dd>
+            <dd className="text-foreground-600">{agent.profileId ? "Has a portal login" : awaitingPassword(agent) ? "Hasn't set a password yet" : "No portal login"}</dd>
           </dl>
         </Card>
       </div>

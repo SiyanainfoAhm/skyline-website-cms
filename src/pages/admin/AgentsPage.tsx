@@ -7,7 +7,7 @@ import ActivateAgentDialog from "@/pages/admin/components/ActivateAgentDialog";
 import { toActivate, type AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { deactivateAgent, listAgentDirectory, resendInvitation, type AgentCounts, type AgentStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
+import { deactivateAgent, listAgentDirectory, resendInvitation, type AgentCounts, type AgentStatus, type DirectoryAgent, awaitingPassword } from "@/pages/admin/lib/businessData";
 import { useListParams } from "@/pages/admin/lib/listParams";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
@@ -192,7 +192,8 @@ export default function AgentsPage() {
                           </option>
                         ))}
                       </select>
-                      {r.status === "Invited" && r.email ? (
+                      {r.status === "Active" && !r.profileId ? <p className="mt-1 text-[11px] font-medium text-amber-700">Hasn't set a password yet</p> : null}
+                      {awaitingPassword(r) && r.email ? (
                         <button type="button" disabled={busyKey === r.key} onClick={() => void resend(r)}
                           className="mt-1.5 flex cursor-pointer items-center gap-1 text-xs font-semibold text-primary-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60">
                           <i className="ri-mail-send-line" aria-hidden="true" /> {busyKey === r.key ? "Sending…" : "Resend invite"}

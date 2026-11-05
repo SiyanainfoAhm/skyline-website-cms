@@ -198,7 +198,7 @@ export async function changeBusinessStatus(business: { id: string; name: string 
   if (waiting) {
     try {
       message += ` ${await resendInvitation({ invitationId: waiting.id, email: waiting.email, name: waiting.name, role: "agency_admin", businessId: business.id })}`;
-      message += " They show as Invited until they set their password, then Active.";
+      message += " They are active; until they set their password they show \"Hasn't set a password yet\".";
     } catch (e) {
       message += ` The invitation email could not be sent${e instanceof Error && e.message ? ` (${e.message})` : ""}; use Resend invite on the Agents tab.`;
     }
@@ -220,7 +220,10 @@ export const getStudent = (id: string) => call<StudentDetail | null>("admin_stud
 
 /* ------------------------------------------------------------------ agents */
 
-/** Active: approved and signed up. Invited: approved, no login yet. Inactive: everything else (the default). */
+/**
+ * Active: approved (their business is active); they may not have set a password yet, see awaitingPassword.
+ * Invited: waiting for their business to be approved. Inactive: everything else (the default).
+ */
 export type AgentStatus = "Active" | "Invited" | "Inactive";
 export interface AgentCounts { all: number; active: number; invited: number; inactive: number }
 
@@ -280,6 +283,11 @@ export const listAgentDirectory = (f: { search?: string; status?: string; busine
  * Invited agents of each active business in which nobody has signed in yet (no Active agent). Such a business shows as
  * Invited; Resend invite sends these agents their invitation again. Reads every agent (100 a page).
  */
+/** Approved or waiting, but has not set a password yet: shown with "Hasn't set a password yet" and Resend invite. */
+export function awaitingPassword(agent: { status: string; profileId: string | null }): boolean {
+  return agent.status !== "Inactive" && !agent.profileId;
+}
+
 export async function invitedBusinesses(): Promise<Map<string, DirectoryAgent[]>> {
   const all: DirectoryAgent[] = [];
   for (let offset = 0; offset < 5000; offset += 100) {
@@ -291,8 +299,8 @@ export async function invitedBusinesses(): Promise<Map<string, DirectoryAgent[]>
   for (const agent of all) {
     if (!agent.businessId || agent.businessStatus !== "Active") continue;
     const entry = byBusiness.get(agent.businessId) ?? { active: false, invited: [] };
-    if (agent.status === "Active") entry.active = true;
-    if (agent.status === "Invited") entry.invited.push(agent);
+    if (agent.status === "Active" && agent.profileId) entry.active = true;
+    if (awaitingPassword(agent)) entry.invited.push(agent);
     byBusiness.set(agent.businessId, entry);
   }
   const result = new Map<string, DirectoryAgent[]>();

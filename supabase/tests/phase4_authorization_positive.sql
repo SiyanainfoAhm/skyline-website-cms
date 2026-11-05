@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(290);
+select plan(292);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -571,6 +571,17 @@ set local role authenticated;
 set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000044';
 select lives_ok($$select public.portal_self_enrol_complete('{"firstName":"Mob","lastName":"Only","phone":"+61498000044"}')$$,'a Google student needs only their mobile');
 select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Bad","lastName":"Dob","phone":"+61498000045","dateOfBirth":"2025-01-01"}')$$,'23505',null,'once set up, the account cannot enrol again');
+-- An approved agent is Active before setting a password; an agent of a business waiting for approval is Invited (20261105130000).
+reset role;
+insert into public.agents(id,business_id,full_name,email,role,status) values
+ ('53000000-0000-0000-0000-000000000090','13000000-0000-0000-0000-000000000001','No Password Yet','no.password@example.test','agent','Active');
+insert into public.agencies(id,name,code,status,registration_requested_at) values ('13000000-0000-0000-0000-000000000090','Waiting Co','P2-WAIT','Inactive',now());
+insert into public.agents(id,business_id,full_name,email,role,status) values
+ ('53000000-0000-0000-0000-000000000091','13000000-0000-0000-0000-000000000090','Waiting Admin','waiting.admin@example.test','agency_admin','Active');
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
+select is((select r->>'status' from jsonb_array_elements(public.admin_business_agents('13000000-0000-0000-0000-000000000001')) r where r->>'email'='no.password@example.test'),'Active','an approved agent without a password yet is Active');
+select is((select r->>'status' from jsonb_array_elements(public.admin_business_agents('13000000-0000-0000-0000-000000000090')) r where r->>'email'='waiting.admin@example.test'),'Invited','an agent of a business waiting for approval is Invited');
 reset role;
 select * from finish();
 rollback;
