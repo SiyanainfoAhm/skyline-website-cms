@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { checkSession, retryUntil } from "@/lib/authSession";
+import { checkSession, retryUntil, type SessionCheck } from "@/lib/authSession";
 import { supabase } from "@/pages/admin/lib/supabase";
 import { AdminLoading, Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
@@ -52,6 +52,15 @@ function magicLinkUrl(): string {
 
 type Tab = "signin" | "enroll";
 
+/** Resolves with `fallback` when `promise` has not settled after `ms`; the page must never wait forever on a stuck call. */
+function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => resolve(fallback), ms);
+    promise.then((value) => { window.clearTimeout(timer); resolve(value); }, (error) => { window.clearTimeout(timer); reject(error); });
+  });
+}
+const SLOW = Symbol("slow");
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -97,7 +106,16 @@ export default function LoginPage() {
   const route = useCallback(async (userId: string) => {
     if (routing.current) return;
     routing.current = true;
-    const access = await fetchAccess(userId);
+    // A stuck or failed access check shows the form with a retry message instead of an endless "Checking your session…".
+    let access: AccessSummary | typeof SLOW;
+    try { access = await within<AccessSummary | typeof SLOW>(fetchAccess(userId), 12000, SLOW); }
+    catch { access = SLOW; }
+    if (access === SLOW) {
+      setError("We could not check your access just now. Refresh the page to try again, or sign in below.");
+      setChecking(false);
+      routing.current = false;
+      return;
+    }
     const decision = decideLogin(access, next, readLastDestination(userId));
     if (decision.kind === "blocked" && access.portal === "no_access" && !access.cms) {
       const { data } = await supabase.auth.getUser();
@@ -128,8 +146,15 @@ export default function LoginPage() {
   useEffect(() => {
     let active = true;
     let stopRetry = () => {};
-    void checkSession().then((check) => {
+    // Reading the saved session waits on a lock shared by every open tab of this site; a tab that is stuck holding it must
+    // not leave this page spinning, so after a few seconds the sign-in form is shown and a late answer still routes.
+    void within<SessionCheck | typeof SLOW>(checkSession(), 6000, SLOW).catch((): typeof SLOW => SLOW).then((check) => {
       if (!active) return;
+      if (check === SLOW) {
+        setChecking(false);
+        void checkSession().then((late) => { if (active && late.kind === "session") void route(late.session.user.id); }).catch(() => {});
+        return;
+      }
       if (check.kind === "session") { void route(check.session.user.id); return; }
       setChecking(false);
       // A saved session that could not be refreshed offline is routed as soon as the network is back.
