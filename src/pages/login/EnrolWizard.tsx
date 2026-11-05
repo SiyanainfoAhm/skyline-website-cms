@@ -21,7 +21,8 @@ type Step = 1 | 2 | 3;
  */
 export default function EnrolWizard({ initialKind, onSignIn, onSignedIn }: { initialKind: EnrolKind | null; onSignIn: () => void; onSignedIn: (userId: string) => void }) {
   const [kind, setKind] = useState<EnrolKind>(initialKind ?? "student");
-  const [step, setStep] = useState<Step>(initialKind && initialKind !== "staff" ? 2 : 1);
+  // Everyone starts on "Who are you enrolling as?"; a link from the Enrol Now page only pre-selects Student or Agent.
+  const [step, setStep] = useState<Step>(1);
   const [result, setResult] = useState<EnrolResult | null>(null);
   const top = useRef<HTMLDivElement>(null);
 
