@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { Button, Field, Select, TextInput } from "@/pages/admin/components/ui";
 import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
 import { PhoneInput } from "@/components/feature/applicationInputs";
+import QuickSignIn from "@/pages/login/QuickSignIn";
+import { loadAuthProviders } from "@/lib/authProviders";
 import {
   EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
   type AgentEnrolForm, type EnrolErrors, type EnrolKind, type StudentEnrolForm,
@@ -17,7 +19,7 @@ type Step = 1 | 2 | 3;
  * invite-only and are pointed back to their invitation email. Nothing here grants access: the password link and the
  * review are what let someone in.
  */
-export default function EnrolWizard({ initialKind, onSignIn }: { initialKind: EnrolKind | null; onSignIn: () => void }) {
+export default function EnrolWizard({ initialKind, onSignIn, onSignedIn }: { initialKind: EnrolKind | null; onSignIn: () => void; onSignedIn: (userId: string) => void }) {
   const [kind, setKind] = useState<EnrolKind>(initialKind ?? "student");
   const [step, setStep] = useState<Step>(initialKind && initialKind !== "staff" ? 2 : 1);
   const [result, setResult] = useState<EnrolResult | null>(null);
@@ -30,7 +32,7 @@ export default function EnrolWizard({ initialKind, onSignIn }: { initialKind: En
   return (
     <div ref={top}>
       {step === 1 ? <KindStep kind={kind} onChange={setKind} onContinue={() => setStep(kind === "staff" ? 1 : 2)} onSignIn={onSignIn} /> : null}
-      {step === 2 && kind === "student" ? <StudentStep onBack={() => setStep(1)} onDone={done} /> : null}
+      {step === 2 && kind === "student" ? <StudentStep onBack={() => setStep(1)} onDone={done} onSignedIn={onSignedIn} /> : null}
       {step === 2 && kind === "agent" ? <AgentStep onBack={() => setStep(1)} onDone={done} /> : null}
       {step === 3 && result ? <DoneStep result={result} onSignIn={onSignIn} /> : null}
     </div>
@@ -145,7 +147,7 @@ function FormError({ text }: { text?: string }) {
 
 /* ----------------------------------------------------------------- step 2: student */
 
-function StudentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: EnrolResult) => void }) {
+function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone: (r: EnrolResult) => void; onSignedIn: (userId: string) => void }) {
   const [form, setForm] = useState<StudentEnrolForm>(EMPTY_STUDENT_ENROL);
   const [errors, setErrors] = useState<EnrolErrors<StudentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
@@ -171,6 +173,7 @@ function StudentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: Enrol
   return (
     <form onSubmit={submit} noValidate>
       <StepHeader step={2} kind="Student" title="Your details" onBack={onBack} />
+      <QuickStart onSignedIn={onSignedIn} />
       <div className="mt-6 space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="First name" required><TextInput value={form.firstName} onChange={(e) => patch({ firstName: e.target.value })} autoComplete="given-name" /><Problem text={errors.firstName} /></Field>
@@ -205,6 +208,21 @@ function StudentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: Enrol
         <Button type="submit" className="w-full" disabled={busy}>{busy ? "Creating your account…" : "Create student account"}</Button>
       </div>
     </form>
+  );
+}
+
+/** Google / Facebook / phone above the student form; hidden entirely when none of them is switched on. */
+function QuickStart({ onSignedIn }: { onSignedIn: (userId: string) => void }) {
+  const [any, setAny] = useState(false);
+  useEffect(() => { let active = true; void loadAuthProviders().then((p) => { if (active) setAny(p.google || p.facebook || p.phone); }); return () => { active = false; }; }, []);
+  if (!any) return null;
+  return (
+    <div className="mt-6">
+      <QuickSignIn create label="Sign up faster" onSignedIn={onSignedIn} />
+      <div className="mt-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
+        <span className="h-px flex-1 bg-background-300" />or fill in your details<span className="h-px flex-1 bg-background-300" />
+      </div>
+    </div>
   );
 }
 

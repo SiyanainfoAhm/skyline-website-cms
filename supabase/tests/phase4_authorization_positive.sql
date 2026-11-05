@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(272);
+select plan(280);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -534,6 +534,23 @@ set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
 select lives_ok($$select public.admin_business_set_status((select id from public.agencies where registration_number='51824753556'),'Inactive')$$,'deactivating a pending business declines it');
 select is((select registration_decision from public.agencies where registration_number='51824753556'),'declined','the decision is declined');
 select is((select status from public.agency_invitations where email='de.clined@example.test'),'revoked','and its invitation is revoked');
+-- Signing up with Google, Facebook or a phone number: the signed-in account completes its details and becomes a student.
+reset role;
+select is((select count(*)::int from public.agents a join public.portal_profiles p on p.id = a.profile_id where p.auth_user_id = '33000000-0000-0000-0000-000000000020'),0,'a student''s sign-in is never mirrored as an agent');
+insert into auth.users(id,email,email_confirmed_at) values ('33000000-0000-0000-0000-000000000040','google.student@example.test',now());
+insert into auth.users(id,phone,phone_confirmed_at) values ('33000000-0000-0000-0000-000000000041','61498765432',now());
+insert into auth.users(id,email) values ('33000000-0000-0000-0000-000000000042','unconfirmed@example.test');
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000040';
+select lives_ok($$select public.portal_self_enrol_complete('{"firstName":"Goo","lastName":"Gle","phone":"+61498000001","dateOfBirth":"2001-03-04"}')$$,'a Google sign-up completes its details');
+select is(public.portal_identity()->>'role','student','and signs in as a student straight away');
+select is((select a.is_direct from public.enrollment_students s join public.agencies a on a.id=s.agency_id where s.email='google.student@example.test'),true,'under the direct business');
+select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Goo","lastName":"Gle","phone":"+61498000001","dateOfBirth":"2001-03-04"}')$$,'23505',null,'it cannot be completed twice');
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000041';
+select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Pho","lastName":"Ne","email":"stu.dent@example.test","dateOfBirth":"2001-03-04"}')$$,'23505',null,'a typed email already on record cannot be claimed');
+select lives_ok($$select public.portal_self_enrol_complete('{"firstName":"Pho","lastName":"Ne","email":"phone.student@example.test","dateOfBirth":"2001-03-04"}')$$,'a phone sign-up completes with its verified mobile');
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000042';
+select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Un","lastName":"Confirmed","phone":"+61498000002","dateOfBirth":"2001-03-04"}')$$,'42501',null,'an account with nothing verified cannot enrol');
 reset role;
 select * from finish();
 rollback;

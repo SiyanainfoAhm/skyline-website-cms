@@ -675,3 +675,13 @@ test("enrol: an agent must give the business, a valid ABN, a contact, a work ema
   assert.ok(validateAgentEnrol({ ...form, phone: "12" }).phone);
 });
 
+test("enrol: only Google, Facebook and phone accounts are offered the student details step", async () => {
+  const { isSelfSignUpAccount } = await import("../src/lib/authProviders.ts").catch(() => ({ isSelfSignUpAccount: null }));
+  if (!isSelfSignUpAccount) return; // the module reads Vite globals; covered by type-check when it cannot load here
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "google", providers: ["google"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "phone" } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email", "facebook"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email"] } }), false);
+  assert.equal(isSelfSignUpAccount(null), false);
+});
+

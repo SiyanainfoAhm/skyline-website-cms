@@ -14,6 +14,10 @@ import {
   type AccessSummary, type CmsAccess, type LoginDestination,
 } from "@/lib/loginRouting";
 import EnrolWizard from "@/pages/login/EnrolWizard";
+import QuickSignIn from "@/pages/login/QuickSignIn";
+import CompleteStudentProfile from "@/pages/login/CompleteStudentProfile";
+import { isSelfSignUpAccount } from "@/lib/authProviders";
+import type { User } from "@supabase/supabase-js";
 import type { EnrolKind } from "@/lib/enrolForm";
 
 /** What the DATABASE says this signed-in user may use. The page only routes; every request is still authorized by RLS / edge functions. */
@@ -68,6 +72,8 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState(notice);
   const [choice, setChoice] = useState<{ userId: string; options: LoginDestination[] } | null>(null);
+  // Signed up with Google, Facebook or a phone number and not a student yet: ask for the remaining details.
+  const [completing, setCompleting] = useState<User | null>(null);
   const routing = useRef(false);
 
   // Tenant domains show the tenant's cached logo / name / colour; the main Skyline domain keeps the built-in branding.
@@ -91,7 +97,17 @@ export default function LoginPage() {
   const route = useCallback(async (userId: string) => {
     if (routing.current) return;
     routing.current = true;
-    const decision = decideLogin(await fetchAccess(userId), next, readLastDestination(userId));
+    const access = await fetchAccess(userId);
+    const decision = decideLogin(access, next, readLastDestination(userId));
+    if (decision.kind === "blocked" && access.portal === "no_access" && !access.cms) {
+      const { data } = await supabase.auth.getUser();
+      if (data.user && data.user.id === userId && isSelfSignUpAccount(data.user)) {
+        setCompleting(data.user);
+        setChecking(false);
+        routing.current = false;
+        return;
+      }
+    }
     if (decision.kind === "blocked") {
       // Nothing usable: end the session so no half-signed-in state is left behind.
       await supabase.auth.signOut({ scope: "local" });
@@ -193,7 +209,13 @@ export default function LoginPage() {
             )}
           </div>
 
-          {choice ? (
+          {completing ? (
+            <CompleteStudentProfile
+              user={completing}
+              onDone={() => { const id = completing.id; setCompleting(null); setChecking(true); void route(id); }}
+              onCancel={() => { void supabase.auth.signOut({ scope: "local" }).then(() => { markSessionSeen(false); setCompleting(null); }); }}
+            />
+          ) : choice ? (
             <div>
               <h2 className="font-heading text-2xl font-bold text-foreground-950">Where do you want to go?</h2>
               <p className="mt-1.5 text-sm text-foreground-600">Your account can use more than one area.</p>
@@ -229,7 +251,7 @@ export default function LoginPage() {
 
               {tab === "enroll" ? (
                 <div className="mt-6">
-                  <EnrolWizard key={initialKind ?? "none"} initialKind={initialKind} onSignIn={() => showTab("signin")} />
+                  <EnrolWizard key={initialKind ?? "none"} initialKind={initialKind} onSignIn={() => showTab("signin")} onSignedIn={(id) => { setChecking(true); void route(id); }} />
                 </div>
               ) : (
                 <>
@@ -270,6 +292,9 @@ export default function LoginPage() {
                   <Button type="button" variant="outline" className="w-full" icon="ri-mail-line" disabled={linkBusy} onClick={() => void emailLink()}>
                     {linkBusy ? "Sending…" : "Email me a sign-in link"}
                   </Button>
+                  <div className="mt-2.5">
+                    <QuickSignIn create={false} onSignedIn={(id) => { setChecking(true); void route(id); }} />
+                  </div>
 
                   <p className="mt-8 text-center text-xs text-foreground-500">
                     {enrolAllowed ? "You’ll be taken to your Student, Agent or Staff portal automatically." : "Need help signing in? Contact your administrator."}
