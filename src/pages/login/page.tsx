@@ -84,6 +84,9 @@ export default function LoginPage() {
   // Signed up with Google, Facebook or a phone number and not a student yet: ask for the remaining details.
   const [completing, setCompleting] = useState<User | null>(null);
   const routing = useRef(false);
+  // Opened on Enroll now (a link from the website): show it straight away; a saved session never holds it up or redirects.
+  const enrolOnOpen = useRef(tab === "enroll");
+  const [signedInAs, setSignedInAs] = useState<{ id: string; email: string } | null>(null);
 
   // Tenant domains show the tenant's cached logo / name / colour; the main Skyline domain keeps the built-in branding.
   const brand = useMemo(() => (tenant ? readCachedBrand(tenantBrandKey()) : null), [tenant]);
@@ -146,6 +149,13 @@ export default function LoginPage() {
   useEffect(() => {
     let active = true;
     let stopRetry = () => {};
+    if (enrolOnOpen.current) {
+      setChecking(false);
+      void within<SessionCheck | typeof SLOW>(checkSession(), 6000, SLOW).catch((): typeof SLOW => SLOW).then((check) => {
+        if (active && check !== SLOW && check.kind === "session") setSignedInAs({ id: check.session.user.id, email: check.session.user.email ?? "" });
+      });
+      return () => { active = false; };
+    }
     // Reading the saved session waits on a lock shared by every open tab of this site; a tab that is stuck holding it must
     // not leave this page spinning, so after a few seconds the sign-in form is shown and a late answer still routes.
     void within<SessionCheck | typeof SLOW>(checkSession(), 6000, SLOW).catch((): typeof SLOW => SLOW).then((check) => {
@@ -283,6 +293,15 @@ export default function LoginPage() {
 
               {tab === "enroll" ? (
                 <div className="mt-6">
+                  {signedInAs ? (
+                    <div role="status" className="mb-4 rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-[13px] text-foreground-700">
+                      You are signed in{signedInAs.email ? ` as ${signedInAs.email}` : ""}.{" "}
+                      <button type="button" className="font-semibold text-primary-700 underline" onClick={() => { const id = signedInAs.id; setSignedInAs(null); setChecking(true); void route(id); }}>Go to my account</button>
+                      {" or "}
+                      <button type="button" className="font-semibold text-primary-700 underline" onClick={() => { void supabase.auth.signOut({ scope: "local" }).then(() => { markSessionSeen(false); setSignedInAs(null); }); }}>sign out</button>
+                      {" to enrol a new account."}
+                    </div>
+                  ) : null}
                   <EnrolWizard key={initialKind ?? "none"} initialKind={initialKind} onSignIn={() => showTab("signin")} onSignedIn={(id) => { setChecking(true); void route(id); }} />
                 </div>
               ) : (
