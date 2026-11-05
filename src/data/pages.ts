@@ -369,7 +369,7 @@ export const oshcPage: ContentPageData = {
       type: "list",
       items: [
         "If you enrol in a 6 months course, you need to purchase 7 months of OSHC.",
-        "Students who enrol in a course of duration 11 months or longer will need to purchase OSHC for 2 additional months after the end of the course.",
+        "Students who enroll in a course of duration 11 months or longer will need to purchase OSHC for 2 additional months after the end of the course.",
         "For example, if you enrol in a 12 months course, you need to purchase 14 months of OSHC. The information contained in this publication is correct as of 1st Sep 2023.",
       ],
     },
