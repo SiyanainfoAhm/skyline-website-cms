@@ -4,12 +4,13 @@
  */
 
 import { validateAbn } from "../../supabase/functions/_shared/validation/abn";
+import { parseStoredPhone, validateStoredPhone } from "../../supabase/functions/_shared/validation/identifiers";
 
 export type EnrolKind = "student" | "agent" | "staff";
 
 export interface StudentEnrolForm {
   firstName: string; lastName: string; email: string; mobile: string;
-  /** DD/MM/YYYY as typed. */
+  /** YYYY-MM-DD from the date picker (DD/MM/YYYY is also understood). */
   dateOfBirth: string; course: string; referralCode: string; agreed: boolean;
 }
 
@@ -34,11 +35,33 @@ function nameProblem(value: string, what: string): string {
   return "";
 }
 
-/** An Australian mobile in any common spelling, normalised to 04XX XXX XXX digits (04xxxxxxxx); null when it is not one. */
-export function normaliseMobile(raw: string): string | null {
-  const digits = raw.replace(/[\s().-]/g, "");
-  const match = /^(?:\+?61|0)(4\d{8})$/.exec(digits);
-  return match ? `0${match[1]}` : null;
+/**
+ * The mobile as the shared country-code phone field stores it (E.164, e.g. +61412345678 or +919876543210), the same
+ * format every other student mobile is saved in. "" when valid, otherwise what is wrong.
+ */
+export function mobileProblem(e164: string): string {
+  const value = e164.trim();
+  if (!value || !value.startsWith("+") || !parseStoredPhone(value)?.national) return "Enter your mobile number.";
+  return validateStoredPhone(value);
+}
+
+/** The date-of-birth limits, as YYYY-MM-DD, for the date picker's min and max. */
+export function dateOfBirthRange(today: Date = new Date()): { min: string; max: string } {
+  const iso = (years: number) => new Date(Date.UTC(today.getUTCFullYear() - years, today.getUTCMonth(), today.getUTCDate())).toISOString().slice(0, 10);
+  return { min: iso(100), max: iso(10) };
+}
+
+/** "" when the date of birth is usable, otherwise a message that says which rule failed. */
+export function dateOfBirthProblem(raw: string, today: Date = new Date()): string {
+  const text = raw.trim();
+  if (!text) return "Enter your date of birth.";
+  if (parseDateOfBirth(text, today)) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(text);
+  const [year, month, day] = iso ? [+iso[1], +iso[2], +iso[3]] : dmy ? [+dmy[3], +dmy[2], +dmy[1]] : [0, 0, 0];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const real = year > 0 && date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return real ? "You must be between 10 and 100 years old." : "Enter a real date of birth.";
 }
 
 /** DD/MM/YYYY (or YYYY-MM-DD) to an ISO date; null when it is not a real date or not 10 to 100 years ago. */
@@ -78,8 +101,8 @@ export function validateStudentEnrol(form: StudentEnrolForm, today?: Date): Enro
   const first = nameProblem(form.firstName, "first name"); if (first) errors.firstName = first;
   const last = nameProblem(form.lastName, "last name"); if (last) errors.lastName = last;
   if (!validEmail(form.email)) errors.email = "Enter a valid email address.";
-  if (!normaliseMobile(form.mobile)) errors.mobile = "Enter an Australian mobile number, like 04xx xxx xxx.";
-  if (!parseDateOfBirth(form.dateOfBirth, today)) errors.dateOfBirth = "Enter your date of birth as DD/MM/YYYY.";
+  const mobile = mobileProblem(form.mobile); if (mobile) errors.mobile = mobile;
+  const dob = dateOfBirthProblem(form.dateOfBirth, today); if (dob) errors.dateOfBirth = dob;
   if (form.referralCode.trim().length > 40 || CONTROL.test(form.referralCode)) errors.referralCode = "Check the referral code.";
   if (!form.agreed) errors.agreed = "Please agree to the terms and privacy policy.";
   return errors;
@@ -103,7 +126,7 @@ export function studentEnrolPayload(form: StudentEnrolForm, today?: Date) {
   return {
     kind: "student" as const,
     firstName: form.firstName.trim(), lastName: form.lastName.trim(), email: form.email.trim().toLowerCase(),
-    phone: normaliseMobile(form.mobile) ?? form.mobile.trim(), dateOfBirth: parseDateOfBirth(form.dateOfBirth, today) ?? "",
+    phone: form.mobile.trim(), dateOfBirth: parseDateOfBirth(form.dateOfBirth, today) ?? "",
     course: form.course.trim(), referralCode: form.referralCode.trim(),
   };
 }

@@ -610,13 +610,23 @@ test('ABN lookup extracts only published business data and fails closed on a dif
 
 // ---- Enroll now (migration 119): what a student or an agent types on the sign-in page ----
 import {
-  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, agentEnrolPayload, formatAbn, normaliseMobile, parseDateOfBirth, studentEnrolPayload,
+  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, agentEnrolPayload, dateOfBirthProblem, dateOfBirthRange, formatAbn, mobileProblem, parseDateOfBirth, studentEnrolPayload,
   validateAgentEnrol, validateStudentEnrol,
 } from "../src/lib/enrolForm.ts";
 
-test("enrol: Australian mobiles are recognised in every common spelling and nothing else is", () => {
-  for (const ok of ["0412 345 678", "0412345678", "+61 412 345 678", "61412345678", "(04) 1234-5678"]) assert.equal(normaliseMobile(ok), "0412345678", ok);
-  for (const bad of ["", "0312345678", "+44 7700 900123", "041234567", "04123456789", "abc"]) assert.equal(normaliseMobile(bad), null, bad);
+test("enrol: the mobile comes from the country-code phone field, so overseas students can enrol", () => {
+  for (const ok of ["+61412345678", "+919876543210", "+447700900123"]) assert.equal(mobileProblem(ok), "", ok);
+  for (const bad of ["", "0412345678", "+61", "+6141234", "abc"]) assert.ok(mobileProblem(bad), bad);
+});
+
+test("enrol: the date of birth says which rule failed, and the picker is limited to 10 to 100 years ago", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  assert.deepEqual(dateOfBirthRange(today), { min: "1926-11-05", max: "2016-11-05" });
+  assert.equal(dateOfBirthProblem("2000-01-02", today), "");
+  assert.match(dateOfBirthProblem("", today), /enter your date of birth/i);
+  assert.match(dateOfBirthProblem("2020-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("1900-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("31/02/2000", today), /real date/i);
 });
 
 test("enrol: dates of birth are typed day first and must be real and 10 to 100 years ago", () => {
@@ -646,9 +656,9 @@ test("enrol: a student must give name, email, mobile, date of birth and agree; t
   const today = new Date(Date.UTC(2026, 10, 5));
   const empty = validateStudentEnrol(EMPTY_STUDENT_ENROL, today);
   assert.deepEqual(Object.keys(empty).sort(), ["agreed", "dateOfBirth", "email", "firstName", "lastName", "mobile"]);
-  const form = { ...EMPTY_STUDENT_ENROL, firstName: " Stu ", lastName: "Dent", email: "Stu.Dent@Example.test ", mobile: "+61 412 345 678", dateOfBirth: "02/01/2000", course: "X - Y", referralCode: " AGT-1 ", agreed: true };
+  const form = { ...EMPTY_STUDENT_ENROL, firstName: " Stu ", lastName: "Dent", email: "Stu.Dent@Example.test ", mobile: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: " AGT-1 ", agreed: true };
   assert.deepEqual(validateStudentEnrol(form, today), {});
-  assert.deepEqual(studentEnrolPayload(form, today), { kind: "student", firstName: "Stu", lastName: "Dent", email: "stu.dent@example.test", phone: "0412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: "AGT-1" });
+  assert.deepEqual(studentEnrolPayload(form, today), { kind: "student", firstName: "Stu", lastName: "Dent", email: "stu.dent@example.test", phone: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: "AGT-1" });
   assert.ok(validateStudentEnrol({ ...form, referralCode: "x".repeat(41) }, today).referralCode);
   assert.ok(validateStudentEnrol({ ...form, email: "not-an-email" }, today).email);
   assert.ok(validateStudentEnrol({ ...form, agreed: false }, today).agreed);

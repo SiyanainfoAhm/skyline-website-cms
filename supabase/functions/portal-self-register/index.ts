@@ -60,7 +60,8 @@ function safeRedirect(value: unknown): string | undefined {
 }
 
 const abnCache = new Map<string, { expires: number; business: AgencyAbnDetails }>();
-const MOBILE = /^(?:\+?61|0)(4\d{8})$/;
+// The shared phone field sends E.164 (+ country code, 8 to 15 digits in all).
+const MOBILE = /^\+[1-9]\d{7,14}$/;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -114,13 +115,13 @@ Deno.serve(async (req) => {
       const first = cleanName(parsed.firstName), last = cleanName(parsed.lastName);
       if (!first.ok) return json({ error: "Enter your first name." }, 400);
       if (!last.ok) return json({ error: "Enter your last name." }, 400);
-      const mobile = MOBILE.exec(text("phone", 40).replace(/[\s().-]/g, ""));
-      if (!mobile) return json({ error: "Enter an Australian mobile number, like 04xx xxx xxx." }, 400);
+      const mobile = text("phone", 40).replace(/[\s().-]/g, "");
+      if (!MOBILE.test(mobile)) return json({ error: "Enter your mobile number with its country code." }, 400);
       const dob = text("dateOfBirth", 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) return json({ error: "Enter a valid date of birth." }, 400);
       const referral = text("referralCode", 40);
       if (/[^A-Za-z0-9 ._-]/.test(referral)) return json({ error: "Check the referral code." }, 400);
-      Object.assign(input, { firstName: first.value, lastName: last.value, phone: `0${mobile[1]}`, dateOfBirth: dob, course: text("course", 200), referralCode: referral });
+      Object.assign(input, { firstName: first.value, lastName: last.value, phone: mobile, dateOfBirth: dob, course: text("course", 200), referralCode: referral });
       displayName = `${first.value} ${last.value}`;
     } else {
       const contact = cleanName(parsed.contactName);

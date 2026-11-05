@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { Link } from "react-router-dom";
 import { Button, Field, Select, TextInput } from "@/pages/admin/components/ui";
 import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
+import { PhoneInput } from "@/components/feature/applicationInputs";
 import {
-  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, formatAbn, validateAgentEnrol, validateStudentEnrol,
+  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
   type AgentEnrolForm, type EnrolErrors, type EnrolKind, type StudentEnrolForm,
 } from "@/lib/enrolForm";
 import { enrolAgent, enrolStudent, lookupAbn, type AbnDetails, type EnrolResult } from "@/lib/selfEnrol";
@@ -150,15 +151,19 @@ function StudentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: Enrol
   const [busy, setBusy] = useState(false);
   const [website, setWebsite] = useState("");
   const patch = (next: Partial<StudentEnrolForm>) => setForm((prev) => ({ ...prev, ...next }));
+  const range = dateOfBirthRange();
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
-    const checked = validateStudentEnrol(form);
+    // The phone field keeps its value (E.164, with the country code) in a hidden input named "mobile".
+    const current = { ...form, mobile: String(new FormData(event.currentTarget).get("mobile") ?? "") };
+    setForm(current);
+    const checked = validateStudentEnrol(current);
     setErrors(checked);
     if (Object.keys(checked).length) return;
     setBusy(true);
-    try { onDone(await enrolStudent(form, website)); }
+    try { onDone(await enrolStudent(current, website)); }
     catch (e) { setErrors({ form: e instanceof Error ? e.message : "We could not complete your enrolment. Please try again." }); }
     finally { setBusy(false); }
   };
@@ -172,10 +177,17 @@ function StudentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: Enrol
           <Field label="Last name" required><TextInput value={form.lastName} onChange={(e) => patch({ lastName: e.target.value })} autoComplete="family-name" /><Problem text={errors.lastName} /></Field>
         </div>
         <Field label="Email" required><TextInput type="email" value={form.email} onChange={(e) => patch({ email: e.target.value })} placeholder="you@example.com" autoComplete="email" /><Problem text={errors.email} /></Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Mobile" required><TextInput type="tel" inputMode="tel" value={form.mobile} onChange={(e) => patch({ mobile: e.target.value })} placeholder="04xx xxx xxx" autoComplete="tel" /><Problem text={errors.mobile} /></Field>
-          <Field label="Date of birth" required><TextInput inputMode="numeric" value={form.dateOfBirth} onChange={(e) => patch({ dateOfBirth: e.target.value })} placeholder="DD/MM/YYYY" autoComplete="bday" /><Problem text={errors.dateOfBirth} /></Field>
+        <div>
+          <label htmlFor="enrol-mobile" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Mobile <span className="text-primary-600">*</span></label>
+          <PhoneInput id="enrol-mobile" name="mobile" value={form.mobile} required placeholder="041 234 5678" />
+          <Problem text={errors.mobile} />
         </div>
+        <Field label="Date of birth" required hint="You must be between 10 and 100 years old.">
+          <TextInput type="date" value={form.dateOfBirth} min={range.min} max={range.max} autoComplete="bday"
+            onChange={(e) => { patch({ dateOfBirth: e.target.value }); if (errors.dateOfBirth) setErrors((prev) => ({ ...prev, dateOfBirth: undefined })); }}
+            onBlur={(e) => { const problem = e.target.value ? dateOfBirthProblem(e.target.value) : ""; setErrors((prev) => ({ ...prev, dateOfBirth: problem || undefined })); }} />
+          <Problem text={errors.dateOfBirth} />
+        </Field>
         <Field label="Course of interest">
           <Select value={form.course} onChange={(e) => patch({ course: e.target.value })}>
             <option value="">Select a course</option>
