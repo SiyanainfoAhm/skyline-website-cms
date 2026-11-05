@@ -47,7 +47,7 @@ export function SiteHeaderView({ navigation, settings, preview = false }: { navi
   const [query, setQuery] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
-  // Preview mode never reads the session; the public header swaps Sign in / Sign up for Dashboard once signed in (both go through /login).
+  // Preview mode never reads the session; the public header shows one account button (headerAccountLink), which goes through /login.
   const signedIn = useSignedIn();
   const account = headerAccountLink(signedIn && !preview);
 

@@ -98,10 +98,13 @@ export function loginNotice(reason: string | null): string {
   return reason === "expired" ? "Your session has expired. Please sign in again." : "";
 }
 
-/** Public header account control: a Dashboard link once signed in, Sign In otherwise. Both go through /login, which routes by role. */
+/**
+ * Public header account control: the same "Login / Enroll Now" button for everyone (owner's choice, 2026-11-05). /login has
+ * Sign in and Enroll now side by side; someone already signed in gets "Go to my account" or "Sign out" there.
+ */
 export function headerAccountLink(signedIn: boolean): { label: string; to: string } {
-  // One button for everyone: /login has Sign in and Enroll now (sign up) side by side.
-  return signedIn ? { label: "Dashboard", to: "/login" } : { label: "Sign in / Sign up", to: "/login" };
+  void signedIn;
+  return { label: "Login / Enroll Now", to: "/login" };
 }
 
 const SEEN_KEY = "skyline.session.seen";
