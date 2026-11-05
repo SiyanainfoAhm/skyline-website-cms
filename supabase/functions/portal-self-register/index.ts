@@ -8,7 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { backendConfiguration } from "../_shared/config.ts";
 import { cleanEmail, cleanName } from "../_shared/user-input.ts";
 import { lookupAgencyAbn, normalizeAbn, validateAbn, type AgencyAbnDetails } from "../_shared/validation/abn.ts";
-import { deliverInvite } from "../_shared/invite-delivery.ts";
+import { deliverInvite, findAuthUserByEmail } from "../_shared/invite-delivery.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -146,8 +146,36 @@ Deno.serve(async (req) => {
       displayName = contact.value;
     }
 
+    // A brand-new student who chose a password gets a ready account (no email round trip) and goes straight into their
+    // application. An email that is already on a student record or has a sign-in never gets a password here: that
+    // record may hold someone's applications, so its owner proves the email through the emailed link instead.
+    const password = kind === "student" && typeof parsed.password === "string" ? parsed.password : "";
+    let accountId = "";
+    let passwordRefused = false;
+    if (password) {
+      if (password.length < 10 || password.length > 72) return json({ error: "Choose a password of 10 to 72 characters." }, 400);
+      if (/skyline|slit/i.test(password)) return json({ error: "Please avoid using the organisation name in your password." }, 400);
+      const { data: onRecord, error: recordError } = await admin.from("enrollment_students").select("id").ilike("email", email.value.replace(/[\\%_]/g, "\\$&")).limit(1);
+      const existing = await findAuthUserByEmail(admin, email.value);
+      if (recordError || existing.error) return json({ error: "We could not complete your enrolment. Please try again shortly." }, 503);
+      if ((onRecord ?? []).length || existing.user) passwordRefused = true;
+      else {
+        const { data: created, error: createErr } = await admin.auth.admin.createUser({ email: email.value, password, email_confirm: true, user_metadata: { name: displayName } });
+        if (createErr || !created?.user) {
+          const weak = /password/i.test(createErr?.message ?? "");
+          return json({ error: weak ? createErr!.message : "We could not create your account. Please try again shortly." }, weak ? 400 : 503);
+        }
+        accountId = created.user.id;
+      }
+    }
+
     const { data, error } = await admin.rpc("portal_self_register", { p_kind: kind, p_input: input });
-    if (error) return rpcFailure(error);
+    if (error) {
+      if (accountId) await admin.auth.admin.deleteUser(accountId).catch(() => undefined);
+      return rpcFailure(error);
+    }
+    // The pending invitation is accepted when they sign in (portal_resolve_access), which the page does at once.
+    if (accountId) return json({ ok: true, kind, signIn: true, emailSent: false, existingIdentity: false, businessName: null, direct: data?.direct ?? null, warning: null });
 
     // The record and its invitation exist; the mail is best effort (a resend is one click away for SLIT staff).
     const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -155,7 +183,8 @@ Deno.serve(async (req) => {
     return json({
       ok: true, kind, emailSent: delivery.emailSent, existingIdentity: delivery.existingIdentity,
       businessName: data?.businessName ?? null, direct: data?.direct ?? null,
-      warning: delivery.error ? "Your enrolment was recorded, but the email could not be sent. Use \"Forgot password?\" on the sign-in tab to get a link." : null,
+      warning: delivery.error ? "Your enrolment was recorded, but the email could not be sent. Use \"Forgot password?\" on the sign-in tab to get a link."
+        : passwordRefused && !delivery.existingIdentity ? "This email is already on a student record, so for your security we've emailed you a link to choose your password. Open it, then sign in to continue your application." : null,
     });
   } catch (error) {
     console.error("portal-self-register failed", error);

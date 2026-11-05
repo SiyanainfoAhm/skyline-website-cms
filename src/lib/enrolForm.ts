@@ -5,6 +5,7 @@
 
 import { validateAbn } from "../../supabase/functions/_shared/validation/abn";
 import { parseStoredPhone, validateStoredPhone } from "../../supabase/functions/_shared/validation/identifiers";
+import { passwordProblem } from "./passwords";
 
 export type EnrolKind = "student" | "agent" | "staff";
 
@@ -12,11 +13,13 @@ export interface StudentEnrolForm {
   firstName: string; lastName: string; email: string; mobile: string;
   /** YYYY-MM-DD from the date picker (DD/MM/YYYY is also understood). */
   dateOfBirth: string; course: string; referralCode: string; agreed: boolean;
+  /** Their own password: the account is ready at once and they go straight into their application. */
+  password: string;
 }
 
 export interface AgentEnrolForm { businessName: string; abn: string; contactName: string; email: string; phone: string; agreed: boolean }
 
-export const EMPTY_STUDENT_ENROL: StudentEnrolForm = { firstName: "", lastName: "", email: "", mobile: "", dateOfBirth: "", course: "", referralCode: "", agreed: false };
+export const EMPTY_STUDENT_ENROL: StudentEnrolForm = { firstName: "", lastName: "", email: "", mobile: "", dateOfBirth: "", course: "", referralCode: "", agreed: false, password: "" };
 export const EMPTY_AGENT_ENROL: AgentEnrolForm = { businessName: "", abn: "", contactName: "", email: "", phone: "", agreed: false };
 
 const EMAIL = /^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/;
@@ -120,6 +123,7 @@ export function validateStudentEnrol(form: StudentEnrolForm, today?: Date): Enro
   const last = form.lastName.trim() ? nameProblem(form.lastName, "last name") : ""; if (last) errors.lastName = last;
   const email = emailProblem(form.email); if (email) errors.email = email;
   const mobile = mobileProblem(form.mobile); if (mobile) errors.mobile = mobile;
+  const password = passwordProblem(form.password); if (password) errors.password = password;
   const dob = form.dateOfBirth.trim() ? dateOfBirthProblem(form.dateOfBirth, today) : ""; if (dob) errors.dateOfBirth = dob;
   if (form.referralCode.trim().length > 40 || CONTROL.test(form.referralCode)) errors.referralCode = "Check the referral code.";
   if (!form.agreed) errors.agreed = "Please agree to the terms and privacy policy.";

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { supabase } from "@/pages/admin/lib/supabase";
+import { MIN_PASSWORD_LENGTH } from "@/lib/passwords";
+import { ApplyQuestion } from "@/pages/login/CompleteSignUp";
 import { Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import QuickSignIn from "@/pages/login/QuickSignIn";
@@ -156,6 +159,8 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
   const [busy, setBusy] = useState(false);
   const [website, setWebsite] = useState("");
   const [showReferral, setShowReferral] = useState(false);
+  const [readyUser, setReadyUser] = useState("");
+  const navigate = useNavigate();
   const patch = (next: Partial<StudentEnrolForm>) => setForm((prev) => ({ ...prev, ...next }));
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -168,10 +173,23 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
     setErrors(checked);
     if (Object.keys(checked).length) return;
     setBusy(true);
-    try { onDone(await enrolStudent(current, website)); }
+    try {
+      const result = await enrolStudent(current, website);
+      if (!result.signIn) { onDone(result); return; }
+      // A new student: their account is ready, so sign them in and go on to "Do you want to apply at SLIT?".
+      const { data, error } = await supabase.auth.signInWithPassword({ email: current.email.trim().toLowerCase(), password: current.password });
+      if (error || !data.user) { onDone({ ...result, warning: "Your account is ready. Sign in with your email and password to start your application." }); return; }
+      // Takes up the student's waiting invitation, so the portal opens as theirs.
+      await supabase.rpc("portal_resolve_access").then(() => undefined, () => undefined);
+      setReadyUser(data.user.id);
+    }
     catch (e) { setErrors({ form: e instanceof Error ? e.message : "We could not complete your enrolment. Please try again." }); }
     finally { setBusy(false); }
   };
+
+  if (readyUser) {
+    return <ApplyQuestion onAnswer={(apply) => { if (apply) navigate("/agency/applications/new", { replace: true }); else onSignedIn(readyUser); }} />;
+  }
 
   return (
     <form onSubmit={submit} noValidate>
@@ -184,6 +202,9 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
           <PhoneInput id="enrol-mobile" name="mobile" value={form.mobile} required placeholder="041 234 5678" />
           <Problem text={errors.mobile} />
         </div>
+        <Field label="Password" required hint={`At least ${MIN_PASSWORD_LENGTH} characters. You sign in with your email and this password.`}>
+          <TextInput type="password" value={form.password} onChange={(e) => patch({ password: e.target.value })} autoComplete="new-password" /><Problem text={errors.password} />
+        </Field>
         {showReferral || form.referralCode ? (
           <Field label="Agent referral code" hint="Your education agent gives you this.">
             <TextInput value={form.referralCode} onChange={(e) => patch({ referralCode: e.target.value })} placeholder="e.g. AGT-1234" autoComplete="off" /><Problem text={errors.referralCode} />
@@ -191,7 +212,7 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
         ) : (
           <button type="button" onClick={() => setShowReferral(true)} className="cursor-pointer text-sm font-medium text-primary-700 hover:text-primary-800">Applying through an education agent? Add their referral code</button>
         )}
-        <p className="text-xs text-foreground-500">Your name and other details come from your passport when you apply. We email you a link to choose your password; that link also confirms your email address.</p>
+        <p className="text-xs text-foreground-500">Your name and other details come from your passport when you apply.</p>
         {/* Honeypot: hidden from people, filled by bots. */}
         <div className="hidden" aria-hidden="true"><label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label></div>
         <Agree checked={form.agreed} onChange={(agreed) => patch({ agreed })} error={errors.agreed} />
