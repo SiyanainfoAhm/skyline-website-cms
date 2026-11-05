@@ -59,6 +59,18 @@ export async function verifyPhoneCode(e164: string, code: string): Promise<strin
   return data.user.id;
 }
 
+/** Student or agent: remembered in this tab across the Google / Facebook round trip, so the right details form opens. */
+export type SignUpIntent = "student" | "agent";
+const INTENT_KEY = "skyline.signup.intent";
+
+export function rememberSignUpIntent(intent: SignUpIntent | null): void {
+  try { if (intent) window.sessionStorage.setItem(INTENT_KEY, intent); else window.sessionStorage.removeItem(INTENT_KEY); } catch { /* storage unavailable */ }
+}
+
+export function readSignUpIntent(): SignUpIntent {
+  try { return window.sessionStorage.getItem(INTENT_KEY) === "agent" ? "agent" : "student"; } catch { return "student"; }
+}
+
 /** True when the signed-in account came from Google, Facebook or a phone number (not an emailed invitation). */
 export function isSelfSignUpAccount(user: { app_metadata?: Record<string, unknown>; phone?: string | null } | null): boolean {
   if (!user) return false;

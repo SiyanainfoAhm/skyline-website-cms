@@ -33,7 +33,7 @@ export default function EnrolWizard({ initialKind, onSignIn, onSignedIn }: { ini
     <div ref={top}>
       {step === 1 ? <KindStep kind={kind} onChange={setKind} onContinue={() => setStep(kind === "staff" ? 1 : 2)} onSignIn={onSignIn} /> : null}
       {step === 2 && kind === "student" ? <StudentStep onBack={() => setStep(1)} onDone={done} onSignedIn={onSignedIn} /> : null}
-      {step === 2 && kind === "agent" ? <AgentStep onBack={() => setStep(1)} onDone={done} /> : null}
+      {step === 2 && kind === "agent" ? <AgentStep onBack={() => setStep(1)} onDone={done} onSignedIn={onSignedIn} /> : null}
       {step === 3 && result ? <DoneStep result={result} onSignIn={onSignIn} /> : null}
     </div>
   );
@@ -173,7 +173,7 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
   return (
     <form onSubmit={submit} noValidate>
       <StepHeader step={2} kind="Student" title="Your details" onBack={onBack} />
-      <QuickStart onSignedIn={onSignedIn} />
+      <QuickStart onSignedIn={onSignedIn} intent="student" />
       <div className="mt-6 space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Field label="First name" required><TextInput value={form.firstName} onChange={(e) => patch({ firstName: e.target.value })} autoComplete="given-name" /><Problem text={errors.firstName} /></Field>
@@ -212,13 +212,13 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
 }
 
 /** Google / Facebook / phone above the student form; hidden entirely when none of them is switched on. */
-function QuickStart({ onSignedIn }: { onSignedIn: (userId: string) => void }) {
+function QuickStart({ onSignedIn, intent }: { onSignedIn: (userId: string) => void; intent: "student" | "agent" }) {
   const [any, setAny] = useState(false);
   useEffect(() => { let active = true; void loadAuthProviders().then((p) => { if (active) setAny(p.google || p.facebook || p.phone); }); return () => { active = false; }; }, []);
   if (!any) return null;
   return (
     <div className="mt-6">
-      <QuickSignIn create label="Sign up faster" onSignedIn={onSignedIn} />
+      <QuickSignIn create intent={intent} label="Sign up faster" onSignedIn={onSignedIn} />
       <div className="mt-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
         <span className="h-px flex-1 bg-background-300" />or fill in your details<span className="h-px flex-1 bg-background-300" />
       </div>
@@ -228,7 +228,7 @@ function QuickStart({ onSignedIn }: { onSignedIn: (userId: string) => void }) {
 
 /* ----------------------------------------------------------------- step 2: agent */
 
-function AgentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: EnrolResult) => void }) {
+function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone: (r: EnrolResult) => void; onSignedIn: (userId: string) => void }) {
   const [form, setForm] = useState<AgentEnrolForm>(EMPTY_AGENT_ENROL);
   const [errors, setErrors] = useState<EnrolErrors<AgentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
@@ -275,6 +275,7 @@ function AgentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: EnrolRe
       <div className="mt-5 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900" role="status">
         <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>Agent accounts are reviewed by our team before you can sign in.</span>
       </div>
+      <QuickStart onSignedIn={onSignedIn} intent="agent" />
       <div className="mt-5 space-y-4">
         <Field label="ABN" required hint={found ? `${found.legalName}${found.entityType ? `, ${found.entityType}` : ""}${found.state ? `, ${found.state} ${found.postcode}` : ""}.` : "We fill in your registered business name."}>
           <div className="flex gap-2">

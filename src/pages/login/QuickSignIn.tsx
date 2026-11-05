@@ -2,14 +2,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import { mobileProblem } from "@/lib/enrolForm";
-import { loadAuthProviders, sendPhoneCode, signInWithProvider, verifyPhoneCode, type AuthProviders } from "@/lib/authProviders";
+import { loadAuthProviders, rememberSignUpIntent, sendPhoneCode, signInWithProvider, verifyPhoneCode, type AuthProviders, type SignUpIntent } from "@/lib/authProviders";
 
 /**
  * "Continue with Google / Facebook / phone". Shown only for providers switched on in Supabase Auth. `create` is true on
  * Enroll now (a new account may be made) and false on Sign in. After Google or Facebook the browser comes back to /login;
  * after a phone code `onSignedIn` routes the new session.
  */
-export default function QuickSignIn({ create, onSignedIn, label }: { create: boolean; onSignedIn: (userId: string) => void; label?: string }) {
+export default function QuickSignIn({ create, onSignedIn, label, intent }: { create: boolean; onSignedIn: (userId: string) => void; label?: string; intent?: SignUpIntent }) {
   const [providers, setProviders] = useState<AuthProviders | null>(null);
   const [busy, setBusy] = useState<"" | "google" | "facebook">("");
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -21,6 +21,7 @@ export default function QuickSignIn({ create, onSignedIn, label }: { create: boo
 
   const oauth = async (provider: "google" | "facebook") => {
     setError(""); setBusy(provider);
+    rememberSignUpIntent(intent ?? null);
     try { await signInWithProvider(provider); } // the browser leaves for the provider here
     catch (e) { setError(e instanceof Error ? e.message : "Please try again."); setBusy(""); }
   };
@@ -39,7 +40,7 @@ export default function QuickSignIn({ create, onSignedIn, label }: { create: boo
         </Button>
       ) : null}
       {providers.phone ? (
-        phoneOpen ? <PhoneCode create={create} onSignedIn={onSignedIn} onCancel={() => setPhoneOpen(false)} /> : (
+        phoneOpen ? <PhoneCode create={create} onSignedIn={(id) => { rememberSignUpIntent(intent ?? null); onSignedIn(id); }} onCancel={() => setPhoneOpen(false)} /> : (
           <Button type="button" variant="outline" className="w-full" icon="ri-smartphone-line" disabled={Boolean(busy)} onClick={() => { setError(""); setPhoneOpen(true); }}>
             Continue with phone number
           </Button>

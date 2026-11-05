@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(280);
+select plan(286);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -551,6 +551,17 @@ select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Pho",
 select lives_ok($$select public.portal_self_enrol_complete('{"firstName":"Pho","lastName":"Ne","email":"phone.student@example.test","dateOfBirth":"2001-03-04"}')$$,'a phone sign-up completes with its verified mobile');
 set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000042';
 select throws_ok($$select public.portal_self_enrol_complete('{"firstName":"Un","lastName":"Confirmed","phone":"+61498000002","dateOfBirth":"2001-03-04"}')$$,'42501',null,'an account with nothing verified cannot enrol');
+-- An agent signs up with Google: their business waits for review with them as its administrator.
+reset role;
+select ok(public.abn_checksum_ok('85165345717') and not public.abn_checksum_ok('85165345718') and not public.abn_checksum_ok('8516534571'),'the ABN checksum is enforced');
+insert into auth.users(id,email,email_confirmed_at) values ('33000000-0000-0000-0000-000000000043','google.agent@example.test',now());
+set local role authenticated;
+set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000043';
+select throws_ok($$select public.portal_self_register_agent_complete('{"abn":"85165345718","businessName":"Bad Abn","contactName":"Goo Agent","phone":"0398765400"}')$$,'22023',null,'an invalid ABN is refused');
+select lives_ok($$select public.portal_self_register_agent_complete('{"abn":"53004085616","businessName":"Google Agency","contactName":"Goo Agent","phone":"0398765400"}')$$,'a Google sign-up registers its agency');
+select is((select status||':'||(registration_requested_at is not null)::text from public.agencies where registration_number='53004085616'),'Inactive:true','the business waits for review');
+select is(public.portal_resolve_access()->>'state','pending_review','the agent is told the review is pending');
+select throws_ok($$select public.portal_self_register_agent_complete('{"abn":"51824753556","businessName":"Second","contactName":"Goo Agent","phone":"0398765400"}')$$,'23505',null,'one business per account');
 reset role;
 select * from finish();
 rollback;

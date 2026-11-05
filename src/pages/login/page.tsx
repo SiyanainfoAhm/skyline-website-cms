@@ -15,7 +15,7 @@ import {
 } from "@/lib/loginRouting";
 import EnrolWizard from "@/pages/login/EnrolWizard";
 import QuickSignIn from "@/pages/login/QuickSignIn";
-import CompleteStudentProfile from "@/pages/login/CompleteStudentProfile";
+import CompleteSignUp from "@/pages/login/CompleteSignUp";
 import { isSelfSignUpAccount } from "@/lib/authProviders";
 import type { User } from "@supabase/supabase-js";
 import type { EnrolKind } from "@/lib/enrolForm";
@@ -210,9 +210,16 @@ export default function LoginPage() {
           </div>
 
           {completing ? (
-            <CompleteStudentProfile
+            <CompleteSignUp
               user={completing}
-              onDone={() => { const id = completing.id; setCompleting(null); setChecking(true); void route(id); }}
+              onStudentDone={() => { const id = completing.id; setCompleting(null); setChecking(true); void route(id); }}
+              onAgentDone={(name) => {
+                // Nothing to open until SLIT approves the business: end the session and say what happens next.
+                void supabase.auth.signOut({ scope: "local" }).then(() => {
+                  markSessionSeen(false); setCompleting(null); setError("");
+                  setInfo(`Application received for ${name}. Our team will review your agent account and email you once it's approved; then sign in the same way.`);
+                });
+              }}
               onCancel={() => { void supabase.auth.signOut({ scope: "local" }).then(() => { markSessionSeen(false); setCompleting(null); }); }}
             />
           ) : choice ? (

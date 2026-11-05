@@ -20,7 +20,7 @@ function namesFrom(user: User): { first: string; last: string } {
  * After signing up with Google, Facebook or a phone number: the few details that make the account a student. Whatever the
  * provider verified (email or mobile) is shown and locked; the database links an existing record only through those.
  */
-export default function CompleteStudentProfile({ user, onDone, onCancel }: { user: User; onDone: () => void; onCancel: () => void }) {
+export default function CompleteStudentProfile({ user, onDone, onCancel, embedded = false }: { user: User; onDone: () => void; onCancel: () => void; embedded?: boolean }) {
   const names = namesFrom(user);
   const emailVerified = Boolean(user.email && user.email_confirmed_at);
   const phoneVerified = Boolean(user.phone && user.phone_confirmed_at);
@@ -63,10 +63,14 @@ export default function CompleteStudentProfile({ user, onDone, onCancel }: { use
 
   return (
     <form onSubmit={(e) => void submit(e)} noValidate>
-      <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Almost done · Student</p>
-      <h2 className="mt-1 font-heading text-2xl font-bold text-foreground-950">Your details</h2>
-      <p className="mt-1.5 text-sm text-foreground-600">A few details to set up your student account.</p>
-      <div className="mt-6 space-y-4">
+      {embedded ? null : (
+        <>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Almost done · Student</p>
+          <h2 className="mt-1 font-heading text-2xl font-bold text-foreground-950">Your details</h2>
+          <p className="mt-1.5 text-sm text-foreground-600">A few details to set up your student account.</p>
+        </>
+      )}
+      <div className={embedded ? "space-y-4" : "mt-6 space-y-4"}>
         <div className="grid grid-cols-2 gap-3">
           <Field label="First name" required><TextInput value={first} onChange={(e) => setFirst(e.target.value)} autoComplete="given-name" />{problem("first")}</Field>
           <Field label="Last name" required><TextInput value={last} onChange={(e) => setLast(e.target.value)} autoComplete="family-name" />{problem("last")}</Field>
