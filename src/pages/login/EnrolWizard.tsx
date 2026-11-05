@@ -313,7 +313,7 @@ function DoneStep({ result, onSignIn }: { result: EnrolResult; onSignIn: () => v
     : result.warning
       ? result.warning
       : agent
-        ? "We've sent you a link to choose your password. Our team will review your agent account and let you know once it's approved."
+        ? "Your application has been received and our team is looking into it. We will get back to you."
         : "We've sent you a link to choose your password. Open it, set your password, then sign in to see your application.";
   return (
     <div className="text-center">

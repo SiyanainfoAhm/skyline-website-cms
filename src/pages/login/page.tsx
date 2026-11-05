@@ -232,7 +232,7 @@ export default function LoginPage() {
                 // Nothing to open until SLIT approves the business: end the session and say what happens next.
                 void supabase.auth.signOut({ scope: "local" }).then(() => {
                   markSessionSeen(false); setCompleting(null); setError("");
-                  setInfo(`Application received for ${name}. Our team will review your agent account and email you once it's approved; then sign in the same way.`);
+                  setInfo(`Your application for ${name} has been received and our team is looking into it. We will get back to you.`);
                 });
               }}
               onCancel={() => { void supabase.auth.signOut({ scope: "local" }).then(() => { markSessionSeen(false); setCompleting(null); }); }}
