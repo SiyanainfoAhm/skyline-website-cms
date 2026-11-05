@@ -12,6 +12,10 @@ let cached: Promise<AuthProviders> | null = null;
 
 export function loadAuthProviders(): Promise<AuthProviders> {
   if (cached) return cached;
+  // Review only: ?show-sign-in-options=1 shows every button before the providers are switched on (they fail until then).
+  try {
+    if (new URLSearchParams(window.location.search).get("show-sign-in-options") === "1") return Promise.resolve({ google: true, facebook: true, phone: true });
+  } catch { /* no window */ }
   const url = import.meta.env.VITE_PUBLIC_SUPABASE_URL as string | undefined;
   const key = import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
   if (!url || !key) return Promise.resolve(NONE);
