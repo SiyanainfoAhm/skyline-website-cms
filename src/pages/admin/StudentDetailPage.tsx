@@ -62,7 +62,7 @@ export default function StudentDetailPage() {
         <span className="text-foreground-900">Student</span>
       </nav>
       <PageHeader title={student.name || "Unnamed student"}
-        description={`Student of ${student.business.name}${student.agent ? `, looked after by ${student.agent.name}` : ""}. Sign-in: ${studentLoginLabel(student.login)}.`}
+        description={`Student of ${student.business.name}${student.agent ? `, looked after by ${student.agent.name}` : ""}${student.selfEnrolled ? ", enrolled themselves from the website" : ""}. Sign-in: ${studentLoginLabel(student.login)}.`}
         actions={student.login?.status === "active" ? undefined : (
           <Button icon="ri-mail-send-line" disabled={inviting || !student.email} onClick={() => void invite()}>
             {inviting ? "Sending…" : student.login?.invitationId ? "Resend invite" : "Invite to sign in"}
@@ -86,6 +86,7 @@ export default function StudentDetailPage() {
             <Row label="Date of birth" value={student.dateOfBirth ? formatDate(student.dateOfBirth) : ""} />
             <Row label="Passport number" value={student.passportNumber} />
             <Row label="Nationality" value={student.nationality} />
+            {student.courseOfInterest ? <Row label="Course of interest" value={student.courseOfInterest} /> : null}
             <div><dt className="text-xs text-foreground-500">Sign-in</dt><dd><StudentLoginCell login={student.login} email={student.email} busy={inviting} onInvite={() => void invite()} /></dd></div>
             <div><dt className="text-xs text-foreground-500">Business</dt><dd className="flex flex-wrap items-center gap-2"><Link to={`/admin/businesses/${student.business.id}`} className="text-foreground-900 hover:text-primary-700">{student.business.name}</Link><AgencyStatusBadge status={student.business.status} /></dd></div>
             <div><dt className="text-xs text-foreground-500">Agent</dt><dd>{student.agent ? <Link to={`/admin/agents/${student.agent.id}`} className="text-foreground-900 hover:text-primary-700">{student.agent.name}</Link> : <span className="text-foreground-500">Not assigned</span>}</dd></div>

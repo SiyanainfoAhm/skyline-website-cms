@@ -5,7 +5,7 @@ import { supabase } from "@/pages/admin/lib/supabase";
 import { AdminLoading, Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
 import { resolveTenantSite } from "@/lib/tenantSite";
-import { passwordRecoveryUrl } from "@/lib/siteUrl";
+import { publicSiteOrigin } from "@/lib/siteUrl";
 import { readCachedBrand, tenantBrandKey } from "@/lib/brandCache";
 import { tenantThemeStyle } from "@/lib/tenantTheme";
 import type { PortalAccessState } from "@/pages/agency/lib/applicationAccess";
@@ -13,6 +13,8 @@ import {
   DESTINATION_LABEL, decideLogin, destinationFor, loginErrorMessage, loginNotice, markSessionSeen, readLastDestination, rememberDestination,
   type AccessSummary, type CmsAccess, type LoginDestination,
 } from "@/lib/loginRouting";
+import EnrolWizard from "@/pages/login/EnrolWizard";
+import type { EnrolKind } from "@/lib/enrolForm";
 
 /** What the DATABASE says this signed-in user may use. The page only routes; every request is still authorized by RLS / edge functions. */
 async function fetchAccess(authUserId: string): Promise<AccessSummary> {
@@ -38,24 +40,37 @@ async function fetchAccess(authUserId: string): Promise<AccessSummary> {
   return { cms, portal };
 }
 
+/** Where the magic link lands: this deployment's /login, which routes the new session like any other. */
+function magicLinkUrl(): string {
+  const base = __BASE_PATH__.split("/").filter(Boolean).join("/");
+  return `${publicSiteOrigin()}${base ? `/${base}` : ""}/login`;
+}
+
+type Tab = "signin" | "enroll";
+
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const next = params.get("next");
   const notice = loginNotice(params.get("reason"));
+  // Tenant domains (other institutions) only sign people in; self-enrolment is a SLIT-site feature.
+  const tenant = requestWebsiteDomain();
+  const enrolAllowed = !tenant;
+  const tab: Tab = enrolAllowed && params.get("mode") === "enroll" ? "enroll" : "signin";
+  const asKind = params.get("as");
+  const initialKind: EnrolKind | null = asKind === "student" || asKind === "agent" || asKind === "staff" ? asKind : null;
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [resetBusy, setResetBusy] = useState(false);
+  const [linkBusy, setLinkBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState(notice);
   const [choice, setChoice] = useState<{ userId: string; options: LoginDestination[] } | null>(null);
   const routing = useRef(false);
 
   // Tenant domains show the tenant's cached logo / name / colour; the main Skyline domain keeps the built-in branding.
-  const tenant = requestWebsiteDomain();
   const brand = useMemo(() => (tenant ? readCachedBrand(tenantBrandKey()) : null), [tenant]);
   const brandName = brand?.name || tenant || "Skyline Institute of Technology";
   const themeStyle = useMemo<CSSProperties>(() => {
@@ -64,6 +79,14 @@ export default function LoginPage() {
     void _h; void _b; void _l;
     return colours as CSSProperties;
   }, [brand]);
+
+  const showTab = (value: Tab, kind?: EnrolKind) => {
+    const query = new URLSearchParams(params);
+    if (value === "enroll") { query.set("mode", "enroll"); if (kind) query.set("as", kind); else query.delete("as"); }
+    else { query.delete("mode"); query.delete("as"); }
+    setParams(query, { replace: true });
+    setError(""); setInfo("");
+  };
 
   const route = useCallback(async (userId: string) => {
     if (routing.current) return;
@@ -85,7 +108,7 @@ export default function LoginPage() {
     navigate(decision.to, { replace: true });
   }, [next, navigate]);
 
-  // Someone who is already signed in (or returning from an invite / reset) is routed without seeing the form.
+  // Someone who is already signed in (or returning from an invite, reset or sign-in link) is routed without seeing the form.
   useEffect(() => {
     let active = true;
     let stopRetry = () => {};
@@ -115,19 +138,24 @@ export default function LoginPage() {
     setBusy(false);
   };
 
-  const forgot = async () => {
+  // A one-time sign-in link for an existing account; it never creates one (sign-up is the Enroll now tab).
+  const emailLink = async () => {
     setError(""); setInfo("");
-    if (!email.trim()) { setError("Enter your email address first, then choose “Forgot password?”."); return; }
-    setResetBusy(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: passwordRecoveryUrl() });
-    setResetBusy(false);
-    if (resetError) setError(loginErrorMessage(resetError).replace("Incorrect email or password.", "We could not send the reset email. Please try again later."));
-    else setInfo("If that email belongs to an account, a password reset link is on its way.");
+    if (!email.trim()) { setError("Enter your email address first, then choose “Email me a sign-in link”."); return; }
+    setLinkBusy(true);
+    try {
+      const { error: linkError } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false, emailRedirectTo: magicLinkUrl() } });
+      if (linkError) setError(/rate|too many/i.test(linkError.message) ? "Please wait before requesting another sign-in link." : "If that email belongs to an account, a sign-in link is on its way.");
+      else setInfo("If that email belongs to an account, a sign-in link is on its way. It works once and expires soon.");
+    } catch { setError("We could not send a sign-in link. Please try again later."); }
+    finally { setLinkBusy(false); }
   };
 
   if (checking) {
     return <div className="flex min-h-screen items-center justify-center bg-background-100" style={themeStyle}><AdminLoading label="Checking your session…" /></div>;
   }
+
+  const tabClass = (value: Tab) => `flex-1 cursor-pointer rounded-md px-3 py-2 text-center text-sm font-semibold transition-colors ${tab === value ? "bg-background-50 text-foreground-950 shadow-sm" : "text-foreground-600 hover:text-foreground-900"}`;
 
   return (
     <div className="flex min-h-screen bg-background-100" style={themeStyle}>
@@ -141,9 +169,11 @@ export default function LoginPage() {
           <span className="font-heading text-lg font-bold">{brandName}</span>
         </div>
         <div>
-          <h1 className="font-heading text-3xl font-bold leading-tight">Welcome back</h1>
+          <h1 className="font-heading text-3xl font-bold leading-tight">{tab === "enroll" ? "Join Skyline" : "Welcome back"}</h1>
           <p className="mt-4 max-w-md text-sm text-background-50/85">
-            One sign-in for website staff, administrators, agency administrators and agents. We take you to the right place for your role.
+            {tab === "enroll"
+              ? "Students enrol in minutes. Education agents register their business and are reviewed by our team. Staff join by invitation."
+              : "Students, agents and staff all sign in here. We take you to your portal automatically."}
           </p>
         </div>
         {tenant ? <p className="text-xs text-background-50/70">{tenant}</p> : <p className="text-xs text-background-50/70">RTO 45989 &middot; CRICOS 04114B</p>}
@@ -151,7 +181,7 @@ export default function LoginPage() {
         <div className="pointer-events-none absolute -bottom-24 right-10 h-72 w-72 rounded-full bg-background-50/10" />
       </div>
 
-      <div className="flex w-full flex-1 items-center justify-center px-5 py-10 lg:w-[54%]">
+      <div className="flex w-full flex-1 items-start justify-center px-5 py-10 lg:w-[54%] lg:items-center">
         <div className="w-full max-w-sm">
           <Link to="/" className="mb-6 inline-flex items-center gap-1.5 text-sm font-medium text-foreground-600 hover:text-primary-700">
             <i className="ri-arrow-left-line" aria-hidden="true" />
@@ -183,44 +213,69 @@ export default function LoginPage() {
             </div>
           ) : (
             <>
-              <h2 className="font-heading text-2xl font-bold text-foreground-950">Sign in</h2>
-              <p className="mt-1.5 text-sm text-foreground-600">Sign in to your Skyline account</p>
+              {tab === "signin" ? (
+                <>
+                  <h2 className="font-heading text-2xl font-bold text-foreground-950">Welcome back</h2>
+                  <p className="mt-1.5 text-sm text-foreground-600">{enrolAllowed ? "Students, agents and staff all sign in here." : `Sign in to ${brandName}.`}</p>
+                </>
+              ) : null}
 
-              <form onSubmit={submit} className="mt-7 space-y-4">
-                <Field label="Email address" required>
-                  <TextInput type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="username" />
-                </Field>
-                <Field label="Password" required>
-                  <div className="relative">
-                    <TextInput type={show ? "text" : "password"} name="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" autoComplete="current-password" className="pr-10" />
-                    <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-foreground-500 hover:bg-background-100">
-                      <i className={show ? "ri-eye-off-line" : "ri-eye-line"} aria-hidden="true" />
-                    </button>
-                  </div>
-                </Field>
-                <div className="flex justify-end">
-                  <button type="button" onClick={forgot} disabled={resetBusy} className="cursor-pointer text-[13px] font-medium text-primary-700 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-60">
-                    {resetBusy ? "Sending…" : "Forgot password?"}
-                  </button>
+              {enrolAllowed ? (
+                <div role="tablist" aria-label="Sign in or enrol" className={`flex rounded-lg border border-background-300 bg-background-200 p-1 ${tab === "signin" ? "mt-6" : ""}`}>
+                  <button type="button" role="tab" aria-selected={tab === "signin"} className={tabClass("signin")} onClick={() => showTab("signin")}>Sign in</button>
+                  <button type="button" role="tab" aria-selected={tab === "enroll"} className={tabClass("enroll")} onClick={() => showTab("enroll")}>Enroll now</button>
                 </div>
+              ) : null}
 
-                {error ? (
-                  <div className="flex items-start gap-2 rounded-md border border-primary-200 bg-primary-50 px-3 py-2.5 text-[13px] text-primary-900" role="alert">
-                    <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>{error}</span>
+              {tab === "enroll" ? (
+                <div className="mt-6">
+                  <EnrolWizard key={initialKind ?? "none"} initialKind={initialKind} onSignIn={() => showTab("signin")} />
+                </div>
+              ) : (
+                <>
+                  <form onSubmit={submit} className="mt-6 space-y-4">
+                    <Field label="Email" required>
+                      <TextInput type="email" name="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="username" />
+                    </Field>
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-[13px] font-medium text-foreground-800">Password <span className="text-primary-600">*</span></span>
+                        <Link to="/forgot-password" className="text-[13px] font-medium text-primary-700 hover:text-primary-800">Forgot password?</Link>
+                      </div>
+                      <div className="relative">
+                        <TextInput type={show ? "text" : "password"} name="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" autoComplete="current-password" className="pr-10" aria-label="Password" />
+                        <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-foreground-500 hover:bg-background-100">
+                          <i className={show ? "ri-eye-off-line" : "ri-eye-line"} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {error ? (
+                      <div className="flex items-start gap-2 rounded-md border border-primary-200 bg-primary-50 px-3 py-2.5 text-[13px] text-primary-900" role="alert">
+                        <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>{error}</span>
+                      </div>
+                    ) : null}
+                    {info ? (
+                      <div className="flex items-start gap-2 rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2.5 text-[13px] text-secondary-900" role="status">
+                        <i className="ri-mail-check-line mt-0.5 text-base" aria-hidden="true" /><span>{info}</span>
+                      </div>
+                    ) : null}
+
+                    <Button type="submit" className="w-full" disabled={busy} icon={busy ? undefined : "ri-login-circle-line"}>{busy ? "Signing in…" : "Sign in"}</Button>
+                  </form>
+
+                  <div className="my-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
+                    <span className="h-px flex-1 bg-background-300" />or<span className="h-px flex-1 bg-background-300" />
                   </div>
-                ) : null}
-                {info ? (
-                  <div className="flex items-start gap-2 rounded-md border border-secondary-200 bg-secondary-50 px-3 py-2.5 text-[13px] text-secondary-900" role="status">
-                    <i className="ri-mail-check-line mt-0.5 text-base" aria-hidden="true" /><span>{info}</span>
-                  </div>
-                ) : null}
+                  <Button type="button" variant="outline" className="w-full" icon="ri-mail-line" disabled={linkBusy} onClick={() => void emailLink()}>
+                    {linkBusy ? "Sending…" : "Email me a sign-in link"}
+                  </Button>
 
-                <Button type="submit" className="w-full" disabled={busy} icon={busy ? undefined : "ri-login-circle-line"}>{busy ? "Signing in…" : "Sign in"}</Button>
-              </form>
-
-              <p className="mt-6 text-center text-xs text-foreground-500">
-                Accounts are created by invitation. Need help signing in? Contact your administrator or IT Support.
-              </p>
+                  <p className="mt-8 text-center text-xs text-foreground-500">
+                    {enrolAllowed ? "You’ll be taken to your Student, Agent or Staff portal automatically." : "Need help signing in? Contact your administrator."}
+                  </p>
+                </>
+              )}
             </>
           )}
         </div>
