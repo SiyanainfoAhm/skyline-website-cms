@@ -158,7 +158,6 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
   const [errors, setErrors] = useState<EnrolErrors<StudentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
   const [website, setWebsite] = useState("");
-  const [showReferral, setShowReferral] = useState(false);
   const [readyUser, setReadyUser] = useState("");
   const navigate = useNavigate();
   const patch = (next: Partial<StudentEnrolForm>) => setForm((prev) => ({ ...prev, ...next }));
@@ -205,13 +204,6 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
         <Field label="Password" required hint={`At least ${MIN_PASSWORD_LENGTH} characters. You sign in with your email and this password.`}>
           <TextInput type="password" value={form.password} onChange={(e) => patch({ password: e.target.value })} autoComplete="new-password" /><Problem text={errors.password} />
         </Field>
-        {showReferral || form.referralCode ? (
-          <Field label="Agent referral code" hint="Your education agent gives you this.">
-            <TextInput value={form.referralCode} onChange={(e) => patch({ referralCode: e.target.value })} placeholder="e.g. AGT-1234" autoComplete="off" /><Problem text={errors.referralCode} />
-          </Field>
-        ) : (
-          <button type="button" onClick={() => setShowReferral(true)} className="cursor-pointer text-sm font-medium text-primary-700 hover:text-primary-800">Applying through an education agent? Add their referral code</button>
-        )}
         <p className="text-xs text-foreground-500">Your name and other details come from your passport when you apply.</p>
         {/* Honeypot: hidden from people, filled by bots. */}
         <div className="hidden" aria-hidden="true"><label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label></div>

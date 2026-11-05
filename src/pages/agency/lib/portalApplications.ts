@@ -511,6 +511,29 @@ export async function createApplicationForStudent(clientKey: string, studentId: 
   return { id: String(row.application_id), reference: String(row.application_reference ?? "") };
 }
 
+export interface StudentAgencyOptions {
+  /** The student is under SLIT's direct business with no application yet, so "Are you working with an agency?" is asked. */
+  ask: boolean;
+  businesses: Array<{ id: string; name: string }>;
+  agents: Array<{ id: string; name: string; role: string }>;
+}
+
+/** Active businesses a self-enrolled student may choose, and (for one business) its active agents. */
+export async function studentAgencyOptions(businessId?: string): Promise<StudentAgencyOptions> {
+  const { data, error } = await supabase.rpc("portal_student_agency_options", { p_business: businessId ?? null });
+  if (error) throw new Error(error.message);
+  const row = (data ?? {}) as Partial<StudentAgencyOptions>;
+  return { ask: row.ask === true, businesses: row.businesses ?? [], agents: row.agents ?? [] };
+}
+
+/** Moves the signed-in student (record, sign-in and pending invitation) under the chosen business and agent. */
+export async function chooseStudentAgency(businessId: string, agentId: string): Promise<{ businessName: string; agentName: string }> {
+  const { data, error } = await supabase.rpc("portal_student_choose_agency", { p_business: businessId, p_agent: agentId });
+  if (error) throw new Error(error.message);
+  const row = (data ?? {}) as { businessName?: string; agentName?: string };
+  return { businessName: String(row.businessName ?? ""), agentName: String(row.agentName ?? "") };
+}
+
 export interface BusinessAgentOption {
   id: string;
   profileId: string | null;

@@ -17,6 +17,8 @@ import {
   listApplicationDocuments,
   saveApplicationDraft,
   saveStudent,
+  studentAgencyOptions,
+  chooseStudentAgency,
   type BusinessAgentOption,
   type StudentMatch,
 } from "@/pages/agency/lib/portalApplications";
@@ -65,7 +67,7 @@ function clearSession(uid: string): void {
   }
 }
 
-type Phase = "checking" | "student" | "pick" | "wizard";
+type Phase = "checking" | "student" | "pick" | "agency" | "wizard";
 
 type Business = { id: string; name: string; status: BusinessStatus };
 
@@ -88,7 +90,7 @@ async function saveContact(id: string, student: StudentDraft): Promise<void> {
  */
 export default function NewApplicationPage() {
   const paths = useApplicationPaths();
-  const { role, studentId, agency, profile, authUser, authLoading, identityLoading } = usePortalAuth();
+  const { role, studentId, agency, profile, authUser, authLoading, identityLoading, reloadIdentity } = usePortalAuth();
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -104,6 +106,13 @@ export default function NewApplicationPage() {
   const [initialAgentName, setInitialAgentName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  // A self-enrolled student's first application: are they working with an education agency?
+  const [agencyChoices, setAgencyChoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [withAgency, setWithAgency] = useState<boolean | null>(null);
+  const [chosenBusinessId, setChosenBusinessId] = useState("");
+  const [agentChoices, setAgentChoices] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [chosenAgentId, setChosenAgentId] = useState("");
+  const [agentsLoading, setAgentsLoading] = useState(false);
 
   // Agency users work inside their own business; SLIT administrators choose one.
   const ownBusiness: Business | null = role !== "slit_admin" && agency ? { id: agency.id, name: agency.name, status: "Active" } : null;
@@ -237,6 +246,9 @@ export default function NewApplicationPage() {
         if (role === "student") {
           // A student starts their own application: no student step, no agent to choose.
           if (!studentId) throw new Error("Your student record could not be found. Ask your agent or SLIT Administration.");
+          // Signed up by themselves and no application yet: first, are they working with an agency?
+          const options = await studentAgencyOptions().catch(() => null);
+          if (options?.ask) { setAgencyChoices(options.businesses); setPhase("agency"); return; }
           const { id } = await createApplicationForStudent(clientKeyRef.current, studentId);
           clientKeyRef.current = newClientKey();
           openWizard(id);
@@ -292,6 +304,39 @@ export default function NewApplicationPage() {
     }
   };
 
+  // The student picked a business: its active agents are listed.
+  useEffect(() => {
+    if (phase !== "agency" || !chosenBusinessId) { setAgentChoices([]); return; }
+    let active = true;
+    setAgentsLoading(true);
+    studentAgencyOptions(chosenBusinessId)
+      .then((options) => { if (active) setAgentChoices(options.agents); })
+      .catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : "We could not load the agents."); })
+      .finally(() => { if (active) setAgentsLoading(false); });
+    return () => { active = false; };
+  }, [phase, chosenBusinessId]);
+
+  // "No, by myself" starts the application under SLIT; "Yes" first moves the student under the chosen business and agent.
+  const startAsStudent = async (choice: { businessId: string; agentId: string } | null) => {
+    if (!studentId) return;
+    setCreating(true);
+    setError("");
+    try {
+      if (choice) {
+        const moved = await chooseStudentAgency(choice.businessId, choice.agentId);
+        await reloadIdentity();
+        push(`You are now recorded with ${moved.businessName}${moved.agentName ? `, looked after by ${moved.agentName}` : ""}.`);
+      }
+      const { id } = await createApplicationForStudent(clientKeyRef.current, studentId);
+      clientKeyRef.current = newClientKey();
+      openWizard(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "We could not start a new application.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const secondary = "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-background-300 px-5 py-3 text-sm font-semibold text-foreground-800 transition-colors hover:bg-background-100 disabled:cursor-not-allowed disabled:opacity-60";
   const primary = "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-6 py-3 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -328,6 +373,68 @@ export default function NewApplicationPage() {
         onFinish={handleFinish}
         onCancel={() => void handleCancel()}
       />
+    );
+  }
+
+  if (phase === "agency") {
+    const selectClass = "w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none disabled:opacity-60";
+    const canContinue = Boolean(chosenBusinessId && chosenAgentId) && !creating;
+    return (
+      <div>
+        <PageHeading
+          eyebrow="New application"
+          title="Before you start"
+          description="Tell us who is helping you with your application. You can only choose this once, so ask SLIT Administration if it needs changing later."
+        />
+        <div className="mt-6 max-w-2xl rounded-card border border-background-200 bg-background-50 p-6">
+          <h2 className="font-heading text-base font-semibold text-foreground-950">Are you working with an education agency?</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button type="button" disabled={creating} onClick={() => setWithAgency(true)}
+              className={`cursor-pointer rounded-md border px-4 py-3 text-left text-sm transition-colors disabled:opacity-60 ${withAgency === true ? "border-primary-500 bg-primary-50 text-foreground-950" : "border-background-300 text-foreground-800 hover:bg-background-100"}`}>
+              <b className="block font-semibold">Yes</b><span className="text-foreground-600">An agent is helping me apply.</span>
+            </button>
+            <button type="button" disabled={creating} onClick={() => { setWithAgency(false); void startAsStudent(null); }}
+              className={`cursor-pointer rounded-md border px-4 py-3 text-left text-sm transition-colors disabled:opacity-60 ${withAgency === false ? "border-primary-500 bg-primary-50 text-foreground-950" : "border-background-300 text-foreground-800 hover:bg-background-100"}`}>
+              <b className="block font-semibold">No</b><span className="text-foreground-600">I am applying by myself.</span>
+            </button>
+          </div>
+
+          {withAgency ? (
+            <div className="mt-5 space-y-4">
+              <div>
+                <label htmlFor="student-business" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Business <span className="text-primary-600">*</span></label>
+                <select id="student-business" className={selectClass} value={chosenBusinessId} disabled={creating}
+                  onChange={(e) => { setChosenBusinessId(e.target.value); setChosenAgentId(""); }}>
+                  <option value="">Select your agency</option>
+                  {agencyChoices.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                {agencyChoices.length === 0 ? <p className="mt-1 text-xs text-foreground-500">No agencies are registered yet. Choose No to apply by yourself.</p> : null}
+              </div>
+              <div>
+                <label htmlFor="student-agent" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Agent <span className="text-primary-600">*</span></label>
+                <select id="student-agent" className={selectClass} value={chosenAgentId} disabled={creating || !chosenBusinessId || agentsLoading}
+                  onChange={(e) => setChosenAgentId(e.target.value)}>
+                  <option value="">{!chosenBusinessId ? "Choose the business first" : agentsLoading ? "Loading agents…" : agentChoices.length ? "Select your agent" : "This business has no active agents"}</option>
+                  {agentChoices.map((a) => <option key={a.id} value={a.id}>{a.name}{a.role === "agency_admin" ? " (agency admin)" : ""}</option>)}
+                </select>
+                <p className="mt-1 text-xs text-foreground-500">Your agent is not listed? Ask them to register with SLIT, or choose No for now.</p>
+              </div>
+            </div>
+          ) : null}
+
+          {error ? <div className="mt-4"><PortalError message={error} /></div> : null}
+
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <Link to={paths.list} className={secondary}>Cancel</Link>
+            {withAgency ? (
+              <button type="button" disabled={!canContinue} onClick={() => void startAsStudent({ businessId: chosenBusinessId, agentId: chosenAgentId })} className={primary}>
+                {creating ? "Starting…" : "Continue"}
+                <i className="ri-arrow-right-line" aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
     );
   }
 
