@@ -13,6 +13,7 @@ import {
   type AccessSummary, type CmsAccess, type LoginDestination,
 } from "@/lib/loginRouting";
 import EnrolWizard from "@/pages/login/EnrolWizard";
+import { staffAccessState } from "@/lib/staffApi";
 import QuickSignIn from "@/pages/login/QuickSignIn";
 import CompleteSignUp from "@/pages/login/CompleteSignUp";
 import { isSelfSignUpAccount } from "@/lib/authProviders";
@@ -40,7 +41,9 @@ async function fetchAccess(authUserId: string): Promise<AccessSummary> {
     const { data } = await supabase.rpc("portal_resolve_access");
     portal = ((data as { state?: PortalAccessState } | null)?.state ?? null) as PortalAccessState | null;
   } catch { portal = null; }
-  return { cms, portal };
+  let staff: AccessSummary["staff"] = null;
+  try { staff = await staffAccessState(); } catch { staff = null; }
+  return { cms, portal, staff };
 }
 
 
@@ -135,6 +138,7 @@ export default function LoginPage() {
     if (decision.kind === "choose") { setChoice({ userId, options: decision.options }); setChecking(false); routing.current = false; return; }
     if (decision.to.startsWith("/admin")) rememberDestination(userId, "cms");
     else if (decision.to.startsWith("/agency")) rememberDestination(userId, "portal");
+    else if (decision.to.startsWith("/staff")) rememberDestination(userId, "staff");
     navigate(decision.to, { replace: true });
   }, [next, navigate]);
 
