@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { listAgencies } from "@/pages/agency/lib/portalData";
 import {
   listApplications,
@@ -8,6 +8,7 @@ import {
   type ApplicationListRow,
 } from "@/pages/agency/lib/portalApplications";
 import ApplicationsTable from "@/pages/agency/components/ApplicationsTable";
+import SubmittedBanner from "@/pages/agency/components/SubmittedBanner";
 import { cmsPaths, useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { requestWebsiteDomain } from "@/lib/tenantHost";
@@ -21,6 +22,13 @@ export default function AllApplicationsPage() {
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Links from the Agents list open with that business and agent already selected (?business=&agent=&status=).
+  const [params] = useSearchParams();
+  const businessParam = params.get("business") ?? "";
+  const agentParam = params.get("agent") ?? "";
+  const statusParam = params.get("status") ?? "";
+  // The business is the agency record, so the id in the link is the agency id.
+  const initialAgencyId = businessParam;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,6 +58,7 @@ export default function AllApplicationsPage() {
 
   return (
     <div>
+      <SubmittedBanner />
       <PageHeading
         eyebrow="All Applications"
         title="All applications"
@@ -59,6 +68,10 @@ export default function AllApplicationsPage() {
 
       <div className="mt-6">
         <ApplicationsTable remote
+          key={`${businessParam}|${agentParam}|${statusParam}`}
+          initialAgencyId={initialAgencyId}
+          initialAgentId={agentParam}
+          initialStatus={statusParam}
           rows={rows}
           loading={loading}
           error={error}

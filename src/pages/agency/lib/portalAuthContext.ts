@@ -14,7 +14,7 @@ import { countPortalMetric } from "@/pages/agency/lib/devMetrics";
 import { passwordRecoveryUrl } from "@/lib/siteUrl";
 import type { PortalScope } from "@/lib/portalScope";
 
-export type PortalRole = "slit_admin" | "agency_admin" | "agent";
+export type PortalRole = "slit_admin" | "agency_admin" | "agent" | "student";
 
 export interface PortalProfile {
   id: string;
@@ -40,7 +40,7 @@ export interface PortalAgency {
 }
 
 export interface PortalMembership {
-  role: "agency_admin" | "agent";
+  role: "agency_admin" | "agent" | "student";
   status: string;
 }
 
@@ -56,6 +56,8 @@ export interface PortalAuthValue {
   selectScope: (key: string) => Promise<void>;
   authUser: { id: string; email: string; name: string } | null;
   role: PortalRole | null;
+  /** Role student: the student record this sign-in belongs to. */
+  studentId: string | null;
   profile: PortalProfile | null;
   agency: PortalAgency | null;
   membership: PortalMembership | null;

@@ -1,4 +1,5 @@
 import type { AppSection } from "@/data/applicationForms";
+import { sectionHeading } from "@/components/feature/applicationFieldHelpers";
 import type { DraftValues } from "@/lib/applicationDraft";
 import type { ApplicationDetail } from "@/pages/agency/lib/portalApplications";
 import { formatStoredValue } from "../../../../supabase/functions/_shared/validation/identifiers";
@@ -16,6 +17,8 @@ export interface ConsentState {
 interface Group {
   title: string;
   icon: string;
+  /** A field on the page that Edit opens. */
+  edit: string;
   rows: Array<[label: string, key: string]>;
 }
 
@@ -23,6 +26,7 @@ const GROUPS: Group[] = [
   {
     title: "Student details",
     icon: "ri-user-line",
+    edit: "first_name",
     rows: [
       ["Title", "title"],
       ["Given name", "first_name"],
@@ -37,6 +41,7 @@ const GROUPS: Group[] = [
   {
     title: "Passport & nationality",
     icon: "ri-id-card-line",
+    edit: "passport_number",
     rows: [
       ["Passport number", "passport_number"],
       ["Passport expiry", "passport_expiry"],
@@ -46,68 +51,114 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Address & contact",
+    title: "Address",
     icon: "ri-map-pin-2-line",
+    edit: "au_street",
     rows: [
       ["Address type", "address_type"],
       ["Street", "au_street"],
       ["Suburb", "au_suburb"],
       ["State", "au_state"],
       ["Postcode", "au_zip"],
-      ["Overseas address", "ov_street"],
-      ["Overseas suburb", "ov_suburb"],
-      ["Overseas country", "ov_country"],
     ],
   },
   {
-    title: "Visa, English & identifiers",
-    icon: "ri-translate-2",
+    title: "Australian visa",
+    icon: "ri-passport-line",
+    edit: "visa_subclass",
     rows: [
       ["Holds a valid visa", "holds_visa"],
+      ["Visa subclass", "visa_subclass"],
+      ["Visa grant number", "visa_grant_number"],
       ["Visa stay-until / expiry", "visa_stay_until"],
+    ],
+  },
+  {
+    title: "English test",
+    icon: "ri-translate-2",
+    edit: "english_type",
+    rows: [
       ["English assessment", "english_type"],
       ["English score", "english_score"],
       ["Date achieved", "english_date"],
-      ["USI", "usi_number"],
+    ],
+  },
+  {
+    title: "Student identifiers",
+    icon: "ri-fingerprint-line",
+    edit: "employment",
+    rows: [
       ["Employment", "employment"],
-      ["Prior education", "prior_ed"],
+      ["Language at home", "language_home"],
+      ["Which language", "language_other"],
+      ["Aboriginal / Torres Strait Islander", "atsi"],
+      ["Disability", "disability"],
     ],
   },
   {
     title: "Academic background",
     icon: "ri-file-text-line",
-    rows: [],
+    edit: "school_level",
+    rows: [
+      ["Highest education", "highest_education"],
+      ["School level (reported)", "school_level"],
+      ["Prior education", "prior_ed"],
+    ],
+  },
+  {
+    title: "USI",
+    icon: "ri-shield-user-line",
+    edit: "usi_number",
+    rows: [["USI", "usi_number"]],
   },
   {
     title: "Emergency contact",
     icon: "ri-phone-line",
+    edit: "ec_name",
     rows: [
       ["Full name", "ec_name"],
+      ["Phone number", "ec_phone"],
       ["Relationship", "ec_relationship"],
-      ["Email", "ec_email"],
-      ["Phone", "ec_phone"],
     ],
   },
   {
-    title: "Course, study reason & welfare",
+    title: "Course & intake",
     icon: "ri-graduation-cap-line",
+    edit: "courses_of_interest",
     rows: [
+      ["Course", "courses_of_interest"],
       ["Preferred intake", "preferred_intake"],
+    ],
+  },
+  {
+    title: "Study reason & course credit",
+    icon: "ri-book-open-line",
+    edit: "study_reason",
+    rows: [
       ["Reason for study", "study_reason"],
       ["Recognition of prior learning", "rpl"],
-      ["OSHC arrangement", "oshc_require"],
+    ],
+  },
+  {
+    title: "Health cover & source",
+    icon: "ri-heart-pulse-line",
+    edit: "oshc_require",
+    rows: [
+      ["SLIT to arrange OSHC", "oshc_require"],
+      ["OSHC start date", "oshc_start_date"],
       ["OSHC provider", "oshc_provider"],
       ["OSHC policy number", "oshc_policy_number"],
+      ["How they heard about SLIT", "hear_about"],
     ],
   },
   {
     title: "Declaration",
     icon: "ri-quill-pen-line",
+    edit: "declaration_name",
     rows: [
       ["Declarant name", "declaration_name"],
       ["Digital signature", "digital_signature"],
       ["Declaration date", "declaration_date"],
-      ["Checklist acknowledged", "checklist"],
     ],
   },
 ];
@@ -154,6 +205,23 @@ export default function ApplicationReview({
     return Array.isArray(v) ? v.join(", ") : formatStoredValue(key, String(v));
   };
 
+  /** Form page holding a field, or -1. */
+  const pageOf = (key: string) => sections.findIndex((section) => section.fields.some((field) => field.name === key));
+  /** Missing items read "SECTION: Field"; find the page by its heading. */
+  const pageOfMissing = (item: string) => sections.findIndex((section, index) => item.startsWith(`${sectionHeading(section.title, index)}: `));
+  const editButton = (page: number, label: string) =>
+    readOnly || page < 0 ? null : (
+      <button
+        type="button"
+        onClick={() => onEditSection(page)}
+        aria-label={`Edit ${label}`}
+        className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-background-300 bg-background-50 px-2 py-1 text-xs font-semibold text-primary-700 hover:bg-primary-50"
+      >
+        <i className="ri-pencil-line" aria-hidden="true" />
+        Edit
+      </button>
+    );
+
   const readyToSubmit = missing.length === 0 && consent.method !== "" && consent.confirmed && consent.authorised;
   const declarationName = val("declaration_name");
   const signature = val("digital_signature");
@@ -186,12 +254,24 @@ export default function ApplicationReview({
             {missing.length} required item{missing.length === 1 ? "" : "s"} still need attention
           </p>
           <ul className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {missing.map((item) => (
-              <li key={item} className="flex items-start gap-2 text-xs text-primary-900">
-                <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
-                {item}
-              </li>
-            ))}
+            {missing.map((item) => {
+              const page = pageOfMissing(item);
+              return (
+                <li key={item} className="text-xs text-primary-900">
+                  {readOnly || page < 0 ? (
+                    <span className="flex items-start gap-2">
+                      <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
+                      {item}
+                    </span>
+                  ) : (
+                    <button type="button" onClick={() => onEditSection(page)} className="flex cursor-pointer items-start gap-2 text-left underline-offset-2 hover:underline">
+                      <i className="ri-arrow-right-s-line mt-px" aria-hidden="true" />
+                      {item}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : (
@@ -206,17 +286,22 @@ export default function ApplicationReview({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {GROUPS.map((group) => (
           <div key={group.title} className="rounded-card border border-background-200 bg-background-50 p-5">
-            <p className="flex items-center gap-2 font-heading text-sm font-semibold text-foreground-950">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-100 text-primary-700">
-                <i className={group.icon} aria-hidden="true" />
-              </span>
-              {group.title}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 font-heading text-sm font-semibold text-foreground-950">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-100 text-primary-700">
+                  <i className={group.icon} aria-hidden="true" />
+                </span>
+                {group.title}
+              </p>
+              {editButton(pageOf(group.edit), group.title)}
+            </div>
             <dl className="mt-3 space-y-2">
-              {(group.title === "Academic background"
-                ? submittedQualifications(qualifications, values).map((item, index): [string, string, string] => [`Qualification ${index + 1}`, `academic-${index}`, [qualificationTitle(item), qualificationDetail(item)].filter(Boolean).join(" · ")])
-                : group.rows.map(([label, key]): [string, string, string] => [label, key, val(key)])
-              ).map(([label, key, value]) => {
+              {[
+                ...(group.title === "Academic background"
+                  ? submittedQualifications(qualifications, values).map((item, index): [string, string, string] => [`Qualification ${index + 1}`, `academic-${index}`, [qualificationTitle(item), qualificationDetail(item)].filter(Boolean).join(" · ")])
+                  : []),
+                ...group.rows.map(([label, key]): [string, string, string] => [label, key, key === "courses_of_interest" ? courses.join("; ") : val(key)]),
+              ].map(([label, key, value]) => {
                 if (!value) return null;
                 return (
                   <div key={key} className="flex items-start justify-between gap-3 text-xs">
@@ -234,15 +319,9 @@ export default function ApplicationReview({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-100 text-accent-900">
               <i className="ri-graduation-cap-line" aria-hidden="true" />
             </span>
-            Courses & agency
+            Agency
           </p>
           <dl className="mt-3 space-y-2 text-xs">
-            <div className="flex items-start justify-between gap-3">
-              <dt className="text-foreground-500">Selected courses</dt>
-              <dd className="max-w-[60%] text-right font-medium text-foreground-900">
-                {courses.length === 0 ? "\u2014" : courses.join("; ")}
-              </dd>
-            </div>
             <div className="flex items-start justify-between gap-3">
               <dt className="text-foreground-500">Agency</dt>
               <dd className="text-right font-medium text-foreground-900">{agencyName || "\u2014"}</dd>
@@ -264,8 +343,8 @@ export default function ApplicationReview({
           Student declaration & consent
         </h4>
         <p className="mt-2 text-xs leading-relaxed text-foreground-600">
-          The student declaration above is a statement made by the <strong>student</strong>, not the agent. Record how the
-          student&rsquo;s consent was collected, and upload the signed form if one was used.
+          The student declaration above is a statement made by the <strong>student</strong>, not the agent. Confirm below that
+          the student reviewed and authorised it.
         </p>
         {!studentSignatureMatches && (declarationName || signature) ? (
           <p className="mt-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-900">
@@ -293,54 +372,10 @@ export default function ApplicationReview({
             )}
           </div>
         ) : (
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-700">
-              Consent collection method <span className="text-primary-600">*</span>
-            </p>
-            <div className="space-y-2">
-              {[
-                { value: "electronic", label: "Electronic declaration completed by the student" },
-                { value: "document", label: "Signed declaration document uploaded" },
-              ].map((option) => (
-                <label key={option.value} className="flex cursor-pointer items-start gap-2 text-sm text-foreground-700">
-                  <input
-                    type="radio"
-                    name="consent_method"
-                    checked={consent.method === option.value}
-                    onChange={() => onConsentChange({ method: option.value })}
-                    className="mt-0.5 h-4 w-4 accent-primary-500"
-                  />
-                  <span className="leading-snug">{option.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-700">
-              Signed declaration document (optional)
-            </p>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(event) => {
-                const file = event.target.files?.[0] ?? null;
-                onConsentChange({ file, fileName: file?.name ?? "" });
-              }}
-              className="w-full cursor-pointer rounded-md border border-dashed border-background-300 bg-background-50 px-3.5 py-2.5 text-xs text-foreground-700 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-primary-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-700"
-            />
-            {consent.fileName ? (
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground-600">
-                <i className="ri-attachment-2" aria-hidden="true" />
-                {consent.fileName}
-              </p>
-            ) : (
-              <p className="mt-2 text-xs text-foreground-400">
-                Stored privately against this application. Only your agency and SLIT can access it.
-              </p>
-            )}
-          </div>
-        </div>
+        <p className="mt-4 flex items-center gap-2 text-sm text-foreground-700">
+          <i className="ri-shield-check-line text-accent-700" aria-hidden="true" />
+          Consent is recorded as the student&rsquo;s electronic declaration in the form above.
+        </p>
         )}
 
         {!readOnly ? (
@@ -399,10 +434,28 @@ export default function ApplicationReview({
               Ready to submit
             </p>
           ) : (
-            <p className="flex items-center gap-2 text-foreground-600">
-              <i className="ri-information-line" aria-hidden="true" />
-              Complete the missing items and consent confirmations to submit.
-            </p>
+            <div className="text-foreground-700">
+              <p className="flex items-center gap-2 font-semibold text-primary-900">
+                <i className="ri-information-line" aria-hidden="true" />
+                Before you can submit:
+              </p>
+              <ul className="mt-1.5 space-y-1 pl-6 text-xs">
+                {missing.map((item) => {
+                  const page = pageOfMissing(item);
+                  return (
+                    <li key={item} className="list-disc">
+                      {page < 0 ? item : (
+                        <button type="button" onClick={() => onEditSection(page)} className="cursor-pointer text-left text-primary-700 underline underline-offset-2 hover:text-primary-900">
+                          {item}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+                {!consent.confirmed ? <li className="list-disc">Tick that the student reviewed and authorised the application.</li> : null}
+                {!consent.authorised ? <li className="list-disc">Tick that you are the agent authorised to submit it.</li> : null}
+              </ul>
+            </div>
           )}
         </div>
         <div className="flex flex-wrap gap-3">

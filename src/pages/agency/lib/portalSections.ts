@@ -1,4 +1,4 @@
-import { enrolSections, type AppSection } from "@/data/applicationForms";
+import { enrolSections, type AppField, type AppSection } from "@/data/applicationForms";
 import { courses } from "@/data/courses";
 
 /**
@@ -78,18 +78,100 @@ export function resolveCourseOption(label: string): ResolvedCourse {
  * surfaced for review as-is rather than overwritten with invented thresholds —
  * see the implementation report.
  */
-export const portalSections: AppSection[] = enrolSections.map((section) => ({
+/** Visa fields that get their own portal page (filled from an uploaded visa document or entered manually). */
+export const VISA_FIELD_NAMES = new Set(["holds_visa", "visa_copy", "visa_subclass", "visa_grant_date", "visa_stay_until", "visa_grant_number"]);
+
+/** In the portal the shared "Visa, English & Agent details" section is split into a Visa page and an English & agent page. */
+function splitVisaSection(section: AppSection): AppSection[] {
+  if (!section.fields.some((field) => field.name === "visa_subclass")) return [section];
+  return [
+    { title: "AUSTRALIAN VISA", fields: section.fields.filter((field) => VISA_FIELD_NAMES.has(field.name)) },
+    { ...section, title: "ENGLISH TEST", fields: section.fields.filter((field) => !VISA_FIELD_NAMES.has(field.name)) },
+  ];
+}
+
+/** Education questions that the portal asks on the Academic documents page instead of the Student identifier page. */
+export const EDUCATION_FIELD_NAMES = new Set(["secondary_enrolled", "school_level", "year_completed", "prior_ed"]);
+
+/** The language actually spoken, asked when "Yes, language other than English" is chosen. */
+const LANGUAGE_OTHER_FIELD: AppField = {
+  name: "language_other",
+  label: "Which language?",
+  type: "text",
+  required: true,
+  full: true,
+  placeholder: "e.g. Hindi",
+  showIf: { field: "language_home", equals: ["Yes, language other than English"] },
+};
+
+/** The portal's emergency contact is just a name, a phone number and the relationship, in that order. */
+const EMERGENCY_CONTACT_FIELDS = ["ec_name", "ec_phone", "ec_relationship"];
+
+function trimEmergencyContact(section: AppSection): AppSection {
+  if (!section.fields.some((field) => field.name === "ec_name")) return section;
+  const fields = EMERGENCY_CONTACT_FIELDS.map((name) => section.fields.find((field) => field.name === name)).filter((field): field is AppField => Boolean(field));
+  return { ...section, fields: fields.map((field) => (field.name === "ec_phone" ? { ...field, label: "Phone Number" } : field)) };
+}
+
+/** Intakes start every month: the next twelve, from next month, as "Month YYYY". */
+export function nextIntakes(from: Date = new Date(), count = 12): string[] {
+  const out: string[] = [];
+  for (let i = 1; i <= count; i += 1) {
+    const month = new Date(from.getFullYear(), from.getMonth() + i, 1);
+    out.push(month.toLocaleString("en-AU", { month: "long", year: "numeric" }));
+  }
+  return out;
+}
+
+/**
+ * Later pages: the health-insurance upload moves below the questions, and the Application checklist page is dropped. Its
+ * required answer is kept (always ticked, out of sight) with the Student declaration, so submission rules are unchanged.
+ */
+function reshapeLaterSections(list: AppSection[]): AppSection[] {
+  const checklistSection = list.find((section) => section.fields.some((field) => field.name === "checklist"));
+  const checklist = checklistSection?.fields.find((field) => field.name === "checklist");
+  return list
+    .filter((section) => section !== checklistSection)
+    .map((section) => {
+      if (section.fields.some((field) => field.name === "oshc_docs")) {
+        return { ...section, fields: [...section.fields.filter((field) => field.name !== "oshc_docs"), ...section.fields.filter((field) => field.name === "oshc_docs")] };
+      }
+      if (checklist && section.fields.some((field) => field.name === "declaration")) return { ...section, fields: [...section.fields, checklist] };
+      return section;
+    });
+}
+
+/** Moves the education questions next to the academic documents they can be read from, and adds the language box. */
+function regroupStudentSections(list: AppSection[]): AppSection[] {
+  const identifier = list.find((section) => section.fields.some((field) => field.name === "employment"));
+  // Year completed is asked once, with the qualification read from the documents, not again under the school level.
+  const education = (identifier?.fields.filter((field) => EDUCATION_FIELD_NAMES.has(field.name) && field.name !== "year_completed") ?? []).map((field) =>
+    field.name === "school_level" ? { ...field, label: "Highest completed education level", description: "Choose the highest level completed." } : field);
+  return list.map((section) => {
+    if (section === identifier) {
+      const fields = section.fields.filter((field) => !EDUCATION_FIELD_NAMES.has(field.name));
+      const at = fields.findIndex((field) => field.name === "language_home");
+      return { ...section, fields: [...fields.slice(0, at + 1), LANGUAGE_OTHER_FIELD, ...fields.slice(at + 1)] };
+    }
+    if (section.fields.some((field) => field.name === "academic_upload")) {
+      const at = section.fields.findIndex((field) => field.name === "academic_upload");
+      return { ...section, fields: [...section.fields.slice(0, at + 1), ...education, ...section.fields.slice(at + 1)] };
+    }
+    return section;
+  });
+}
+
+export const portalSections: AppSection[] = reshapeLaterSections(regroupStudentSections(enrolSections.flatMap(splitVisaSection)).map(trimEmergencyContact)).map((section) => ({
   ...section,
-  fields: section.fields.map((field) =>
-    field.name === COURSE_FIELD
-      ? {
-          ...field,
-          options: portalCourseOptions,
-          description:
-            "Tick one or more courses below. Only courses open to international students are shown. Each option lists the course code, title and duration.",
-        }
-      : field,
-  ),
+  fields: section.fields.map((field) => {
+    if (field.name === COURSE_FIELD) {
+      return { ...field, options: portalCourseOptions, description: "Search and pick one course. Only active courses open to international students are listed." };
+    }
+    if (field.name === "preferred_intake") {
+      return { ...field, type: "select" as const, options: nextIntakes(), placeholder: "Select intake", description: "Intakes start every month." };
+    }
+    return field;
+  }),
 }));
 
 /** Human label for the whole application, used in review + confirmation screens. */

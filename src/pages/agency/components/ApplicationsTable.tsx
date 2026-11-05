@@ -3,9 +3,10 @@ import { useMemo, useState, useEffect, type ReactNode } from "react";
 import { useApplicationPaths } from "@/pages/agency/lib/applicationPaths";
 import { Link } from "react-router-dom";
 import { queryApplications, type ApplicationListRow } from "@/pages/agency/lib/portalApplications";
-import { STATUS_META, statusMeta, formatDate } from "@/pages/agency/lib/portalData";
-import { SELECTABLE_STATUSES } from "@/pages/agency/lib/applicationAccess";
-import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/agency/components/PortalUI";
+import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
+import { statusMeta, formatDate } from "@/pages/agency/lib/portalData";
+import { PortalEmpty, PortalError, PortalLoading } from "@/pages/agency/components/PortalUI";
+import ApplicationStatusSelect from "@/pages/agency/components/ApplicationStatusSelect";
 
 type SortKey = "reference" | "student" | "agency" | "agent" | "status" | "completion" | "created" | "updated";
 
@@ -24,6 +25,11 @@ interface ApplicationsTableProps {
   showFilters?: boolean;
   /** Pins the list to one agency (the agency page): sent to the query, never filtered after loading. */
   fixedAgencyId?: string;
+  /** Status filter selected when the table first renders (for links such as "2 Draft" on the Agencies list). */
+  initialStatus?: string;
+  /** Agency and assigned agent selected when the table first renders (for links from the Agents list). */
+  initialAgencyId?: string;
+  initialAgentId?: string;
   /** SLIT Admin: filter by agency. */
   agencies?: Option[];
   /** Agency Admin / SLIT Admin: filter by assigned agent. */
@@ -72,6 +78,9 @@ export default function ApplicationsTable({
   onRetry,
   showFilters = true,
   fixedAgencyId = "",
+  initialStatus = "",
+  initialAgencyId = "",
+  initialAgentId = "",
   agencies,
   agents,
   pageSize = 10,
@@ -83,12 +92,13 @@ export default function ApplicationsTable({
 }: ApplicationsTableProps) {
   const paths = useApplicationPaths();
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [chosenAgencyId, setAgencyId] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [chosenAgencyId, setAgencyId] = useState(initialAgencyId);
   const agencyId = fixedAgencyId || chosenAgencyId;
-  const [agentId, setAgentId] = useState("");
-  const [courseCode, setCourseCode] = useState("");
-  const [intake, setIntake] = useState("");
+  // No agent, course or intake filter controls; a link from the Agents list still opens with its agent selected.
+  const agentId = initialAgentId;
+  const courseCode: string = "";
+  const intake: string = "";
   const [sort, setSort] = useState<SortKey>("updated");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -113,11 +123,8 @@ export default function ApplicationsTable({
     return () => { active = false; window.clearTimeout(timer); };
   }, [remote, search, status, agencyId, agentId, courseCode, intake, sort, dir, page, pageSize, retry]);
 
-  const courseOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    rows.forEach((row) => row.courses.forEach((c) => map.set(c.code, c.code)));
-    return Array.from(map.keys()).sort();
-  }, [rows]);
+  // The status filter and every row's status dropdown use the same backend catalogue.
+  const statusChoices = useStatusCatalog().application;
 
   const filtered = useMemo(() => {
     if (remote) return rows;
@@ -193,7 +200,7 @@ export default function ApplicationsTable({
       {remoteError ? <PortalError message={remoteError} onRetry={() => setRetry(value => value + 1)} /> : null}
       {showFilters ? (
         <div className="mb-4 rounded-card border border-background-200 bg-background-50 p-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="flex items-center gap-2 rounded-md border border-background-300 bg-background-50 px-3 py-2 lg:col-span-2">
               <i className="ri-search-line text-base text-foreground-400" aria-hidden="true" />
               <input
@@ -217,9 +224,9 @@ export default function ApplicationsTable({
               aria-label="Filter by status"
             >
               <option value="">All statuses</option>
-              {SELECTABLE_STATUSES.map((value) => [value, STATUS_META[value]] as const).map(([value, meta]) => (
-                <option key={value} value={value}>
-                  {meta.label}
+              {statusChoices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
                 </option>
               ))}
             </select>
@@ -241,51 +248,6 @@ export default function ApplicationsTable({
                 ))}
               </select>
             ) : null}
-            {agents ? (
-              <select
-                value={agentId}
-                onChange={(e) => {
-                  setAgentId(e.target.value);
-                  resetPage();
-                }}
-                className={SELECT_CLASS}
-                aria-label="Filter by agent"
-              >
-                <option value="">All agents</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <select
-              value={courseCode}
-              onChange={(e) => {
-                setCourseCode(e.target.value);
-                resetPage();
-              }}
-              className={SELECT_CLASS}
-              aria-label="Filter by course"
-            >
-              <option value="">All courses</option>
-              {courseOptions.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={intake}
-              onChange={(e) => {
-                setIntake(e.target.value);
-                resetPage();
-              }}
-              placeholder="Intake e.g. 02/2026"
-              className={SELECT_CLASS}
-              aria-label="Filter by intake"
-            />
           </div>
         </div>
       ) : null}
@@ -340,7 +302,7 @@ export default function ApplicationsTable({
                         {row.agentName || <span className="text-foreground-400">Unassigned</span>}
                       </td>
                       <td data-label="Status" className="px-3 py-3">
-                        <StatusBadge status={row.status} />
+                        <ApplicationStatusSelect applicationId={row.id} status={row.status} allowed={row.nextStatuses} openHref={paths.detail(row.id)} />
                       </td>
                       <td data-label="Progress" className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1">

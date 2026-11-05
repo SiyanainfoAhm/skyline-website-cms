@@ -1,3 +1,4 @@
+import { normalizeAbn, validateAbn } from "../../../../supabase/functions/_shared/validation/abn";
 import { supabase } from "@/pages/admin/lib/supabase";
 import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_LABELS } from "@/pages/agency/lib/applicationAccess";
@@ -33,6 +34,7 @@ export const ROLE_LABELS: Record<string, string> = {
   slit_admin: "SLIT Admin",
   agency_admin: "Agency Admin",
   agent: "Agent",
+  student: "Student",
 };
 
 export function statusMeta(status: string) {
@@ -62,7 +64,7 @@ export interface PortalUserRow {
   email: string;
   phone: string;
   status: string;
-  role: "agency_admin" | "agent" | null;
+  role: "agency_admin" | "agent" | "student" | null;
   agencyId: string | null;
   agencyName: string;
 }
@@ -194,17 +196,25 @@ export async function listAgencyInvitations(agencyId: string): Promise<Invitatio
 }
 
 /** Adds an agency record without a first administrator (with one, use the create_agency function, which is atomic). */
-export async function createAgencyRecord(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<string> {
+export async function createAgencyRecordWithBusiness(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<{ agencyId: string; businessId: string }> {
+  const abnProblem = validateAbn(input.registrationNumber);
+  if (abnProblem) throw new Error(abnProblem);
   const { data, error } = await supabase
     .from("agencies")
     .insert({
-      name: input.name.trim(), code: input.code.trim(), registration_number: input.registrationNumber.trim(), business_email: input.businessEmail.trim(),
+      name: input.name.trim(), code: input.code.trim(), registration_number: normalizeAbn(input.registrationNumber), business_email: input.businessEmail.trim(),
       phone: input.phone.trim(), address: input.address.trim(), country: input.country.trim(), primary_contact: input.primaryContact.trim(), status: input.status,
     })
     .select("id")
     .single();
   if (error) throw new Error(error.message);
-  return String(data.id);
+  // The business is the agency record, so both ids are the same.
+  return { agencyId: String(data.id), businessId: String(data.id) };
+}
+
+export async function createAgencyRecord(input: AgencyPatch & { status: "Active" | "Inactive" }): Promise<string> {
+  const created = await createAgencyRecordWithBusiness(input);
+  return created.agencyId;
 }
 
 /**
@@ -256,6 +266,16 @@ export async function setAgencyStatus(id: string, status: "Active" | "Inactive")
   if (error) throw new Error(error.message);
 }
 
+/** An agency already recorded with this ABN (stored with or without spaces), if any. */
+export async function findAgencyByAbn(abn: string): Promise<{ id: string; name: string } | null> {
+  const digits = normalizeAbn(abn);
+  const spaced = digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3 $4");
+  const { data, error } = await supabase.from("agencies").select("id, name").in("registration_number", [digits, spaced]).limit(1);
+  if (error) throw new Error("We could not check whether this business already exists. Please try again.");
+  const row = data?.[0];
+  return row ? { id: String(row.id), name: String(row.name ?? "") } : null;
+}
+
 /** Delete an agency (SLIT Admin only). Blocked if it still owns applications. */
 export async function deleteAgency(id: string): Promise<void> {
   const { error } = await supabase.from("agencies").delete().eq("id", id);
@@ -289,7 +309,7 @@ export async function listPortalUsers(): Promise<PortalUserRow[]> {
     .select("id, auth_user_id, full_name, email, phone, status, agency_memberships(role, status, agency_id, agencies(name))")
     .order("full_name", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => {
+  return (data ?? []).map((row): PortalUserRow => {
     const r = row as Record<string, unknown>;
     // PostgREST returns a single object (not an array) because agency_memberships.user_id is unique; accept both shapes.
     const embedded = r.agency_memberships as Record<string, unknown> | Array<Record<string, unknown>> | null | undefined;
@@ -302,11 +322,12 @@ export async function listPortalUsers(): Promise<PortalUserRow[]> {
       email: String(r.email ?? ""),
       phone: String(r.phone ?? ""),
       status: String(r.status ?? "Active"),
-      role: m ? (m.role === "agency_admin" ? "agency_admin" : "agent") : null,
+      role: m ? (m.role === "agency_admin" ? "agency_admin" : m.role === "student" ? "student" : "agent") : null,
       agencyId: m ? String(m.agency_id ?? "") || null : null,
       agencyName: String(agency?.name ?? ""),
     };
-  });
+  // Students sign in too, but they are managed from the Students list, not as portal users.
+  }).filter((row) => row.role !== "student");
 }
 
 /** Totals for the signed-in user's authorized scope (RLS decides the rows). */

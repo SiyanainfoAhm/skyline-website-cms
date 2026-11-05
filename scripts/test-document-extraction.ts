@@ -113,7 +113,7 @@ test("USI: format rules, forbidden characters, case, blank", async () => {
 });
 
 test("phone: Australian normalisation, validation and display", async () => {
-  const { normalizePhoneInput, validatePhone, formatPhone, parseStoredPhone, AU_PHONE_MESSAGE } = await import("../supabase/functions/_shared/validation/identifiers.ts");
+  const { normalizePhoneInput, validatePhone, formatPhone, formatNational, parseStoredPhone, AU_PHONE_MESSAGE } = await import("../supabase/functions/_shared/validation/identifiers.ts");
   const check = (dial: string, typed: string) => { const n = normalizePhoneInput(dial, typed); return { e164: n.e164, message: validatePhone(n.dial, n.national) }; };
   assert.deepEqual(check("61", "0412345678"), { e164: "+61412345678", message: "" });
   assert.deepEqual(check("61", "+61412345678"), { e164: "+61412345678", message: "" });
@@ -121,12 +121,19 @@ test("phone: Australian normalisation, validation and display", async () => {
   assert.deepEqual(check("61", "0412 345 678"), { e164: "+61412345678", message: "" });
   assert.deepEqual(check("61", "0291234567"), { e164: "+61291234567", message: "" });
   assert.equal(check("61", "12345").message, AU_PHONE_MESSAGE);
-  assert.equal(check("61", "0512345678").message, AU_PHONE_MESSAGE);
+  assert.deepEqual(check("61", "0505345678"), { e164: "+61505345678", message: "" });
+  assert.equal(check("61", "05053456").message, AU_PHONE_MESSAGE);
   assert.deepEqual(check("61", ""), { e164: "", message: "" });
   assert.equal(check("91", "9876543210").message, "");
   assert.equal(check("91", "+441234567890").e164, "+441234567890");
-  assert.equal(formatPhone("+61412345678"), "+61 412 345 678");
-  assert.equal(formatPhone("0412345678"), "+61 412 345 678");
+  assert.equal(formatPhone("+61412345678"), "041 234 5678");
+  assert.equal(formatPhone("0412345678"), "041 234 5678");
+  assert.deepEqual(check("61", "041 234 5678"), { e164: "+61412345678", message: "" });
+  assert.equal(formatPhone("+919876543210"), "+91 987 654 321 0");
   assert.equal(formatPhone("(03) 9123 4567"), "(03) 9123 4567");
   assert.equal(parseStoredPhone("(03) 9123 4567"), null);
+  // Australian digits format live with the trunk 0 added, grouped 3-3-4.
+  assert.equal(formatNational("61", "4"), "04");
+  assert.equal(formatNational("61", "4123"), "041 23");
+  assert.equal(formatNational("61", "291234567"), "029 123 4567");
 });

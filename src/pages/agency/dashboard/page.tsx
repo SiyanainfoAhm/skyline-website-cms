@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { listAgencies, ROLE_LABELS, STATUS_META } from "@/pages/agency/lib/portalData";
 import {
@@ -46,6 +46,7 @@ export default function PortalDashboardPage() {
 
   const isSlit = role === "slit_admin";
   const isAgent = role === "agent";
+  const isStudent = role === "student";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +82,7 @@ export default function PortalDashboardPage() {
 
   const breakdown = isSlit ? stats.byAgency : stats.byAgent;
 
+  if (isStudent) return <Navigate to="/agency/applications" replace />;
   return (
     <div>
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

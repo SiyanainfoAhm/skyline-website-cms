@@ -118,9 +118,12 @@ export function PhoneInput({ id, name, value, locked, required, placeholder }: {
   }, []);
 
   const commit = (nextDial: string, typed: string) => {
-    const normalized = normalizePhoneInput(nextDial, typed);
+    let normalized = normalizePhoneInput(nextDial, typed);
+    if (normalized.dial === DEFAULT_DIAL && normalized.national.length > 9) normalized = normalizePhoneInput(nextDial, `0${normalized.national.slice(0, 9)}`);
     setDial(normalized.dial);
-    setText(normalized.national === typed.replace(/\D/g, "") ? typed : normalized.national);
+    // Australian numbers format live as 041 234 5678, with the 0 added automatically.
+    if (normalized.dial === DEFAULT_DIAL) setText(normalized.national ? formatNational(normalized.dial, normalized.national) : typed.replace(/\D/g, "").startsWith("0") ? "0" : "");
+    else setText(normalized.national === typed.replace(/\D/g, "") ? typed : normalized.national);
     setMessage(validatePhone(normalized.dial, normalized.national));
     const stored = storedRef.current;
     if (!stored || stored.value === normalized.e164) return;

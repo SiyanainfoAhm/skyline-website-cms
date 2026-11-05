@@ -75,7 +75,7 @@ export default function AgencyDetailPage() {
       <div>
         <PageHeader breadcrumb="Agencies" title="Agency not found" />
         <p role="alert" className="text-sm text-red-700">{error || "This agency could not be found."}</p>
-        <Link to="/admin/agencies" className="mt-3 inline-block text-sm font-semibold text-primary-700 underline">Back to Agencies</Link>
+        <Link to="/admin/businesses" className="mt-3 inline-block text-sm font-semibold text-primary-700 underline">Back to Businesses</Link>
       </div>
     );
   }
@@ -128,7 +128,7 @@ export default function AgencyDetailPage() {
   );
 }
 
-function DetailsTab({ agency, onSaved }: { agency: AgencySummary; onSaved: () => Promise<void> }) {
+export function DetailsTab({ agency, onSaved }: { agency: AgencySummary; onSaved: () => Promise<void> }) {
   const { push } = useToast();
   const [form, setForm] = useState<AgencyFormState>(() => agencyToForm(agency));
   const [errors, setErrors] = useState<AgencyFormErrors>({});
@@ -165,7 +165,7 @@ function DetailsTab({ agency, onSaved }: { agency: AgencySummary; onSaved: () =>
   );
 }
 
-function AgentsTab({ agencyId, agencyName, onChanged }: { agencyId: string; agencyName: string; onChanged: () => Promise<void> }) {
+export function AgentsTab({ agencyId, agencyName, onChanged }: { agencyId: string; agencyName: string; onChanged: () => Promise<void> }) {
   const { push } = useToast();
   const [members, setMembers] = useState<AgencyMemberRow[]>([]);
   const [invitations, setInvitations] = useState<InvitationRow[]>([]);
@@ -341,7 +341,7 @@ function AgentsTab({ agencyId, agencyName, onChanged }: { agencyId: string; agen
   );
 }
 
-function ApplicationsTab({ agencyId }: { agencyId: string }) {
+export function ApplicationsTab({ agencyId, initialStatus = "" }: { agencyId: string; initialStatus?: string }) {
   const [members, setMembers] = useState<AgencyMemberRow[]>([]);
   useEffect(() => {
     setMembers([]);
@@ -352,6 +352,7 @@ function ApplicationsTab({ agencyId }: { agencyId: string }) {
       remote
       rows={[]}
       fixedAgencyId={agencyId}
+      initialStatus={initialStatus}
       agents={members.filter((m) => m.role === "agent").map((m) => ({ id: m.profileId, name: m.fullName || m.email }))}
       emptyTitle="No applications for this agency yet"
       emptyMessage="Applications created by this agency's agents will appear here."

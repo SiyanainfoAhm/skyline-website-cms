@@ -92,7 +92,15 @@ export default function ApplicationAttachmentField({ field, documents, disabled,
         );
       })}
 
-      {documents.length === 0 || allowAdditional ? (
+      {documents.length > 0 && allowAdditional ? (
+        <label className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-md border border-background-300 bg-background-50 px-2.5 py-1 text-[11px] font-medium text-foreground-600 transition-colors hover:border-primary-300 hover:text-primary-700">
+          <i className="ri-add-line" aria-hidden="true" />
+          Add more files
+          <input ref={inputRef} name={field.name} type="file" accept=".pdf,.jpg,.jpeg,.png" multiple disabled={disabled} onChange={(event) => void upload(event.target.files)} className="sr-only" />
+        </label>
+      ) : null}
+
+      {documents.length === 0 ? (
         <div>
           <input ref={inputRef} id={`portal-file-${field.name}`} name={field.name} type="file" accept=".pdf,.jpg,.jpeg,.png" multiple={field.multiple} disabled={disabled} onChange={(event) => void upload(event.target.files)} className="w-full cursor-pointer rounded-md border border-dashed border-background-300 bg-background-50 px-3.5 py-2.5 text-sm text-foreground-700 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-primary-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-700 disabled:cursor-not-allowed disabled:opacity-60" />
           <p className="mt-1 text-[11px] text-foreground-500">PDF, JPG or PNG only; maximum {Math.round(MAX_DOCUMENT_BYTES / 1024 / 1024)} MB per file.</p>

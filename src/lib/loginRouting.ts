@@ -72,6 +72,8 @@ export function decideLogin(access: AccessSummary, next: string | null = null, l
     if (options.includes("portal") && /^\/agency(?:[/?#]|$)/.test(target)) return { kind: "go", to: target };
   }
   if (options.length === 1) return { kind: "go", to: DESTINATION_PATH[options[0]] };
+  // A SLIT administrator manages everything from the CMS (its menu links to the portal pages), so there is nothing to choose.
+  if (access.portal === "org_admin" && options.includes("cms")) return { kind: "go", to: DESTINATION_PATH.cms };
   // Last used first, so the remembered choice is one click.
   return { kind: "choose", options: last && options.includes(last) ? [last, ...options.filter((o) => o !== last)] : options };
 }
@@ -96,9 +98,13 @@ export function loginNotice(reason: string | null): string {
   return reason === "expired" ? "Your session has expired. Please sign in again." : "";
 }
 
-/** Public header account control: a Dashboard link once signed in, Sign In otherwise. Both go through /login, which routes by role. */
+/**
+ * Public header account control: the same "Login / Enroll Now" button for everyone (owner's choice, 2026-11-05). /login has
+ * Sign in and Enroll now side by side; someone already signed in gets "Go to my account" or "Sign out" there.
+ */
 export function headerAccountLink(signedIn: boolean): { label: string; to: string } {
-  return signedIn ? { label: "Dashboard", to: "/login" } : { label: "Sign In", to: "/login" };
+  void signedIn;
+  return { label: "Login / Enroll Now", to: "/login" };
 }
 
 const SEEN_KEY = "skyline.session.seen";

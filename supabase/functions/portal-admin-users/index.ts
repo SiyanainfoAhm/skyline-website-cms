@@ -12,6 +12,7 @@
 // the notification-delivery outbox, so migration 84 activation rules do not apply.
 // =====================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { lookupAgencyAbn, validateAbn, normalizeAbn, type AgencyAbnDetails } from "../_shared/validation/abn.ts";
 import { cleanEmail, cleanName } from "../_shared/user-input.ts";
 import { backendConfiguration } from "../_shared/config.ts";
 
@@ -24,6 +25,10 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+// Bounded, short-lived per-instance cache; no scheduled/background work.
+const abnCache = new Map<string, { expires: number; business: AgencyAbnDetails }>();
+const abnCallerRequests = new Map<string, number>();
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -135,18 +140,39 @@ Deno.serve(async (req) => {
     };
 
     switch (action) {
+      case "lookup_agency_abn": {
+        if (!isSlit) return json({ error: "Organization administrator access required." }, 403);
+        const abn = normalizeAbn(String(parsed.abn ?? ""));
+        const problem = validateAbn(abn);
+        if (problem) return json({ error: problem }, 400);
+        const cached = abnCache.get(abn);
+        if (cached && cached.expires > Date.now()) return json({ business: cached.business });
+        const lastRequest = abnCallerRequests.get(caller.id) ?? 0;
+        if (Date.now() - lastRequest < 1500) return json({ error: "Please wait a moment before another ABN lookup." }, 429);
+        if (abnCallerRequests.size > 256) abnCallerRequests.clear();
+        abnCallerRequests.set(caller.id, Date.now());
+        try {
+          const business = await lookupAgencyAbn(abn);
+          if (abnCache.size >= 256) abnCache.clear();
+          abnCache.set(abn, { expires: Date.now() + 5 * 60 * 1000, business });
+          return json({ business });
+        }
+        catch { return json({ error: "We could not retrieve this ABN from the government register. Check the ABN or try again shortly." }, 503); }
+      }
       case "invite": {
         const emailCheck = cleanEmail(parsed.email);
         if (!emailCheck.ok) return json({ error: emailCheck.error }, 400);
         const nameCheck = cleanName(parsed.name);
         if (!nameCheck.ok) return json({ error: nameCheck.error }, 400);
         // For an agency admin the database ignores any agencyId other than their own membership's agency.
+        // A student invitation (role student, studentId) takes the email and name from the student record.
         const { data, error } = await admin.rpc("portal_invitation_create", {
           p_actor: caller.id,
           p_agency: optionalText("agencyId"),
           p_email: emailCheck.value,
           p_name: nameCheck.value,
           p_role: String(parsed.role ?? "agent"),
+          p_student: optionalText("studentId"),
         });
         if (error) return rpcFailure(error);
         return respondDelivered(data);
@@ -158,6 +184,9 @@ Deno.serve(async (req) => {
         const adminName = cleanName(parsed.adminName);
         if (!adminName.ok) return json({ error: adminName.error }, 400);
         const agency = (parsed.agency && typeof parsed.agency === "object" ? parsed.agency : {}) as Record<string, unknown>;
+        const abnProblem = validateAbn(String(agency.registration_number ?? ""));
+        if (abnProblem) return json({ error: abnProblem }, 400);
+        agency.registration_number = normalizeAbn(String(agency.registration_number));
         const { data, error } = await admin.rpc("portal_agency_create_with_admin", {
           p_actor: caller.id,
           p_agency: agency,

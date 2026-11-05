@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DraftStatus from "@/pages/admin/components/DraftStatus";
 import { useDraft } from "@/pages/admin/lib/useDraft";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -10,6 +10,8 @@ import RichTextEditor from "@/pages/admin/components/RichTextEditor";
 import { courseCategories } from "@/pages/admin/lib/seed";
 import type { AdminCourse } from "@/pages/admin/lib/types";
 import { removeCmsObject, uploadCmsDocument } from "@/pages/admin/lib/storage";
+import { NationalCourseFields, SkylineStatusBadge } from "@/pages/admin/components/CourseCatalogue";
+import { fetchCatalogueCourse, type CatalogueCourse } from "@/pages/admin/lib/courseCatalogue";
 
 const TABS = [
   { id: "basic", label: "Basic Info", icon: "ri-information-line" },
@@ -39,6 +41,18 @@ export default function CourseEditorPage() {
   const [tab, setTab] = useState("basic");
   const [uploading, setUploading] = useState(false);
   const attachmentInput = useRef<HTMLInputElement>(null);
+  const [national, setNational] = useState<CatalogueCourse | null>(null);
+  const savedCode = original?.code ?? "";
+
+  // National reference record for the saved course code (read-only; owned by training.gov.au sync).
+  useEffect(() => {
+    let live = true;
+    setNational(null);
+    fetchCatalogueCourse(savedCode)
+      .then((c) => { if (live) setNational(c); })
+      .catch(() => { if (live) setNational(null); });
+    return () => { live = false; };
+  }, [savedCode]);
 
   if (!original || !draft) {
     return (
@@ -158,19 +172,28 @@ export default function CourseEditorPage() {
       <Card className="p-5 md:p-6">
         {tab === "basic" ? (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            {national ? (
+              <div className="space-y-2 md:col-span-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground-800">
+                  Australian course <SkylineStatusBadge course={national} />
+                </div>
+                <NationalCourseFields course={national} />
+              </div>
+            ) : null}
             <div className="md:col-span-2">
-              <Field label="Course Name" required>
+              <Field label="Course Name" required hint={national ? "Display name on the Skyline website. The national name is shown above." : undefined}>
                 <TextInput value={draft.name} onChange={(e) => set("name", e.target.value)} />
               </Field>
             </div>
             <Field label="Course Code">
-              <TextInput value={draft.code} onChange={(e) => set("code", e.target.value)} placeholder="e.g. MSF30422" />
+              <TextInput value={draft.code} readOnly={!!national} onChange={(e) => set("code", e.target.value)} placeholder="e.g. MSF30422" />
             </Field>
             <Field label="CRICOS Code">
               <TextInput value={draft.cricos} onChange={(e) => set("cricos", e.target.value)} placeholder="e.g. 119813H" />
             </Field>
             <Field label="Category" required>
               <Select value={draft.category} onChange={(e) => set("category", e.target.value)}>
+                {draft.category ? null : <option value="">Select a category</option>}
                 {courseCategories.map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -179,7 +202,7 @@ export default function CourseEditorPage() {
               </Select>
             </Field>
             <Field label="Training Package">
-              <TextInput value={draft.trainingPackage} onChange={(e) => set("trainingPackage", e.target.value)} />
+              <TextInput value={draft.trainingPackage} readOnly={!!national} onChange={(e) => set("trainingPackage", e.target.value)} />
             </Field>
           </div>
         ) : null}

@@ -6,7 +6,7 @@ import test from "node:test";
 import { directoryAgencyToForm, EMPTY_AGENCY_FORM, validateAgencyForm } from '../src/pages/admin/lib/agencyForm.ts';
 import type { DirectoryAgency } from '../src/pages/agency/lib/portalData.ts';
 
-test('agency directory fills real business fields, keeps inactive status and does not invent missing contact details', () => {
+test('agency directory fills real business fields, starts the added business inactive and does not invent missing contact details', () => {
   const agency: DirectoryAgency = { ...EMPTY_AGENCY_FORM, id: 'directory:sample', name: 'Sample Business', code: 'OMARA-ABC12345',
     phone: '+61412345678 / +61400000000', primaryContact: 'Registered Contact', status: 'Inactive', businessEmail: '',
     address: '1 Sample Street', country: 'Australia', registrationNumber: '', isPermanent: false, createdAt: '',
@@ -15,7 +15,7 @@ test('agency directory fills real business fields, keeps inactive status and doe
   assert.equal(form.name, agency.name);
   assert.equal(form.address, agency.address);
   assert.equal(form.primaryContact, agency.primaryContact);
-  assert.equal(form.status, 'Inactive');
+  assert.equal(form.status, 'Inactive', 'every new business starts inactive until a SLIT administrator activates it');
   assert.equal(form.businessEmail, '');
   assert.equal(form.registrationNumber, '', 'a person MARN is not an agency ABN');
   assert.equal(validateAgencyForm(form).phone, '+61412345678');
@@ -235,8 +235,8 @@ test("stored drafts of one editor are listed newest first and never mix editors 
 // ---- single portal sign-in: database-resolved role decides landing page, user-management UI and no-access messages ----
 test("sign-in: each role lands on its own page and unknown roles never get one", () => {
   assert.equal(portalLanding("slit_admin"), "/agency/dashboard");
-  assert.equal(portalLanding("agency_admin"), "/agency/dashboard");
-  assert.equal(portalLanding("agent"), "/agency/applications");
+  assert.equal(portalLanding("agency_admin"), "/agency/workspace");
+  assert.equal(portalLanding("agent"), "/agency/workspace");
 });
 
 test("sign-in: only organization and agency admins are shown user management", () => {
@@ -247,8 +247,10 @@ test("sign-in: only organization and agency admins are shown user management", (
 });
 
 test("sign-in: suspended, expired and unassigned accounts each get a distinct clear message", () => {
-  const messages = ["agency_suspended", "user_suspended", "invite_expired", "no_access"].map(portalAccessMessage);
-  assert.equal(new Set(messages).size, 4);
+  const messages = ["agency_suspended", "user_suspended", "invite_expired", "no_access", "pending_review", "registration_declined"].map(portalAccessMessage);
+  assert.equal(new Set(messages).size, 6);
+  assert.match(portalAccessMessage("pending_review"), /reviewing your agent account/i);
+  assert.match(portalAccessMessage("registration_declined"), /not approved/i);
   assert.match(portalAccessMessage("agency_suspended"), /agency is currently suspended/i);
   assert.match(portalAccessMessage("user_suspended"), /deactivated/i);
   assert.match(portalAccessMessage("invite_expired"), /expired/i);
@@ -276,11 +278,12 @@ test("login: unauthenticated users go to /login with a safe next; old login URLs
   assert.equal(legacyLoginTarget("", "https://evil.example"), "/login");
 });
 
-test("login: each kind of access lands in the right place and multiple kinds ask first", () => {
+test("login: each kind of access lands in the right place; SLIT admins go to the CMS and other multiple kinds ask first", () => {
   const cms = { active: true, mustChangePassword: false };
   assert.deepEqual(decideLogin({ cms, portal: "no_access" }), { kind: "go", to: "/admin" });
   assert.deepEqual(decideLogin({ cms: null, portal: "active" }), { kind: "go", to: "/agency" });
-  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }), { kind: "choose", options: ["cms", "portal"] });
+  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }), { kind: "go", to: "/admin" }, "a SLIT administrator is never asked to choose");
+  assert.deepEqual(decideLogin({ cms, portal: "org_admin" }, null, "portal"), { kind: "go", to: "/admin" }, "not even when the portal was used last");
   assert.deepEqual(decideLogin({ cms, portal: "active" }, null, "portal"), { kind: "choose", options: ["portal", "cms"] });
   assert.deepEqual(decideLogin({ cms, portal: "no_access" }, "/admin/courses"), { kind: "go", to: "/admin/courses" });
   assert.deepEqual(decideLogin({ cms: null, portal: "active" }, "/admin/courses"), { kind: "go", to: "/agency" }, "a return path into an area the user cannot use is ignored");
@@ -310,12 +313,12 @@ test("login: failures are generic, rate limits and unaccepted invitations are ex
   assert.equal(loginNotice(null), "");
 });
 
-test("header: signed-in visitors see Dashboard instead of Sign In, and the Agency Portal button is gone", () => {
-  assert.deepEqual(headerAccountLink(false), { label: "Sign In", to: "/login" });
-  assert.deepEqual(headerAccountLink(true), { label: "Dashboard", to: "/login" });
+test("header: one Login / Enroll Now button for everyone, and no Agency Portal or separate Enroll Now button", () => {
+  assert.deepEqual(headerAccountLink(false), { label: "Login / Enroll Now", to: "/login" });
+  assert.deepEqual(headerAccountLink(true), { label: "Login / Enroll Now", to: "/login" });
   const header = readFileSync(new URL("../src/components/feature/SiteHeader.tsx", import.meta.url), "utf8");
   for (const gone of ["Agency Portal", "/agency/login", "/admin/login"]) assert.ok(!header.includes(gone), gone);
-  assert.ok(header.includes("Enroll Now"));
+  assert.ok(!header.includes("Enroll Now"), "the header uses the one Login / Enroll Now button");
 });
 
 // ---- user dialogs: pure validation, self / last-admin guards and safe server-error mapping ----
@@ -409,14 +412,19 @@ test("status model: the UI options equal the default graph in migration 91; lega
   const sql = readFileSync(new URL("../supabase/migrations/20261027050000_admissions_status_model_revision.sql", import.meta.url), "utf8");
   const workflow = /when 'workflow' then jsonb_build_object\([\s\S]*?\]'::jsonb\)/.exec(sql)?.[0] ?? "";
   const pairs = [...workflow.matchAll(/\{"from":"(\w+)","to":"(\w+)"\}/g)].map((m) => `${m[1]}>${m[2]}`).filter((p) => !p.startsWith("draft>"));
-  const fromUi = Object.keys(STATUS_LABELS).flatMap((from) => ["under_review", "offer_issued"].includes(from) ? [] : nextStatusOptions(from).map((to) => `${from}>${to}`));
+  // Drafts are compared separately: migration 108 lets an administrator close one (withdrawn / rejected).
+  const fromUi = Object.keys(STATUS_LABELS).flatMap((from) => ["under_review", "offer_issued", "draft"].includes(from) ? [] : nextStatusOptions(from).map((to) => `${from}>${to}`));
   assert.deepEqual([...pairs].sort(), [...fromUi].sort());
   assert.ok(workflow.includes('"draft","to":"submitted"'));
   assert.deepEqual([...nextStatusOptions("under_review")].sort(), ["action_required", "offer_accepted", "rejected", "withdrawn"]);
   assert.deepEqual([...nextStatusOptions("offer_issued")].sort(), ["offer_accepted", "rejected", "withdrawn"]);
   assert.deepEqual(nextStatusOptions("enrolled"), []);
   assert.deepEqual(nextStatusOptions("rejected"), []);
-  assert.deepEqual(nextStatusOptions("draft"), [], "a draft is submitted, never moved by the status command");
+  // A draft is submitted only from its form; the status command can only close it, as migration 108 allows.
+  assert.deepEqual([...nextStatusOptions("draft")].sort(), ["rejected", "withdrawn"]);
+  const draftSql = readFileSync(new URL("../supabase/migrations/20261104170000_draft_can_be_withdrawn_or_rejected.sql", import.meta.url), "utf8");
+  assert.ok(draftSql.includes("when 'draft' then p_to in ('withdrawn','rejected')"));
+  assert.ok(!nextStatusOptions("draft").includes("submitted"));
 });
 
 test("status model: only a draft can be submitted by an agent or agency admin; the status control is read-only for them", () => {
@@ -517,5 +525,194 @@ test("shared table exposes sorting controls in the small-screen toolbar without 
   assert.match(html, /aria-label="Table sorting"/);
   assert.equal((html.match(/<button/g) ?? []).length, 2);
   assert.equal(calls, 0);
+});
+
+// ---- Agencies list: application status breakdown ----
+import { sortedStatusCounts } from "../src/pages/admin/lib/agencyStatus.ts";
+
+test("agencies list: status breakdown puts work needing attention first and drops empty or unknown statuses", () => {
+  assert.deepEqual(sortedStatusCounts({ offer_accepted: 1, draft: 2, action_required: 1, enrolled: 0, mystery: 4 }),
+    [["action_required", 1], ["draft", 2], ["offer_accepted", 1]]);
+  assert.deepEqual(sortedStatusCounts(undefined), []);
+  assert.deepEqual(sortedStatusCounts({}), []);
+});
+
+// ---- Businesses, agents and students (CMS) ----
+import { groupByStudent } from "../src/pages/admin/lib/businessGroups.ts";
+import type { ApplicationRow } from "../src/pages/admin/lib/businessData.ts";
+
+test("agent page: applications group under their student, newest activity first, unknown students kept", () => {
+  const app = (id: string, studentId: string): ApplicationRow => ({ id, reference: id, status: "draft", intake: "", completion: 0, createdAt: "", updatedAt: "",
+    submittedAt: null, studentId, agentId: "a", agentName: "Agent", courses: [] });
+  const groups = groupByStudent([app("1", "s2"), app("2", "s1"), app("3", "s2"), app("4", "s9")],
+    [{ id: "s1", name: "One", email: "" }, { id: "s2", name: "Two", email: "" }]);
+  assert.deepEqual(groups.map((g) => [g.student.name, g.applications.map((a) => a.id)]), [["Two", ["1", "3"]], ["One", ["2"]], ["Student", ["4"]]]);
+});
+
+test("business, agent and student screens fit the page: no horizontal scrolling tables", () => {
+  for (const file of ["BusinessesPage", "BusinessDetailPage", "AgentsPage", "AgentDetailPage", "StudentsPage", "StudentDetailPage",
+    "components/StudentsTable", "components/ApplicationsList"]) {
+    const source = readFileSync(`src/pages/admin/${file}.tsx`, "utf8");
+    assert.doesNotMatch(source, /overflow-x-auto|min-w-\[\d/, `${file} must not scroll sideways`);
+    if (/<thead>/.test(source)) assert.match(source, /ResponsiveTable/, `${file} uses the shared responsive table`);
+  }
+});
+
+// ---- Agents: activation starts from the agent's own business, or the one OMARA lists ----
+import { toActivate } from "../src/pages/admin/lib/agentActivation.ts";
+
+test("agents: the Activate dialog starts from the agent's business and knows whether they already have a login", () => {
+  const base = { key: "g1", agentId: "g1", omaraId: "o1", profileId: null, invitationId: null, name: "Anna Lee", email: "", phone: "0412 000 000", role: "agent" as const, status: "Inactive" as const,
+    statusChangedAt: null, marn: "1100001", registered: true, businessId: "b1", businessName: "Bright Futures", businessStatus: "Inactive" as const, students: 0, statusCounts: {} };
+  const start = toActivate(base);
+  assert.deepEqual(start.business, { id: "b1", name: "Bright Futures", status: "Inactive" }, "every agent belongs to one business");
+  assert.equal(start.hasLogin, false);
+  assert.equal(start.agentId, "g1");
+  assert.equal(start.marn, "1100001", "the MARN is kept so activation keeps the OMARA link");
+  assert.equal(start.phone, "0412 000 000");
+  assert.equal(toActivate({ ...base, profileId: "p1", role: "agency_admin" }).hasLogin, true);
+});
+
+// Agency ABN onboarding: deterministic fixtures only; no government calls.
+import { normalizeAbn, validateAbn, parseAgencyAbnPage, lookupAgencyAbn } from '../supabase/functions/_shared/validation/abn.ts';
+
+test('new manual agencies require checksum-valid ABNs; legacy editing remains compatible', () => {
+  assert.equal(normalizeAbn('85 165 345 717'), '85165345717');
+  assert.equal(validateAbn('85 165 345 717'), '');
+  assert.ok(validateAbn('')); assert.ok(validateAbn('85165345718')); assert.ok(validateAbn('8516534571a'));
+  const form = { ...EMPTY_AGENCY_FORM, name: 'Sample', code: 'SAM-001', businessEmail: 'agency@example.test' };
+  assert.ok(validateAgencyForm(form, true).errors.registrationNumber);
+  assert.equal(validateAgencyForm(form).errors.registrationNumber, undefined);
+  assert.equal(validateAgencyForm({ ...form, registrationNumber: '85165345717' }, true).errors.registrationNumber, undefined);
+});
+
+test('ABN lookup extracts only published business data and fails closed on a different ABN or blocked page', async () => {
+  const html = `<h1>Current details for ABN 85 165 345 717</h1><table>
+    <tr><th>Entity name:</th><td>SYNTHETIC &amp; COMPANY</td></tr>
+    <tr><th>ABN status:</th><td>Active from 19&nbsp;Jun&nbsp;2020</td></tr>
+    <tr><th>Entity type:</th><td>Individual/Sole Trader</td></tr>
+    <tr><th>Goods &amp; Services Tax (GST):</th><td>Not currently registered</td></tr>
+    <tr><th>Main business location:</th><td>WA 6112</td></tr></table>
+    <table><caption>Business name(s)</caption><tr><td>Sample agency</td><td>14 Sep 2025</td></tr></table>`;
+  const result = parseAgencyAbnPage(html, '85165345717');
+  assert.equal(result.legalName, 'SYNTHETIC & COMPANY');
+  assert.deepEqual(result.businessNames, ['Sample agency']); assert.equal(result.postcode, '6112');
+  assert.equal('email' in result, false); assert.equal('phone' in result, false);
+  assert.throws(() => parseAgencyAbnPage(html, '95830955864'));
+  assert.throws(() => parseAgencyAbnPage('<h1>Access denied</h1>', '85165345717'));
+  let requested = '';
+  const mock = (async (url: string) => { requested = url; return new Response(html); }) as typeof fetch;
+  assert.equal((await lookupAgencyAbn('85 165 345 717', mock)).abn, '85165345717');
+  assert.equal(requested, 'https://abr.business.gov.au/ABN/View?abn=85165345717');
+  await assert.rejects(lookupAgencyAbn('https://evil.invalid', mock));
+  await assert.rejects(lookupAgencyAbn('85165345717', (async () => new Response('Blocked', { status: 429 })) as typeof fetch));
+});
+
+// ---- Enroll now (migration 119): what a student or an agent types on the sign-in page ----
+import {
+  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, agentEnrolPayload, dateOfBirthProblem, dateOfBirthRange, formatAbn, mobileProblem, parseDateOfBirth, studentEnrolPayload,
+  validateAgentEnrol, validateStudentEnrol,
+} from "../src/lib/enrolForm.ts";
+
+test("enrol: the mobile comes from the country-code phone field, so overseas students can enrol", () => {
+  for (const ok of ["+61412345678", "+919876543210", "+447700900123"]) assert.equal(mobileProblem(ok), "", ok);
+  for (const bad of ["", "0412345678", "+61", "+6141234", "abc"]) assert.ok(mobileProblem(bad), bad);
+});
+
+test("enrol: the date of birth says which rule failed, and the picker is limited to 10 to 100 years ago", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  assert.deepEqual(dateOfBirthRange(today), { min: "1926-11-05", max: "2016-11-05" });
+  assert.equal(dateOfBirthProblem("2000-01-02", today), "");
+  assert.match(dateOfBirthProblem("", today), /enter your date of birth/i);
+  assert.match(dateOfBirthProblem("2020-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("1900-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("31/02/2000", today), /real date/i);
+});
+
+test("enrol: dates of birth are typed day first and must be real and 10 to 100 years ago", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  assert.equal(parseDateOfBirth("02/01/2000", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("2-1-2000", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("2000-01-02", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("31/02/2000", today), null, "not a real date");
+  assert.equal(parseDateOfBirth("05/11/2017", today), null, "younger than 10");
+  assert.equal(parseDateOfBirth("05/11/2016", today), "2016-11-05", "exactly 10 is fine");
+  assert.equal(parseDateOfBirth("04/11/1926", today), null, "older than 100");
+  assert.equal(parseDateOfBirth("01/02/03", today), null);
+  assert.equal(parseDateOfBirth("", today), null);
+});
+
+test("enrol: the ABN is checked like the Edge Function does and shown in groups", () => {
+  assert.equal(abnProblem("85 165 345 717"), "");
+  assert.ok(abnProblem(""));
+  assert.ok(abnProblem("85165345718"));
+  assert.ok(abnProblem("8516534571"));
+  assert.equal(formatAbn("85165345717"), "85 165 345 717");
+  assert.equal(formatAbn("851"), "85 1");
+  assert.equal(formatAbn("85165345717999"), "85 165 345 717", "never more than 11 digits");
+});
+
+test("enrol: a student gives only email, mobile and a password and agrees (name and date of birth optional); the payload is normalised", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  const empty = validateStudentEnrol(EMPTY_STUDENT_ENROL, today);
+  assert.deepEqual(Object.keys(empty).sort(), ["agreed", "email", "mobile", "password"]);
+  const minimal = { ...EMPTY_STUDENT_ENROL, email: "a@b.test", mobile: "+61412345678", password: "long-enough-pw", agreed: true };
+  assert.ok(validateStudentEnrol({ ...minimal, password: "short" }, today).password);
+  assert.deepEqual(validateStudentEnrol(minimal, today), {});
+  assert.equal(studentEnrolPayload(minimal, today).firstName, "");
+  const form = { ...EMPTY_STUDENT_ENROL, firstName: " Stu ", lastName: "Dent", email: "Stu.Dent@Example.test ", mobile: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: " AGT-1 ", agreed: true, password: "long-enough-pw" };
+  assert.deepEqual(validateStudentEnrol(form, today), {});
+  assert.deepEqual(studentEnrolPayload(form, today), { kind: "student", firstName: "Stu", lastName: "Dent", email: "stu.dent@example.test", phone: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: "AGT-1" });
+  assert.ok(validateStudentEnrol({ ...form, referralCode: "x".repeat(41) }, today).referralCode);
+  assert.ok(validateStudentEnrol({ ...form, email: "not-an-email" }, today).email);
+  assert.ok(validateStudentEnrol({ ...form, agreed: false }, today).agreed);
+});
+
+test("enrol: an agent must give the business, a valid ABN, a contact, a work email and a phone", () => {
+  const empty = validateAgentEnrol(EMPTY_AGENT_ENROL);
+  assert.deepEqual(Object.keys(empty).sort(), ["abn", "agreed", "businessName", "contactName", "email", "phone"]);
+  const form = { ...EMPTY_AGENT_ENROL, businessName: " Sample Agency ", abn: "85 165 345 717", contactName: "Reg Istrar", email: "Reg@Example.test", phone: "+61398765432", agreed: true };
+  assert.deepEqual(validateAgentEnrol(form), {});
+  assert.deepEqual(agentEnrolPayload(form), { kind: "agent", businessName: "Sample Agency", abn: "85165345717", contactName: "Reg Istrar", email: "reg@example.test", phone: "+61398765432" });
+  assert.ok(validateAgentEnrol({ ...form, abn: "85165345718" }).abn);
+  assert.ok(validateAgentEnrol({ ...form, businessName: "A" }).businessName);
+  assert.ok(validateAgentEnrol({ ...form, phone: "12" }).phone);
+});
+
+test("enrol: only Google, Facebook and phone accounts are offered the student details step", async () => {
+  const { isSelfSignUpAccount } = await import("../src/lib/authProviders.ts").catch(() => ({ isSelfSignUpAccount: null }));
+  if (!isSelfSignUpAccount) return; // the module reads Vite globals; covered by type-check when it cannot load here
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "google", providers: ["google"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "phone" } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email", "facebook"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email"] } }), false);
+  assert.equal(isSelfSignUpAccount(null), false);
+});
+
+test("enrol: the agent's email or phone already used by another company is shown as a popup, other errors are not", async () => {
+  const { isContactConflict } = await import("../src/lib/enrolForm.ts");
+  assert.equal(isContactConflict("The email you entered is already linked to another company. Please enter a different email, since this will be the admin account for your company."), true);
+  assert.equal(isContactConflict("The phone number you entered is already linked to another company. Please enter a different phone number, since this will be the admin account for your company."), true);
+  assert.equal(isContactConflict("The ABN you entered already exists in our system. Please contact Skyline to get registered."), false);
+  assert.equal(isContactConflict("Enter a phone number."), false);
+});
+
+test("enrol: emails need a real-looking domain; Australian phones are 10 digits starting with 0, entered with the country code", async () => {
+  const { validEmail, emailProblem, validateAgentEnrol, EMPTY_AGENT_ENROL } = await import("../src/lib/enrolForm.ts");
+  for (const ok of ["name@company.com.au", "first.last+tag@mail.example.com", "a@b.io"]) assert.equal(validEmail(ok), true, ok);
+  for (const bad of ["", "name", "name@", "@company.com", "name@company", "name@company.c", "name@@company.com", "na me@company.com",
+    "name@company..com", ".name@company.com", "name.@company.com", "na..me@company.com", "name@-company.com", "name@company-.com", "name@company.123"]) {
+    assert.equal(validEmail(bad), false, bad);
+  }
+  assert.match(emailProblem(""), /enter your email/i);
+  assert.match(emailProblem("name@company"), /valid email/i);
+  const form = { ...EMPTY_AGENT_ENROL, businessName: "Sample", abn: "85 165 345 717", contactName: "Reg Istrar", email: "reg@example.com.au", agreed: true };
+  assert.equal(validateAgentEnrol({ ...form, phone: "+61398765432" }).phone, undefined, "Australian landline");
+  assert.equal(validateAgentEnrol({ ...form, phone: "+61412345678" }).phone, undefined, "Australian mobile");
+  assert.equal(validateAgentEnrol({ ...form, phone: "+919876543210" }).phone, undefined, "overseas number");
+  assert.ok(validateAgentEnrol({ ...form, phone: "+6141234567" }).phone, "Australian number one digit short");
+  assert.ok(validateAgentEnrol({ ...form, phone: "0412345678" }).phone, "without the country-code field");
+  assert.ok(validateAgentEnrol({ ...form, phone: "" }).phone, "empty");
+  assert.match(validateAgentEnrol({ ...form, email: "reg@example" }).email ?? "", /valid email/i);
 });
 

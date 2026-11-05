@@ -34,6 +34,7 @@ import AdminUsersPage from "@/pages/agency/users/page";
 import AllApplicationsPage from "@/pages/agency/all-applications/page";
 import AdminAuditLogPage from "@/pages/agency/audit-log/page";
 import RegistrationWorkbenchPage from "@/pages/agency/registrations/page";
+import AgencyWorkspacePage from "@/pages/agency/workspace/page";
 
 import AdminProviders from "@/pages/admin/components/AdminProviders";
 import AdminLayout from "@/pages/admin/components/AdminLayout";
@@ -55,9 +56,14 @@ import UsersPage from "@/pages/admin/UsersPage";
 import InstitutionPage from "@/pages/admin/InstitutionPage";
 import ActivityPage from "@/pages/admin/ActivityPage";
 import NotificationLogPage from "@/pages/admin/NotificationLogPage";
-import AgenciesPage from "@/pages/admin/AgenciesPage";
 import AgencyNewPage from "@/pages/admin/AgencyNewPage";
-import AgencyDetailPage from "@/pages/admin/AgencyDetailPage";
+import AgencyRedirect from "@/pages/admin/AgencyRedirect";
+import BusinessesPage from "@/pages/admin/BusinessesPage";
+import BusinessDetailPage from "@/pages/admin/BusinessDetailPage";
+import AdminAgentsPage from "@/pages/admin/AgentsPage";
+import AgentDetailPage from "@/pages/admin/AgentDetailPage";
+import StudentsPage from "@/pages/admin/StudentsPage";
+import StudentDetailPage from "@/pages/admin/StudentDetailPage";
 import ApplicationsArea from "@/pages/admin/ApplicationsArea";
 import KnowledgePage from "@/pages/admin/KnowledgePage";
 
@@ -104,6 +110,7 @@ const routes: RouteObject[] = [
         children: [
           { index: true, element: <PortalLanding /> },
           { path: "dashboard", element: <PortalDashboardPage /> },
+          { path: "workspace", element: <AgencyWorkspacePage /> },
           { path: "applications", element: <PortalApplicationsPage /> },
           { path: "applications/new", element: <NewApplicationPage /> },
           { path: "applications/:id", element: <ApplicationDetailPage /> },
@@ -154,11 +161,17 @@ const routes: RouteObject[] = [
             path: "agencies",
             element: <RequireAdmin><ApplicationsArea /></RequireAdmin>,
             children: [
-              { index: true, element: <AgenciesPage /> },
+              { index: true, element: <Navigate to="/admin/businesses" replace /> },
               { path: "new", element: <AgencyNewPage /> },
-              { path: ":id", element: <AgencyDetailPage /> },
+              { path: ":id", element: <AgencyRedirect /> },
             ],
           },
+          { path: "businesses", element: <RequireAdmin><BusinessesPage /></RequireAdmin> },
+          { path: "businesses/:id", element: <RequireAdmin><BusinessDetailPage /></RequireAdmin> },
+          { path: "agents", element: <RequireAdmin><AdminAgentsPage /></RequireAdmin> },
+          { path: "agents/:id", element: <RequireAdmin><AgentDetailPage /></RequireAdmin> },
+          { path: "students", element: <RequireAdmin><StudentsPage /></RequireAdmin> },
+          { path: "students/:id", element: <RequireAdmin><StudentDetailPage /></RequireAdmin> },
           { path: "notifications", element: <RequireAdmin><NotificationLogPage /></RequireAdmin> },
           { path: "users", element: <RequireAdmin><UsersPage /></RequireAdmin> },
           { path: "institution", element: <RequireAdmin><InstitutionPage /></RequireAdmin> },

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { expiryMessage, expiryTone, getDocumentExpiryStatus } from "@/pages/agency/lib/documentExpiry";
 import { formatBytes, type PendingUpload, type WizardDoc, type WizardStep } from "@/pages/agency/lib/wizardConfig";
+import { getDocumentSignedUrl } from "@/pages/agency/lib/portalApplications";
 
 interface Props {
   step: WizardStep;
@@ -15,6 +16,8 @@ interface Props {
   onRetryDoc: (doc: WizardDoc) => void;
   onDismissDoc: (doc: WizardDoc) => void;
   onRemoveDoc: (doc: WizardDoc) => Promise<void>;
+  /** Records the view first where access is audited (SLIT staff); a failure blocks opening the file. */
+  logView?: (doc: WizardDoc) => Promise<void>;
 }
 
 const CHIP = "rounded-md border border-background-200 bg-background-50 px-3 py-2 text-xs text-foreground-700";
@@ -41,13 +44,39 @@ function ErrorActions({ message, onRetry, onManual }: { message: string; onRetry
   );
 }
 
-export default function WizardDocumentStep({ step, docs, pending, dismissed, onPickFiles, onRetryUpload, onDropUpload, onRetryDoc, onDismissDoc, onRemoveDoc }: Props) {
+export default function WizardDocumentStep({ step, docs, pending, dismissed, onPickFiles, onRetryUpload, onDropUpload, onRetryDoc, onDismissDoc, onRemoveDoc, logView }: Props) {
   const [deleteCandidate, setDeleteCandidate] = useState<WizardDoc | null>(null);
   const [removing, setRemoving] = useState("");
   const [removeError, setRemoveError] = useState("");
 
   const uploading = pending.some((item) => !item.error);
   const hasFile = docs.length > 0 || pending.length > 0;
+
+  const [viewing, setViewing] = useState("");
+  const [preview, setPreview] = useState<{ doc: WizardDoc; url: string; isPdf: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setPreview(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview]);
+
+  const handleView = async (doc: WizardDoc) => {
+    setViewing(doc.id);
+    setRemoveError("");
+    try {
+      if (logView) await logView(doc);
+      const signedUrl = await getDocumentSignedUrl(doc.storagePath, 300);
+      const isPdf = /\.pdf$/i.test(doc.filename);
+      // View only: hide the browser PDF viewer's download and print toolbar.
+      setPreview({ doc, url: isPdf ? `${signedUrl}#toolbar=0&navpanes=0` : signedUrl, isPdf });
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : "The document could not be opened.");
+    } finally {
+      setViewing("");
+    }
+  };
 
   const handleRemove = async (doc: WizardDoc) => {
     setRemoving(doc.id);
@@ -75,10 +104,34 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
         </div>
       </div>
 
+      {hasFile ? (
+        // Once a document is in, the upload area shrinks to a small, light button so it is clear the step is done.
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-900">
+            <i className="ri-checkbox-circle-fill text-base text-emerald-600" aria-hidden="true" />
+            {step.multiple ? "Uploaded" : "Document uploaded"}
+          </p>
+          <label className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-md border border-background-300 bg-background-50 px-2.5 py-1 text-[11px] font-medium text-foreground-600 transition-colors hover:border-primary-300 hover:text-primary-700">
+            <i className={step.multiple ? "ri-add-line" : "ri-refresh-line"} aria-hidden="true" />
+            {step.multiple ? "Add more files" : "Replace file"}
+          <input
+            type="file"
+            accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+            multiple={step.multiple}
+            disabled={uploading}
+            onChange={(event) => {
+              onPickFiles(event.target.files);
+              event.target.value = "";
+            }}
+            className="sr-only"
+          />
+          </label>
+        </div>
+      ) : (
       <div>
         <label className="flex w-full cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-dashed border-primary-300 bg-background-50 px-4 py-6 text-sm font-semibold text-primary-700 transition-colors hover:bg-primary-50">
           <i className="ri-upload-cloud-2-line text-lg" aria-hidden="true" />
-          {step.multiple ? (hasFile ? "Add more files" : "Upload files") : hasFile ? "Replace file" : "Upload file"}
+          {step.multiple ? "Upload files" : "Upload file"}
           <input
             type="file"
             accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
@@ -95,6 +148,7 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
           PDF, JPG or PNG &middot; up to 10 MB each &middot; stored privately
         </p>
       </div>
+      )}
 
       {hasFile ? (
         <ul className="space-y-1.5" aria-live="polite">
@@ -136,6 +190,17 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
                     )}
                     <button
                       type="button"
+                      onClick={() => void handleView(doc)}
+                      disabled={viewing === doc.id || !doc.storagePath}
+                      aria-label={`View ${doc.filename}`}
+                      title="View"
+                      className="flex h-7 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 font-semibold text-primary-700 transition-colors hover:bg-primary-50 disabled:opacity-50"
+                    >
+                      <i className={viewing === doc.id ? "ri-loader-4-line animate-spin" : "ri-eye-line"} aria-hidden="true" />
+                      View
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setDeleteCandidate(doc)}
                       disabled={removing === doc.id}
                       aria-label={`Remove ${doc.filename}`}
@@ -158,6 +223,37 @@ export default function WizardDocumentStep({ step, docs, pending, dismissed, onP
           <i className="ri-alert-line mt-px" aria-hidden="true" />
           {removeError}
         </p>
+      ) : null}
+
+      {preview ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-foreground-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Viewing ${preview.doc.filename}`}
+          onClick={() => setPreview(null)}
+        >
+          <div className="flex h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-background-50 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-background-200 px-4 py-3">
+              <p className="truncate font-heading text-sm font-semibold text-foreground-950">{preview.doc.filename}</p>
+              <button
+                type="button"
+                onClick={() => setPreview(null)}
+                aria-label="Close preview"
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground-500 transition-colors hover:bg-background-100 hover:text-foreground-900"
+              >
+                <i className="ri-close-line text-lg" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-background-100" onContextMenu={(event) => event.preventDefault()}>
+              {preview.isPdf ? (
+                <iframe src={preview.url} title={preview.doc.filename} className="h-full w-full border-0" />
+              ) : (
+                <img src={preview.url} alt={preview.doc.filename} draggable={false} className="max-h-full max-w-full select-none object-contain" />
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {deleteCandidate ? (

@@ -1,7 +1,7 @@
 import ResponsiveTable from "@/components/ui/ResponsiveTable";
 import { useCallback, useEffect, useState } from "react";
 import { formatPhone } from "../../../../../supabase/functions/_shared/validation/identifiers";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { usePortalAuth } from "@/pages/agency/lib/portalAuthContext";
 import { STATUS_META, formatDate } from "@/pages/agency/lib/portalData";
 import { isEditableApplicationStatus, nextStatusOptions } from "@/pages/agency/lib/applicationAccess";
@@ -32,15 +32,17 @@ import { PortalEmpty, PortalError, PortalLoading, StatusBadge } from "@/pages/ag
 
 import { portalScopeCacheKey } from "@/lib/portalScope";
 
-type Tab = "overview" | "form" | "documents" | "history" | "messages" | "notifications";
+type Tab = "form" | "documents" | "history" | "messages" | "notifications";
 
 const TABS: Array<{ id: Tab; label: string; icon: string }> = [
-  { id: "overview", label: "Overview", icon: "ri-dashboard-line" },
   { id: "form", label: "Application form", icon: "ri-file-edit-line" },
   { id: "documents", label: "Documents", icon: "ri-folder-3-line" },
   { id: "history", label: "Status history", icon: "ri-history-line" },
   { id: "messages", label: "Messages", icon: "ri-chat-3-line" },
 ];
+
+const CONTROL =
+  "mt-1 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40";
 
 function wizardOpenKey(applicationId: string): string {
   return `slit-portal-wizard-open:${portalScopeCacheKey()}:${applicationId}`;
@@ -53,19 +55,30 @@ function wasWizardOpen(applicationId: string): boolean {
 export default function ApplicationDetailPage() {
   const { id = "" } = useParams();
   const paths = useApplicationPaths();
+  const navigate = useNavigate();
   const { role, profile, agency } = usePortalAuth();
 
   const [application, setApplication] = useState<ApplicationDetail | null>(null);
   const [history, setHistory] = useState<StatusHistoryRow[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("form");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusNote, setStatusNote] = useState("");
-  const [wizardOpen, setWizardOpen] = useState(() => wasWizardOpen(id));
+  // ?wizard=1 (a student just added from the Students page) opens the document wizard straight away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [wizardOpen, setWizardOpen] = useState(() => wasWizardOpen(id) || searchParams.get("wizard") === "1");
+  useEffect(() => {
+    if (searchParams.get("wizard") !== "1") return;
+    try { window.sessionStorage.setItem(wizardOpenKey(id), "1"); } catch { /* session storage unavailable */ }
+    setWizardOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("wizard");
+    setSearchParams(next, { replace: true });
+  }, [id, searchParams, setSearchParams]);
   const [workspaceKey, setWorkspaceKey] = useState(0);
   const [documentBusy, setDocumentBusy] = useState("");
 
@@ -269,6 +282,79 @@ export default function ApplicationDetailPage() {
         </div>
       </header>
 
+      {/* Always has content: the status control for SLIT, the read-only status for agency users. */}
+      <div className="mt-5 flex flex-col gap-3 rounded-card border border-background-200 bg-background-50 p-4 md:flex-row md:flex-wrap md:items-end">
+        {canManageAssignment ? (
+          <label className="block md:w-60">
+            <span className="text-xs font-semibold text-foreground-700">Assigned agent</span>
+            <select
+              value={application.agentId ?? ""}
+              disabled={busy}
+              onChange={(event) => void handleReassign(event.target.value)}
+              className={CONTROL}
+            >
+              <option value="">Unassigned</option>
+              {agents.map((agent) => (
+                <option key={agent.profileId} value={agent.profileId}>
+                  {agent.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {isSlit ? (
+          <>
+            <label className="block md:w-60">
+              <span className="text-xs font-semibold text-foreground-700">Admissions status</span>
+              <select
+                value=""
+                aria-label="Change status"
+                disabled={busy}
+                onChange={(event) => void handleStatus(event.target.value)}
+                className={CONTROL}
+              >
+                <option value="">{nextStatusOptions(application.status).length ? "Change status to…" : "No further status changes"}</option>
+                {nextStatusOptions(application.status).map((value) => (
+                  <option key={value} value={value}>
+                    {STATUS_META[value as keyof typeof STATUS_META]?.label ?? value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block md:min-w-[220px] md:flex-1">
+              <span className="text-xs font-semibold text-foreground-700">Note for the applicant (optional)</span>
+              <input
+                type="text"
+                value={statusNote}
+                onChange={(event) => setStatusNote(event.target.value)}
+                placeholder="Sent with the status change"
+                className={CONTROL}
+              />
+            </label>
+          </>
+        ) : null}
+
+        {!isSlit ? (
+          <div className="md:w-60">
+            <span className="text-xs font-semibold text-foreground-700">Admissions status</span>
+            <p className="mt-1 text-sm text-foreground-800">{STATUS_META[application.status as keyof typeof STATUS_META]?.label ?? application.status}</p>
+            <p className="mt-0.5 text-xs text-foreground-500">Read-only. Status changes are made by SLIT administration.</p>
+          </div>
+        ) : null}
+
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={openWizard}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md border border-primary-300 bg-background-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-50 md:ml-auto"
+          >
+            <i className="ri-magic-line" aria-hidden="true" />
+            Document upload wizard
+          </button>
+        ) : null}
+      </div>
+
       <nav className="mt-6 flex flex-wrap gap-1.5 border-b border-background-200 pb-px">
         {(paths.area === "cms" ? [...TABS, { id: "notifications" as Tab, label: "Notifications", icon: "ri-mail-line" }] : TABS).map((item) => (
           <button
@@ -311,125 +397,6 @@ export default function ApplicationDetailPage() {
       ) : null}
 
       <div className="mt-5">
-        {tab === "overview" ? (
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
-            <section className="rounded-card border border-background-200 bg-background-50 p-5">
-              <h2 className="font-heading text-base font-semibold text-foreground-950">Summary</h2>
-              <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-                {[
-                  ["Student", application.studentName || "\u2014"],
-                  ["Email", application.studentEmail || "\u2014"],
-                  [
-                    "Courses",
-                    application.courses.length
-                      ? application.courses.map((c) => `${c.code}${c.variant ? ` (${c.variant})` : ""}`).join(", ")
-                      : "\u2014",
-                  ],
-                  ["Preferred intake", application.intake || "\u2014"],
-                  ["Agency", agencyName || "\u2014"],
-                  ["Assigned agent", application.agentName || "Unassigned"],
-                  ["Created by", application.createdByName || "\u2014"],
-                  ["Submitted by", application.submittedByName || "\u2014"],
-                ].map(([label, value]) => (
-                  <div key={label}>
-                    <dt className="text-xs uppercase tracking-wide text-foreground-500">{label}</dt>
-                    <dd className="mt-1 text-sm font-medium text-foreground-900">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-
-            <div className="space-y-5">
-              {canManageAssignment ? (
-                <section className="rounded-card border border-background-200 bg-background-50 p-5">
-                  <h2 className="font-heading text-base font-semibold text-foreground-950">Assignment</h2>
-                  <p className="mt-1 text-xs text-foreground-500">
-                    Assign to an active agent in this agency, or leave unassigned.
-                  </p>
-                  <select
-                    value={application.agentId ?? ""}
-                    disabled={busy}
-                    onChange={(event) => void handleReassign(event.target.value)}
-                    className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
-                  >
-                    <option value="">Unassigned</option>
-                    {agents.map((agent) => (
-                      <option key={agent.profileId} value={agent.profileId}>
-                        {agent.fullName}
-                      </option>
-                    ))}
-                  </select>
-                </section>
-              ) : null}
-
-              {isSlit ? (
-                <section className="rounded-card border border-background-200 bg-background-50 p-5">
-                  <h2 className="font-heading text-base font-semibold text-foreground-950">Admissions status</h2>
-                  <p className="mt-1 text-xs text-foreground-500">
-                    SLIT Admin only. Agency users can never change an admissions decision.
-                  </p>
-                  <select
-                    value=""
-                    aria-label="Change status"
-                    disabled={busy}
-                    onChange={(event) => void handleStatus(event.target.value)}
-                    className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
-                  >
-                    <option value="">{nextStatusOptions(application.status).length ? "Change status to\u2026" : "No further status changes"}</option>
-                    {nextStatusOptions(application.status).map((value) => (
-                      <option key={value} value={value}>
-                        {STATUS_META[value as keyof typeof STATUS_META]?.label ?? value}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    value={statusNote}
-                    onChange={(event) => setStatusNote(event.target.value)}
-                    placeholder="Optional note for the applicant"
-                    className="mt-3 w-full rounded-md border border-background-300 bg-background-50 px-3 py-2.5 text-sm text-foreground-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-400/40"
-                  />
-                </section>
-              ) : null}
-
-              {!isSlit ? (
-                <section className="rounded-card border border-background-200 bg-background-50 p-5">
-                  <h2 className="font-heading text-base font-semibold text-foreground-950">Admissions status</h2>
-                  <p className="mt-2 text-sm text-foreground-800">{STATUS_META[application.status as keyof typeof STATUS_META]?.label ?? application.status}</p>
-                  <p className="mt-1 text-xs text-foreground-500">Read-only. Status changes are made by SLIT administration.</p>
-                </section>
-              ) : null}
-
-              {!readOnly ? (
-                <section className="rounded-card border border-primary-200 bg-primary-50 p-5">
-                  <h2 className="font-heading text-base font-semibold text-primary-900">Next step</h2>
-                  <p className="mt-1 text-xs text-primary-900/80">
-                    This application is still a draft. Open the application form to continue, save and submit.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTab("form")}
-                      className="inline-flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-4 py-2.5 text-sm font-semibold text-background-50 hover:bg-primary-600"
-                    >
-                      <i className="ri-play-line" aria-hidden="true" />
-                      Continue application
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openWizard}
-                      className="inline-flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-primary-300 bg-background-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-50"
-                    >
-                      <i className="ri-magic-line" aria-hidden="true" />
-                      Document upload wizard
-                    </button>
-                  </div>
-                </section>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
         {tab === "form" ? (
           <ApplicationWorkspace
             key={workspaceKey}
@@ -441,6 +408,8 @@ export default function ApplicationDetailPage() {
             readOnly={readOnly}
             auditAccess={isSlit}
             onSaved={refreshAfterSave}
+            onSubmitted={(reference, studentName) =>
+              navigate(isSlit && paths.area === "portal" ? "/agency/all-applications" : paths.list, { state: { submittedReference: reference, submittedName: studentName } })}
           />
         ) : null}
 

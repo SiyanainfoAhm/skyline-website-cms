@@ -56,6 +56,8 @@ export interface ApplicationListRow {
   updatedAt: string;
   submittedAt: string | null;
   isTest: boolean;
+  /** Migration 109: where a SLIT administrator may move this application, decided by the backend rules (absent before it). */
+  nextStatuses?: string[];
 }
 
 export interface ApplicationFilters {
@@ -107,10 +109,17 @@ export async function listApplications(filters: ApplicationFilters = {}): Promis
   return rows;
 }
 
+/** The application statuses the backend defines, in workflow order (empty before migration 109). */
+export async function listApplicationStatuses(): Promise<Array<{ value: string; label: string }>> {
+  const { data, error } = await supabase.rpc("portal_application_statuses");
+  if (error || !Array.isArray(data)) return [];
+  return (data as Array<Record<string, unknown>>).map((item) => ({ value: str(item.value), label: str(item.label) })).filter((item) => item.value);
+}
+
 export async function queryApplications(filters: ApplicationFilters & { sort?: string; direction?: string; limit?: number; offset?: number } = {}): Promise<{ total: number; rows: ApplicationListRow[] }> {
   const { data, error } = await supabase.rpc("portal_query_applications", { p_search: filters.search ?? "", p_status: filters.status ?? "", p_agency: filters.agencyId || null, p_agent: filters.agentId || null, p_course: filters.courseCode ?? "", p_intake: filters.intake ?? "", p_sort: filters.sort ?? "updated", p_direction: filters.direction ?? "desc", p_limit: filters.limit ?? 25, p_offset: filters.offset ?? 0 });
   if (error) throw new Error(error.message);
-  return { total: data.total, rows: (data.rows ?? []).map((r: Record<string, unknown>) => ({ id: str(r.id), reference: str(r.reference), status: str(r.status) as ApplicationStatus, studentName: str(r.student_name), studentEmail: str(r.student_email), intake: str(r.intake), completion: Number(r.completion), agencyId: str(r.agency_id), agencyName: str(r.agency_name), agentId: r.assigned_agent_id ? str(r.assigned_agent_id) : null, agentName: str(r.agent_name), courses: r.courses as ApplicationCourseRow[], createdAt: str(r.created_at), updatedAt: str(r.updated_at), submittedAt: r.submitted_at ? str(r.submitted_at) : null, isTest: Boolean(r.is_test) })) };
+  return { total: data.total, rows: (data.rows ?? []).map((r: Record<string, unknown>) => ({ id: str(r.id), reference: str(r.reference), status: str(r.status) as ApplicationStatus, studentName: str(r.student_name), studentEmail: str(r.student_email), intake: str(r.intake), completion: Number(r.completion), agencyId: str(r.agency_id), agencyName: str(r.agency_name), agentId: r.assigned_agent_id ? str(r.assigned_agent_id) : null, agentName: str(r.agent_name), courses: r.courses as ApplicationCourseRow[], createdAt: str(r.created_at), updatedAt: str(r.updated_at), submittedAt: r.submitted_at ? str(r.submitted_at) : null, isTest: Boolean(r.is_test), nextStatuses: Array.isArray(r.next_statuses) ? (r.next_statuses as unknown[]).map(String) : undefined })) };
 }
 
 async function fetchAgencyNames(ids: string[]): Promise<Map<string, string>> {
@@ -266,8 +275,15 @@ export interface ApplicationDetail {
   submittedByName: string;
   studentName: string;
   studentEmail: string;
+  /** The student record (enrollment_students) this application belongs to. */
+  studentId: string | null;
   intake: string;
   completion: number;
+  /**
+   * The form as one map: `values` holds the student's answers (kept on the student record) merged with this
+   * application's own answers; `academicQualifications` is the student's list. Saves send the whole map and the
+   * database routes each answer to the student or the application.
+   */
   data: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -305,15 +321,28 @@ export interface DocumentRow {
 
 export async function getApplication(id: string, refreshDraftRevision = true): Promise<ApplicationDetail | null> {
   countPortalMetric("applications.detail");
-  const { data, error } = await supabase
+  const base = `${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id`;
+  let { data, error } = await supabase
     .from("enrollment_applications")
-    .select(`${APP_COLUMNS}, created_by, submitted_by, data, version, draft_version, tenant_id`)
+    .select(`${base}, student:enrollment_students!enrollment_applications_student_fk(id, details, qualifications)`)
     .eq("id", id)
     .maybeSingle();
+  // Before migration 103 the student relation does not exist and every answer is still on the application.
+  if (error && /relationship|enrollment_applications_student_fk/i.test(error.message)) {
+    ({ data, error } = await supabase.from("enrollment_applications").select(base).eq("id", id).maybeSingle());
+  }
   if (error) throw new Error(error.message);
   if (!data) return null;
 
   const r = data as Record<string, unknown>;
+  // Student answers live on the student record; the form works on one merged map.
+  const studentRow = (Array.isArray(r.student) ? r.student[0] : r.student) as { id?: string; details?: Record<string, unknown>; qualifications?: unknown } | null | undefined;
+  const rawData = (r.data as Record<string, unknown>) ?? {};
+  const merged: Record<string, unknown> = {
+    ...rawData,
+    values: { ...(studentRow?.details ?? {}), ...((rawData.values as Record<string, unknown> | undefined) ?? {}) },
+  };
+  if (merged.academicQualifications === undefined && Array.isArray(studentRow?.qualifications)) merged.academicQualifications = studentRow.qualifications;
   if (refreshDraftRevision) draftVersions.set(id, Number(r.draft_version ?? 0));
   const agencyId = str(r.agency_id);
   const [nameMap, agencyMap, courseMap, consents, agentContact] = await Promise.all([
@@ -339,9 +368,10 @@ export async function getApplication(id: string, refreshDraftRevision = true): P
     submittedByName: nameMap.get(str(r.submitted_by)) ?? "",
     studentName: str(r.student_name),
     studentEmail: str(r.student_email),
+    studentId: studentRow?.id ? String(studentRow.id) : null,
     intake: str(r.intake),
     completion: Number(r.completion ?? 0),
-    data: (r.data as Record<string, unknown>) ?? {},
+    data: merged,
     createdAt: str(r.created_at),
     updatedAt: str(r.updated_at),
     submittedAt: r.submitted_at ? str(r.submitted_at) : null,
@@ -418,6 +448,120 @@ export async function listApplicationDocuments(applicationId: string): Promise<D
       metadata: (r.metadata as Record<string, unknown>) ?? {},
     };
   });
+}
+
+/**
+ * The most recently updated application, visible to the caller under RLS, whose student has this email or mobile.
+ * Mobiles are stored as E.164; older drafts may hold the national 0-prefixed form, so both are matched.
+ */
+/* ------------------------------------------------------------ Students */
+// One chain: business -> agent -> student -> applications. A student is created once and reused for every application.
+
+export interface StudentMatch {
+  id: string; name: string; email: string; phone: string; dateOfBirth: string | null; passportNumber: string;
+  businessId: string; businessName: string; agentId: string | null; agentName: string; applications: number;
+  emailMatch: boolean; phoneMatch: boolean; passportMatch: boolean;
+}
+
+/** Students the caller may see with this email, mobile or passport number, newest first. */
+export async function findStudents(email: string, mobileE164: string, passport = ""): Promise<StudentMatch[]> {
+  const { data, error } = await supabase.rpc("portal_student_find", { p_email: email, p_phone: mobileE164, p_passport: passport });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: str(r.id), name: str(r.name), email: str(r.email), phone: str(r.phone), dateOfBirth: r.dateOfBirth ? str(r.dateOfBirth) : null,
+    passportNumber: str(r.passportNumber), businessId: str(r.businessId), businessName: str(r.businessName),
+    agentId: r.agentId ? str(r.agentId) : null, agentName: str(r.agentName), applications: Number(r.applications ?? 0),
+    emailMatch: Boolean(r.emailMatch), phoneMatch: Boolean(r.phoneMatch), passportMatch: Boolean(r.passportMatch),
+  }));
+}
+
+export interface StudentInput {
+  studentId?: string | null;
+  /** The agent (agents.id) who looks after the student; the business follows from it. */
+  agentId: string;
+  fullName: string;
+  email: string;
+  mobile: string;
+  dateOfBirth?: string;
+  passportNumber?: string;
+  nationality?: string;
+  /** Migration 117: first and last name typed on Add student (sent only when given). */
+  firstName?: string;
+  lastName?: string;
+}
+
+/** Creates or updates a student. A new student matching an existing one of the business comes back as that student (`reused`). */
+export async function saveStudent(input: StudentInput): Promise<{ id: string; name: string; email: string; phone: string; businessId: string; agentId: string | null; reused: boolean }> {
+  const { data, error } = await supabase.rpc("portal_student_save", {
+    p_student: input.studentId ?? null, p_agent: input.agentId, p_full_name: input.fullName, p_email: input.email, p_phone: input.mobile,
+    p_date_of_birth: input.dateOfBirth || null, p_passport: input.passportNumber ?? "", p_nationality: input.nationality ?? "",
+    ...(input.firstName || input.lastName ? { p_first_name: input.firstName ?? "", p_last_name: input.lastName ?? "" } : {}),
+  });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as Record<string, unknown>;
+  return { id: str(r.id), name: str(r.name), email: str(r.email), phone: str(r.phone), businessId: str(r.businessId), agentId: r.agentId ? str(r.agentId) : null, reused: Boolean(r.reused) };
+}
+
+/** A new draft application for a student; its business and assigned agent come from the student. */
+export async function createApplicationForStudent(clientKey: string, studentId: string): Promise<{ id: string; reference: string }> {
+  const { data, error } = await supabase.rpc("portal_create_student_application", { p_client_key: clientKey, p_student: studentId });
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : data) as { application_id?: string; application_reference?: string } | null | undefined;
+  if (!row?.application_id) throw new Error("The application could not be created.");
+  return { id: String(row.application_id), reference: String(row.application_reference ?? "") };
+}
+
+export interface StudentAgencyOptions {
+  /** The student is under SLIT's direct business with no application yet, so "Are you working with an agency?" is asked. */
+  ask: boolean;
+  businesses: Array<{ id: string; name: string }>;
+  agents: Array<{ id: string; name: string; role: string }>;
+}
+
+/** Active businesses a self-enrolled student may choose, and (for one business) its active agents. */
+export async function studentAgencyOptions(businessId?: string): Promise<StudentAgencyOptions> {
+  const { data, error } = await supabase.rpc("portal_student_agency_options", { p_business: businessId ?? null });
+  if (error) throw new Error(error.message);
+  const row = (data ?? {}) as Partial<StudentAgencyOptions>;
+  return { ask: row.ask === true, businesses: row.businesses ?? [], agents: row.agents ?? [] };
+}
+
+/** Moves the signed-in student (record, sign-in and pending invitation) under the chosen business and agent. */
+export async function chooseStudentAgency(businessId: string, agentId: string): Promise<{ businessName: string; agentName: string }> {
+  const { data, error } = await supabase.rpc("portal_student_choose_agency", { p_business: businessId, p_agent: agentId });
+  if (error) throw new Error(error.message);
+  const row = (data ?? {}) as { businessName?: string; agentName?: string };
+  return { businessName: String(row.businessName ?? ""), agentName: String(row.agentName ?? "") };
+}
+
+export interface BusinessAgentOption {
+  id: string;
+  profileId: string | null;
+  name: string;
+  email: string;
+  role: "agent" | "agency_admin";
+  /** Active: approved and signed in. Invited: approved, no login yet. Inactive: cannot be given students until activated. */
+  status: "Active" | "Invited" | "Inactive";
+}
+
+const toAgentOption = (r: Record<string, unknown>): BusinessAgentOption => ({
+  id: str(r.id), profileId: r.profile_id ? str(r.profile_id) : null, name: str(r.full_name), email: str(r.email),
+  role: r.role === "agency_admin" ? "agency_admin" : "agent",
+  status: r.status !== "Active" ? "Inactive" : r.profile_id ? "Active" : "Invited",
+});
+
+/** The agents of one business (SLIT administrators see every business; portal users their own). */
+export async function listAgentsOfBusiness(businessId: string): Promise<BusinessAgentOption[]> {
+  const { data, error } = await supabase.from("agents").select("id, profile_id, full_name, email, role, status").eq("business_id", businessId).order("full_name");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => toAgentOption(r as Record<string, unknown>));
+}
+
+/** The agent record behind a portal login, if any. */
+export async function findAgentByProfile(profileId: string): Promise<BusinessAgentOption | null> {
+  const { data, error } = await supabase.from("agents").select("id, profile_id, full_name, email, role, status").eq("profile_id", profileId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toAgentOption(data as Record<string, unknown>) : null;
 }
 
 /* ------------------------------------------------------------ Mutation */
@@ -502,28 +646,6 @@ export async function uploadConsentDocument(applicationId: string, file: File): 
 }
 
 /* -------------------------------------------------------------- RPCs */
-
-export async function createApplication(
-  clientKey: string,
-  assignedAgentId?: string | null,
-  agencyId?: string | null,
-): Promise<{ id: string; reference: string }> {
-  const input: Record<string, string | null> = {
-    p_client_key: clientKey,
-    p_assigned_agent_id: assignedAgentId ?? null,
-  };
-  // Omit this key for the deployed two-argument RPC until the safe incremental
-  // migration is applied; agency users never get to supply an agency id.
-  if (agencyId) input.p_agency_id = agencyId;
-  const { data, error } = await supabase.rpc("portal_create_application", input);
-  if (error) throw new Error(error.message);
-  const row = (Array.isArray(data) ? data[0] : data) as
-    | { application_id?: string; application_reference?: string }
-    | null
-    | undefined;
-  if (!row?.application_id) throw new Error("The application could not be created.");
-  return { id: String(row.application_id), reference: String(row.application_reference ?? "") };
-}
 
 export async function assignApplicationAgent(applicationId: string, agentProfileId: string | null): Promise<void> {
   const { error } = await supabase.rpc("portal_assign_agent", {

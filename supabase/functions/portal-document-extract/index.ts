@@ -43,13 +43,44 @@ async function enqueue(request: Request) {
   // not a browser request carrying the worker secret. The durable queue plus
   // Cron recovery dispatcher handles an interrupted Edge Runtime instance.
   EdgeRuntime.waitUntil(
-    processOne(job.tenant_id ? { job: job.id, tenant: job.tenant_id } : undefined)
+    (job.tenant_id ? processOne({ job: job.id, tenant: job.tenant_id }) : drainQueue())
       .then(() => console.log(JSON.stringify({ event: "document_extraction_immediate_dispatch_finished" })))
       // A lease makes a claimed job recoverable.  Do not swallow an unexpected
       // runtime failure: record a non-sensitive operational event for logs.
       .catch(() => console.error(JSON.stringify({ event: "document_extraction_immediate_dispatch_crashed" }))),
   );
   return reply({ ok: true, jobId: job?.id, state: job?.state ?? "queued" });
+}
+
+// The shared queue claims one job at a time, so a job queued while another is being read used to wait for the
+// next 5-minute Cron run. A dispatcher therefore keeps claiming until nothing claimable remains, waiting briefly
+// while another worker holds the lease, within a budget that stays under the Edge wall-clock limit.
+const DRAIN_BUDGET_MS = 120_000;
+const DRAIN_BUSY_WAIT_MS = 3_000;
+
+async function queuedSharedJobs(): Promise<number> {
+  const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const { count, error } = await admin.from("enrollment_document_extraction_jobs").select("id", { count: "exact", head: true })
+    .is("tenant_id", null).eq("state", "queued").lte("next_attempt_at", new Date().toISOString());
+  return error ? 0 : count ?? 0;
+}
+
+async function drainQueue(first?: Response): Promise<Response> {
+  const deadline = Date.now() + DRAIN_BUDGET_MS;
+  let response = first ?? await processOne();
+  while (Date.now() < deadline) {
+    const body = await response.clone().json().catch(() => ({}));
+    if (body?.processed === false && !body?.stale) {
+      // Nothing was claimed: either the queue is empty or another worker holds the lease.
+      if (await queuedSharedJobs() === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, DRAIN_BUSY_WAIT_MS));
+    } else if (response.status >= 500 && body?.processed === undefined) {
+      break; // configuration or database failure: leave the rest to Cron recovery
+    }
+    if (Date.now() >= deadline) break;
+    response = await processOne();
+  }
+  return response;
 }
 
 async function processOne(scope?: { job: string; tenant: string }) {
@@ -133,6 +164,13 @@ Deno.serve(async (request) => {
   const configuration = backendConfiguration(url, serviceKey, anonKey);
   if (configuration) return reply(configuration, 503);
   if (request.method !== "POST") return reply({ ok: false, error: "Method not allowed." }, 405);
-  if (request.headers.get("x-worker-secret") === workerSecret && workerSecret) { const body = await request.json().catch(() => ({})); return await processOne(typeof body.jobId === "string" && typeof body.tenantId === "string" ? { job: body.jobId, tenant: body.tenantId } : undefined); }
+  if (request.headers.get("x-worker-secret") === workerSecret && workerSecret) {
+    const body = await request.json().catch(() => ({}));
+    if (typeof body.jobId === "string" && typeof body.tenantId === "string") return await processOne({ job: body.jobId, tenant: body.tenantId });
+    // Reply with the first outcome; keep working through the shared queue in the background.
+    const first = await processOne();
+    EdgeRuntime.waitUntil(drainQueue(first.clone()).catch(() => console.error(JSON.stringify({ event: "document_extraction_drain_crashed" }))));
+    return first;
+  }
   return await enqueue(request);
 });

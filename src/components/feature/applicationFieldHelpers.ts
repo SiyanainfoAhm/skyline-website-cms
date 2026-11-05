@@ -14,7 +14,10 @@ export function isFieldFilled(form: HTMLFormElement, field: AppField): boolean {
     return Array.from(nodes).some((node) => node.checked);
   }
   if (field.type === "radio") {
-    return Boolean(form.querySelector(`input[name="${field.name}"]:checked`));
+    if (form.querySelector(`input[name="${field.name}"]:checked`)) return true;
+    // A radio question the form answers itself (kept as a hidden value, e.g. a fixed address type).
+    const kept = form.querySelector<HTMLInputElement>(`input[type="hidden"][name="${field.name}"]`);
+    return Boolean(kept && kept.value.trim() !== "");
   }
   if (field.type === "file") {
     const input = form.querySelector<HTMLInputElement>(`input[name="${field.name}"]`);

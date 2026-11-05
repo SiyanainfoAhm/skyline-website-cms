@@ -1,3 +1,4 @@
+import { validateAbn } from "../../../../supabase/functions/_shared/validation/abn";
 import { DEFAULT_DIAL, formatPhone, normalizePhoneInput, validatePhone } from "../../../../supabase/functions/_shared/validation/identifiers";
 import { validateEmail, validateName } from "../../agency/lib/userValidation";
 import type { PortalAgency } from "@/pages/agency/lib/portalAuthContext";
@@ -16,7 +17,7 @@ export interface AgencyFormState {
 }
 
 export const EMPTY_AGENCY_FORM: AgencyFormState = {
-  name: "", code: "", registrationNumber: "", businessEmail: "", phone: "", address: "", country: "Australia", primaryContact: "", status: "Active",
+  name: "", code: "", registrationNumber: "", businessEmail: "", phone: "", address: "", country: "Australia", primaryContact: "", status: "Inactive",
 };
 
 export function agencyToForm(agency: PortalAgency): AgencyFormState {
@@ -27,9 +28,9 @@ export function agencyToForm(agency: PortalAgency): AgencyFormState {
   };
 }
 
-/** Registry contact numbers may contain alternatives; never invent missing email/ABN. */
+/** Registry contact numbers may contain alternatives; never invent missing email/ABN. Every new business starts Inactive until a SLIT administrator activates it. */
 export function directoryAgencyToForm(agency: DirectoryAgency): AgencyFormState {
-  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()) };
+  return { ...agencyToForm(agency), phone: formatPhone(agency.phone.split(/[;,/]|\s+or\s+/i)[0].trim()), status: "Inactive" };
 }
 
 /** A starting code from the name (initials plus a number); the administrator can change it. */
@@ -41,8 +42,9 @@ export function suggestAgencyCode(name: string, suffix: number): string {
 export type AgencyFormErrors = Partial<Record<keyof AgencyFormState | "firstName" | "firstEmail", string>>;
 
 /** Validates the agency fields; the phone defaults to +61 and is returned as E.164. */
-export function validateAgencyForm(form: AgencyFormState): { errors: AgencyFormErrors; phone: string } {
+export function validateAgencyForm(form: AgencyFormState, requireAbn = false): { errors: AgencyFormErrors; phone: string } {
   const errors: AgencyFormErrors = {};
+  if (requireAbn) { const problem = validateAbn(form.registrationNumber); if (problem) errors.registrationNumber = problem; }
   if (form.name.trim().length < 2) errors.name = "Enter the agency name.";
   if (!form.code.trim()) errors.code = "Enter a unique agency code.";
   const email = validateEmail(form.businessEmail);
