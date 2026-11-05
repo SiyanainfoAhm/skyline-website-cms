@@ -5,7 +5,8 @@ import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/component
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { invitedBusinesses, listBusinesses, resendInvitation, setBusinessStatus, type BusinessRow, type BusinessStatus, type DirectoryAgent, type ListCounts } from "@/pages/admin/lib/businessData";
+import { invitedBusinesses, listBusinesses, listPendingRegistrations, resendInvitation, setBusinessStatus, type BusinessRow, type BusinessStatus, type DirectoryAgent, type ListCounts, type PendingRegistration } from "@/pages/admin/lib/businessData";
+import PendingRegistrationsTable from "@/pages/admin/components/PendingRegistrationsTable";
 import { useListParams } from "@/pages/admin/lib/listParams";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
 
@@ -21,11 +22,14 @@ export default function BusinessesPage() {
   // Tabs and each row's dropdown use the backend's business statuses.
   const businessStatuses = useStatusCatalog().business;
   // Active is the default tab; "all" in the address shows every business.
-  const status = values.status === "all" ? "" : values.status === "Inactive" ? "Inactive" : values.status === "Invited" ? "Invited" : "Active";
+  const status = values.status === "all" ? "" : values.status === "Inactive" ? "Inactive" : values.status === "Invited" ? "Invited" : values.status === "Pending" ? "Pending" : "Active";
   // Invited: active, but nobody in it has signed in yet (its agents are all still invited).
   const [invited, setInvited] = useState<Map<string, DirectoryAgent[]>>(new Map());
+  // Pending review: businesses that registered themselves from the sign-in page (migration 119).
+  const [pending, setPending] = useState<PendingRegistration[]>([]);
+  const [decline, setDecline] = useState<PendingRegistration | null>(null);
   const countFor = (value: string) => (value === "Active" ? (counts ? Math.max(0, counts.active - invited.size) : null)
-    : value === "Invited" ? (counts ? invited.size : null) : value === "Inactive" ? counts?.inactive : undefined) ?? null;
+    : value === "Invited" ? (counts ? invited.size : null) : value === "Pending" ? (counts ? pending.length : null) : value === "Inactive" ? counts?.inactive : undefined) ?? null;
   const [rows, setRows] = useState<BusinessRow[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<ListCounts | null>(null);
@@ -40,15 +44,21 @@ export default function BusinessesPage() {
     setLoading(true);
     setError("");
     const split = status === "Active" || status === "Invited";
+    const pendingTab = status === "Pending";
     Promise.all([
       split ? listBusinesses({ search: values.q, status: "Active", limit: ACTIVE_LIMIT, offset: 0 })
-        : listBusinesses({ search: values.q, status, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+        : listBusinesses({ search: values.q, status: pendingTab ? "Inactive" : status, limit: pendingTab ? 1 : PAGE_SIZE, offset: pendingTab ? 0 : (page - 1) * PAGE_SIZE }),
       invitedBusinesses().catch(() => new Map<string, DirectoryAgent[]>()),
+      listPendingRegistrations().catch(() => [] as PendingRegistration[]),
     ])
-      .then(([result, invitedMap]) => {
+      .then(([result, invitedMap, pendingList]) => {
         if (!active) return;
         setInvited(invitedMap);
-        if (split) {
+        setPending(pendingList);
+        if (pendingTab) {
+          setRows([]);
+          setTotal(pendingList.length);
+        } else if (split) {
           const kept = result.rows.filter((r) => (status === "Invited") === invitedMap.has(r.id));
           setRows(kept.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE));
           setTotal(kept.length);
@@ -96,6 +106,44 @@ export default function BusinessesPage() {
     }
   };
 
+  // Approving activates the business and emails its waiting administrator invitation; declining leaves it inactive.
+  const approve = async (row: PendingRegistration) => {
+    setBusyId(row.id);
+    try {
+      const result = await setBusinessStatus(row.id, "Active");
+      let message = `${row.name} approved and active.`;
+      if (result.pendingInvitation) {
+        try {
+          message += ` ${await resendInvitation({ invitationId: result.pendingInvitation.id, email: result.pendingInvitation.email, name: result.pendingInvitation.name, role: "agency_admin", businessId: row.id })}`;
+        } catch (e) {
+          message += ` The invitation email could not be sent${e instanceof Error && e.message ? ` (${e.message})` : ""}; resend it from the Invited tab.`;
+        }
+      } else if (row.signedIn) {
+        message += " Its administrator can sign in now.";
+      }
+      push(message);
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not approve this registration.", "error");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const declineNow = async (row: PendingRegistration) => {
+    setBusyId(row.id);
+    try {
+      await setBusinessStatus(row.id, "Inactive");
+      push(`${row.name} declined. Its invitation was revoked and nobody in it can sign in.`);
+      setReload((n) => n + 1);
+    } catch (e) {
+      push(e instanceof Error ? e.message : "We could not decline this registration.", "error");
+    } finally {
+      setBusyId("");
+      setDecline(null);
+    }
+  };
+
   const filtered = Boolean(values.q || values.status);
   return (
     <div>
@@ -110,14 +158,16 @@ export default function BusinessesPage() {
           tabs={[{ id: "all", label: "All", count: counts?.all ?? null }, ...businessStatuses.flatMap((item) => {
             const tab = { id: item.value, label: item.label, count: countFor(item.value) };
             return item.value === "Active" ? [tab, { id: "Invited", label: "Invited", count: countFor("Invited") }] : [tab];
-          })]} />
+          }), { id: "Pending", label: "Pending review", count: countFor("Pending") }]} />
         <div className="flex-1">
           <SearchBox label="Search businesses" value={values.q} onSearch={(q) => update({ q })} placeholder="Search business, ABN, agent name, MARN, email or phone" />
         </div>
       </div>
 
       <Card>
-        {error ? (
+        {status === "Pending" ? (
+          <PendingRegistrationsTable rows={pending} loading={loading} busyId={busyId} onApprove={(row) => void approve(row)} onDecline={setDecline} />
+        ) : error ? (
           <ListMessage icon="ri-error-warning-line" title="Businesses did not load" text={error}
             action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} />
         ) : !loading && rows.length === 0 ? (
@@ -198,8 +248,17 @@ export default function BusinessesPage() {
             </ResponsiveTable>
           </div>
         )}
-        {!error ? <Pager page={page} pageSize={PAGE_SIZE} total={total} loading={loading} onPage={setPage} /> : null}
+        {!error && status !== "Pending" ? <Pager page={page} pageSize={PAGE_SIZE} total={total} loading={loading} onPage={setPage} /> : null}
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(decline)}
+        title={`Decline ${decline?.name ?? "this registration"}?`}
+        message="The business stays inactive and its sign-in invitation is revoked. The person who registered is not emailed; contact them yourself if you want to explain."
+        confirmLabel={busyId ? "Declining…" : "Decline registration"}
+        onConfirm={() => { if (decline && !busyId) void declineNow(decline); }}
+        onCancel={() => { if (!busyId) setDecline(null); }}
+      />
 
       <ConfirmDialog
         open={Boolean(confirm)}

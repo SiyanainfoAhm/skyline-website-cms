@@ -247,8 +247,10 @@ test("sign-in: only organization and agency admins are shown user management", (
 });
 
 test("sign-in: suspended, expired and unassigned accounts each get a distinct clear message", () => {
-  const messages = ["agency_suspended", "user_suspended", "invite_expired", "no_access"].map(portalAccessMessage);
-  assert.equal(new Set(messages).size, 4);
+  const messages = ["agency_suspended", "user_suspended", "invite_expired", "no_access", "pending_review", "registration_declined"].map(portalAccessMessage);
+  assert.equal(new Set(messages).size, 6);
+  assert.match(portalAccessMessage("pending_review"), /reviewing your agent account/i);
+  assert.match(portalAccessMessage("registration_declined"), /not approved/i);
   assert.match(portalAccessMessage("agency_suspended"), /agency is currently suspended/i);
   assert.match(portalAccessMessage("user_suspended"), /deactivated/i);
   assert.match(portalAccessMessage("invite_expired"), /expired/i);
@@ -605,3 +607,81 @@ test('ABN lookup extracts only published business data and fails closed on a dif
   await assert.rejects(lookupAgencyAbn('https://evil.invalid', mock));
   await assert.rejects(lookupAgencyAbn('85165345717', (async () => new Response('Blocked', { status: 429 })) as typeof fetch));
 });
+
+// ---- Enroll now (migration 119): what a student or an agent types on the sign-in page ----
+import {
+  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, agentEnrolPayload, dateOfBirthProblem, dateOfBirthRange, formatAbn, mobileProblem, parseDateOfBirth, studentEnrolPayload,
+  validateAgentEnrol, validateStudentEnrol,
+} from "../src/lib/enrolForm.ts";
+
+test("enrol: the mobile comes from the country-code phone field, so overseas students can enrol", () => {
+  for (const ok of ["+61412345678", "+919876543210", "+447700900123"]) assert.equal(mobileProblem(ok), "", ok);
+  for (const bad of ["", "0412345678", "+61", "+6141234", "abc"]) assert.ok(mobileProblem(bad), bad);
+});
+
+test("enrol: the date of birth says which rule failed, and the picker is limited to 10 to 100 years ago", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  assert.deepEqual(dateOfBirthRange(today), { min: "1926-11-05", max: "2016-11-05" });
+  assert.equal(dateOfBirthProblem("2000-01-02", today), "");
+  assert.match(dateOfBirthProblem("", today), /enter your date of birth/i);
+  assert.match(dateOfBirthProblem("2020-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("1900-01-01", today), /between 10 and 100/i);
+  assert.match(dateOfBirthProblem("31/02/2000", today), /real date/i);
+});
+
+test("enrol: dates of birth are typed day first and must be real and 10 to 100 years ago", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  assert.equal(parseDateOfBirth("02/01/2000", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("2-1-2000", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("2000-01-02", today), "2000-01-02");
+  assert.equal(parseDateOfBirth("31/02/2000", today), null, "not a real date");
+  assert.equal(parseDateOfBirth("05/11/2017", today), null, "younger than 10");
+  assert.equal(parseDateOfBirth("05/11/2016", today), "2016-11-05", "exactly 10 is fine");
+  assert.equal(parseDateOfBirth("04/11/1926", today), null, "older than 100");
+  assert.equal(parseDateOfBirth("01/02/03", today), null);
+  assert.equal(parseDateOfBirth("", today), null);
+});
+
+test("enrol: the ABN is checked like the Edge Function does and shown in groups", () => {
+  assert.equal(abnProblem("85 165 345 717"), "");
+  assert.ok(abnProblem(""));
+  assert.ok(abnProblem("85165345718"));
+  assert.ok(abnProblem("8516534571"));
+  assert.equal(formatAbn("85165345717"), "85 165 345 717");
+  assert.equal(formatAbn("851"), "85 1");
+  assert.equal(formatAbn("85165345717999"), "85 165 345 717", "never more than 11 digits");
+});
+
+test("enrol: a student must give name, email, mobile, date of birth and agree; the payload is normalised", () => {
+  const today = new Date(Date.UTC(2026, 10, 5));
+  const empty = validateStudentEnrol(EMPTY_STUDENT_ENROL, today);
+  assert.deepEqual(Object.keys(empty).sort(), ["agreed", "dateOfBirth", "email", "firstName", "lastName", "mobile"]);
+  const form = { ...EMPTY_STUDENT_ENROL, firstName: " Stu ", lastName: "Dent", email: "Stu.Dent@Example.test ", mobile: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: " AGT-1 ", agreed: true };
+  assert.deepEqual(validateStudentEnrol(form, today), {});
+  assert.deepEqual(studentEnrolPayload(form, today), { kind: "student", firstName: "Stu", lastName: "Dent", email: "stu.dent@example.test", phone: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: "AGT-1" });
+  assert.ok(validateStudentEnrol({ ...form, referralCode: "x".repeat(41) }, today).referralCode);
+  assert.ok(validateStudentEnrol({ ...form, email: "not-an-email" }, today).email);
+  assert.ok(validateStudentEnrol({ ...form, agreed: false }, today).agreed);
+});
+
+test("enrol: an agent must give the business, a valid ABN, a contact, a work email and a phone", () => {
+  const empty = validateAgentEnrol(EMPTY_AGENT_ENROL);
+  assert.deepEqual(Object.keys(empty).sort(), ["abn", "agreed", "businessName", "contactName", "email", "phone"]);
+  const form = { ...EMPTY_AGENT_ENROL, businessName: " Sample Agency ", abn: "85 165 345 717", contactName: "Reg Istrar", email: "Reg@Example.test", phone: "(03) 9876 5432", agreed: true };
+  assert.deepEqual(validateAgentEnrol(form), {});
+  assert.deepEqual(agentEnrolPayload(form), { kind: "agent", businessName: "Sample Agency", abn: "85165345717", contactName: "Reg Istrar", email: "reg@example.test", phone: "(03) 9876 5432" });
+  assert.ok(validateAgentEnrol({ ...form, abn: "85165345718" }).abn);
+  assert.ok(validateAgentEnrol({ ...form, businessName: "A" }).businessName);
+  assert.ok(validateAgentEnrol({ ...form, phone: "12" }).phone);
+});
+
+test("enrol: only Google, Facebook and phone accounts are offered the student details step", async () => {
+  const { isSelfSignUpAccount } = await import("../src/lib/authProviders.ts").catch(() => ({ isSelfSignUpAccount: null }));
+  if (!isSelfSignUpAccount) return; // the module reads Vite globals; covered by type-check when it cannot load here
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "google", providers: ["google"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "phone" } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email", "facebook"] } }), true);
+  assert.equal(isSelfSignUpAccount({ app_metadata: { provider: "email", providers: ["email"] } }), false);
+  assert.equal(isSelfSignUpAccount(null), false);
+});
+

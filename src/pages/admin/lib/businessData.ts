@@ -36,6 +36,13 @@ export type BusinessStatus = "Active" | "Inactive";
 export type StatusCounts = Record<string, number>;
 export interface ListCounts { all: number; active: number; inactive: number }
 
+/** A business an agent registered from the sign-in page, waiting for a SLIT decision (migration 119). */
+export interface PendingRegistration {
+  id: string; name: string; abn: string; contact: string; email: string; phone: string; requestedAt: string | null;
+  invitation: null | { id: string; status: "pending" | "expired" | "accepted" | "revoked"; expiresAt: string | null; email: string; name: string };
+  signedIn: boolean;
+}
+
 export interface BusinessRow {
   id: string;
   name: string;
@@ -137,6 +144,9 @@ export interface StudentDetail {
   agent: null | { id: string; name: string; email: string };
   applications: ApplicationRow[];
   login?: StudentLogin;
+  /** Migration 119: what a self-enrolled student asked about, and whether they enrolled themselves. */
+  courseOfInterest?: string;
+  selfEnrolled?: boolean;
 }
 
 async function call<T>(fn: string, params: Record<string, unknown>, fallback: string): Promise<T> {
@@ -173,8 +183,11 @@ export const getBusiness = (id: string) => call<BusinessDetail | null>("admin_bu
 export const listBusinessAgents = (id: string) => call<DirectoryAgent[]>("admin_business_agents", { p_business: id }, "We could not load this business’s agents.");
 
 export const setBusinessStatus = (id: string, status: BusinessStatus) =>
-  call<{ businessId: string; status: BusinessStatus; agencyId: string; workspaceCreated: boolean }>("admin_business_set_status",
-    { p_business: id, p_status: status }, "We could not change this business’s status.");
+  call<{ businessId: string; status: BusinessStatus; agencyId: string; workspaceCreated: boolean; reviewed?: boolean; pendingInvitation?: { id: string; email: string; name: string } | null }>(
+    "admin_business_set_status", { p_business: id, p_status: status }, "We could not change this business’s status.");
+
+export const listPendingRegistrations = () =>
+  call<PendingRegistration[]>("admin_registration_list", {}, "We could not load the registrations waiting for review.");
 
 /** Students, optionally filtered by the student's own status (a value from the backend's student status list). */
 export const listStudents = (f: { search?: string; status?: string; studentStatus?: string; businessId?: string | null; agentId?: string | null; limit: number; offset: number }) =>
