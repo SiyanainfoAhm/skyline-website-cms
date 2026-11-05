@@ -4,7 +4,6 @@ import { Button, Field, Select, TextInput } from "@/pages/admin/components/ui";
 import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import QuickSignIn from "@/pages/login/QuickSignIn";
-import { loadAuthProviders } from "@/lib/authProviders";
 import {
   EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
   type AgentEnrolForm, type EnrolErrors, type EnrolKind, type StudentEnrolForm,
@@ -214,9 +213,6 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
 
 /** Google / Facebook / phone above the student form; hidden entirely when none of them is switched on. */
 function QuickStart({ onSignedIn, intent }: { onSignedIn: (userId: string) => void; intent: "student" | "agent" }) {
-  const [any, setAny] = useState(false);
-  useEffect(() => { let active = true; void loadAuthProviders().then((p) => { if (active) setAny(p.google || p.facebook || p.phone); }); return () => { active = false; }; }, []);
-  if (!any) return null;
   return (
     <div className="mt-6">
       <QuickSignIn create intent={intent} label="Sign up faster" onSignedIn={onSignedIn} />
