@@ -10,7 +10,7 @@ import AgentStatusBadge from "@/pages/admin/components/AgentStatusBadge";
 import { toActivate, type AgentToActivate } from "@/pages/admin/lib/agentActivation";
 import { useToast } from "@/pages/admin/components/toastContext";
 import { ApplicationsTab, DetailsTab } from "@/pages/admin/AgencyDetailPage";
-import { deactivateAgent, getBusiness, resendInvitation, listBusinessAgents, setBusinessStatus, type BusinessDetail, type BusinessStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
+import { changeBusinessStatus, deactivateAgent, getBusiness, resendInvitation, listBusinessAgents, type BusinessDetail, type BusinessStatus, type DirectoryAgent } from "@/pages/admin/lib/businessData";
 import { formatDate, getAgency, type AgencySummary } from "@/pages/agency/lib/portalData";
 
 type Tab = "details" | "agents" | "students" | "applications";
@@ -48,8 +48,7 @@ export default function BusinessDetailPage() {
     if (!business) return;
     setBusy(true);
     try {
-      await setBusinessStatus(business.id, next);
-      push(next === "Inactive" ? `${business.name} deactivated. Its people can no longer sign in.` : `${business.name} activated.`);
+      push(await changeBusinessStatus(business, next));
       await load();
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not change this business’s status.", "error");

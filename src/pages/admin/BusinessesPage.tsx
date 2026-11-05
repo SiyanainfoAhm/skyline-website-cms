@@ -5,7 +5,7 @@ import { Button, Card, ConfirmDialog, PageHeader } from "@/pages/admin/component
 import { ApplicationStatusPills } from "@/pages/admin/components/AgencyStatus";
 import { ListMessage, Pager, SearchBox, StatusTabs } from "@/pages/admin/components/ListControls";
 import { useToast } from "@/pages/admin/components/toastContext";
-import { invitedBusinesses, listBusinesses, listPendingRegistrations, resendInvitation, setBusinessStatus, type BusinessRow, type BusinessStatus, type DirectoryAgent, type ListCounts, type PendingRegistration } from "@/pages/admin/lib/businessData";
+import { changeBusinessStatus, invitedBusinesses, listBusinesses, listPendingRegistrations, resendInvitation, setBusinessStatus, type BusinessRow, type BusinessStatus, type DirectoryAgent, type ListCounts, type PendingRegistration } from "@/pages/admin/lib/businessData";
 import PendingRegistrationsTable from "@/pages/admin/components/PendingRegistrationsTable";
 import { useListParams } from "@/pages/admin/lib/listParams";
 import { useStatusCatalog } from "@/pages/agency/lib/statusCatalog";
@@ -76,8 +76,7 @@ export default function BusinessesPage() {
   const change = async (row: BusinessRow, next: BusinessStatus) => {
     setBusyId(row.id);
     try {
-      await setBusinessStatus(row.id, next);
-      push(next === "Inactive" ? `${row.name} deactivated. Its people can no longer sign in.` : `${row.name} activated.`);
+      push(await changeBusinessStatus(row, next));
       setReload((n) => n + 1);
     } catch (e) {
       push(e instanceof Error ? e.message : "We could not change this business’s status.", "error");

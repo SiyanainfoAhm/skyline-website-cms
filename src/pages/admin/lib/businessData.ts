@@ -186,6 +186,26 @@ export const setBusinessStatus = (id: string, status: BusinessStatus) =>
   call<{ businessId: string; status: BusinessStatus; agencyId: string; workspaceCreated: boolean; reviewed?: boolean; pendingInvitation?: { id: string; email: string; name: string } | null }>(
     "admin_business_set_status", { p_business: id, p_status: status }, "We could not change this business’s status.");
 
+/**
+ * Activates or deactivates a business and says what happened. Activating a business whose administrator has not set a
+ * password yet (a website registration) also emails their invitation, however the business was activated.
+ */
+export async function changeBusinessStatus(business: { id: string; name: string }, next: BusinessStatus): Promise<string> {
+  const result = await setBusinessStatus(business.id, next);
+  if (next === "Inactive") return `${business.name} deactivated. Its people can no longer sign in.`;
+  let message = `${business.name} activated.`;
+  const waiting = result.pendingInvitation;
+  if (waiting) {
+    try {
+      message += ` ${await resendInvitation({ invitationId: waiting.id, email: waiting.email, name: waiting.name, role: "agency_admin", businessId: business.id })}`;
+      message += " They show as Invited until they set their password, then Active.";
+    } catch (e) {
+      message += ` The invitation email could not be sent${e instanceof Error && e.message ? ` (${e.message})` : ""}; use Resend invite on the Agents tab.`;
+    }
+  }
+  return message;
+}
+
 export const listPendingRegistrations = () =>
   call<PendingRegistration[]>("admin_registration_list", {}, "We could not load the registrations waiting for review.");
 
