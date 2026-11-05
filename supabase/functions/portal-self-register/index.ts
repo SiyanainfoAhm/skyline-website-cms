@@ -118,17 +118,20 @@ Deno.serve(async (req) => {
     const input: Record<string, unknown> = { email: email.value };
     let displayName = "";
     if (kind === "student") {
-      const first = cleanName(parsed.firstName), last = cleanName(parsed.lastName);
-      if (!first.ok) return json({ error: "Enter your first name." }, 400);
-      if (!last.ok) return json({ error: "Enter your last name." }, 400);
+      // A student signs up with their email and mobile only (like an application); name and date of birth come later
+      // from the passport and the application form, and are checked here only when given.
+      const first = text("firstName", 100) ? cleanName(parsed.firstName) : { ok: true as const, value: "" };
+      const last = text("lastName", 100) ? cleanName(parsed.lastName) : { ok: true as const, value: "" };
+      if (!first.ok) return json({ error: "Check your first name." }, 400);
+      if (!last.ok) return json({ error: "Check your last name." }, 400);
       const mobile = text("phone", 40).replace(/[\s().-]/g, "");
       if (!MOBILE.test(mobile)) return json({ error: "Enter your mobile number with its country code." }, 400);
       const dob = text("dateOfBirth", 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) return json({ error: "Enter a valid date of birth." }, 400);
+      if (dob && (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob)))) return json({ error: "Enter a valid date of birth." }, 400);
       const referral = text("referralCode", 40);
       if (/[^A-Za-z0-9 ._-]/.test(referral)) return json({ error: "Check the referral code." }, 400);
       Object.assign(input, { firstName: first.value, lastName: last.value, phone: mobile, dateOfBirth: dob, course: text("course", 200), referralCode: referral });
-      displayName = `${first.value} ${last.value}`;
+      displayName = `${first.value} ${last.value}`.trim();
     } else {
       const contact = cleanName(parsed.contactName);
       if (!contact.ok) return json({ error: "Enter the contact person's name." }, 400);

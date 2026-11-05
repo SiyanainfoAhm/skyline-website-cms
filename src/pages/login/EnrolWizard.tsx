@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Button, Field, Select, TextInput } from "@/pages/admin/components/ui";
-import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
+import { Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import QuickSignIn from "@/pages/login/QuickSignIn";
 import AgentBusinessStep, { type ChosenBusiness } from "@/pages/login/AgentBusinessStep";
@@ -9,7 +8,7 @@ import ContactConflictPopup from "@/pages/login/ContactConflictPopup";
 import { isContactConflict } from "@/lib/enrolForm";
 import { rememberSignUpBusiness } from "@/lib/authProviders";
 import {
-  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
+  EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, formatAbn, validateAgentEnrol, validateStudentEnrol,
   type AgentEnrolForm, type EnrolErrors, type EnrolKind, type StudentEnrolForm,
 } from "@/lib/enrolForm";
 import { enrolAgent, enrolStudent, lookupAbn, type AbnDetails, type EnrolResult } from "@/lib/selfEnrol";
@@ -156,8 +155,8 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
   const [errors, setErrors] = useState<EnrolErrors<StudentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
   const [website, setWebsite] = useState("");
+  const [showReferral, setShowReferral] = useState(false);
   const patch = (next: Partial<StudentEnrolForm>) => setForm((prev) => ({ ...prev, ...next }));
-  const range = dateOfBirthRange();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -179,32 +178,20 @@ function StudentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDon
       <StepHeader step={2} kind="Student" title="Your details" onBack={onBack} />
       <QuickStart onSignedIn={onSignedIn} intent="student" />
       <div className="mt-6 space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="First name" required><TextInput value={form.firstName} onChange={(e) => patch({ firstName: e.target.value })} autoComplete="given-name" /><Problem text={errors.firstName} /></Field>
-          <Field label="Last name" required><TextInput value={form.lastName} onChange={(e) => patch({ lastName: e.target.value })} autoComplete="family-name" /><Problem text={errors.lastName} /></Field>
-        </div>
         <Field label="Email" required><TextInput type="email" value={form.email} onChange={(e) => patch({ email: e.target.value })} placeholder="you@example.com" autoComplete="email" /><Problem text={errors.email} /></Field>
         <div>
           <label htmlFor="enrol-mobile" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Mobile <span className="text-primary-600">*</span></label>
           <PhoneInput id="enrol-mobile" name="mobile" value={form.mobile} required placeholder="041 234 5678" />
           <Problem text={errors.mobile} />
         </div>
-        <Field label="Date of birth" required hint="You must be between 10 and 100 years old.">
-          <TextInput type="date" value={form.dateOfBirth} min={range.min} max={range.max} autoComplete="bday"
-            onChange={(e) => { patch({ dateOfBirth: e.target.value }); if (errors.dateOfBirth) setErrors((prev) => ({ ...prev, dateOfBirth: undefined })); }}
-            onBlur={(e) => { const problem = e.target.value ? dateOfBirthProblem(e.target.value) : ""; setErrors((prev) => ({ ...prev, dateOfBirth: problem || undefined })); }} />
-          <Problem text={errors.dateOfBirth} />
-        </Field>
-        <Field label="Course of interest">
-          <Select value={form.course} onChange={(e) => patch({ course: e.target.value })}>
-            <option value="">Select a course</option>
-            {portalCourseOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-          </Select>
-        </Field>
-        <Field label="Agent referral code" hint="Your education agent gives you this. Leave it blank if you are applying by yourself.">
-          <TextInput value={form.referralCode} onChange={(e) => patch({ referralCode: e.target.value })} placeholder="e.g. AGT-1234" autoComplete="off" /><Problem text={errors.referralCode} />
-        </Field>
-        <p className="text-xs text-foreground-500">We email you a link to choose your password; that link also confirms your email address.</p>
+        {showReferral || form.referralCode ? (
+          <Field label="Agent referral code" hint="Your education agent gives you this.">
+            <TextInput value={form.referralCode} onChange={(e) => patch({ referralCode: e.target.value })} placeholder="e.g. AGT-1234" autoComplete="off" /><Problem text={errors.referralCode} />
+          </Field>
+        ) : (
+          <button type="button" onClick={() => setShowReferral(true)} className="cursor-pointer text-sm font-medium text-primary-700 hover:text-primary-800">Applying through an education agent? Add their referral code</button>
+        )}
+        <p className="text-xs text-foreground-500">Your name and other details come from your passport when you apply. We email you a link to choose your password; that link also confirms your email address.</p>
         {/* Honeypot: hidden from people, filled by bots. */}
         <div className="hidden" aria-hidden="true"><label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label></div>
         <Agree checked={form.agreed} onChange={(agreed) => patch({ agreed })} error={errors.agreed} />
@@ -324,7 +311,7 @@ function DoneStep({ result, onSignIn }: { result: EnrolResult; onSignIn: () => v
       ? result.warning
       : agent
         ? "Your application has been received and our team is looking into it. We will get back to you."
-        : "We've sent you a link to choose your password. Open it, set your password, then sign in to see your application.";
+        : "We've sent you a link to choose your password. Open it and set your password; then you can start your application at SLIT.";
   return (
     <div className="text-center">
       <Progress step={3} />

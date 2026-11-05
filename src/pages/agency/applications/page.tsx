@@ -67,6 +67,19 @@ export default function PortalApplicationsPage() {
         }
       />
 
+      {isStudent && !loading && !error && rows.length === 0 ? (
+        <div className="mt-6 flex flex-col items-start gap-4 rounded-lg border border-primary-200 bg-primary-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-heading text-lg font-bold text-foreground-950">Do you want to apply at SLIT?</h2>
+            <p className="mt-1 text-sm text-foreground-700">Start your application: upload your passport and we fill in your details.</p>
+          </div>
+          <Link to="/agency/applications/new"
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md bg-primary-500 px-5 py-2.5 text-sm font-semibold text-background-50 transition-colors hover:bg-primary-600">
+            Yes, start my application
+          </Link>
+        </div>
+      ) : null}
+
       <div className="mt-6">
         <ApplicationsTable remote
           rows={rows}

@@ -652,10 +652,13 @@ test("enrol: the ABN is checked like the Edge Function does and shown in groups"
   assert.equal(formatAbn("85165345717999"), "85 165 345 717", "never more than 11 digits");
 });
 
-test("enrol: a student must give name, email, mobile, date of birth and agree; the payload is normalised", () => {
+test("enrol: a student gives only email and mobile and agrees (name and date of birth optional); the payload is normalised", () => {
   const today = new Date(Date.UTC(2026, 10, 5));
   const empty = validateStudentEnrol(EMPTY_STUDENT_ENROL, today);
-  assert.deepEqual(Object.keys(empty).sort(), ["agreed", "dateOfBirth", "email", "firstName", "lastName", "mobile"]);
+  assert.deepEqual(Object.keys(empty).sort(), ["agreed", "email", "mobile"]);
+  const minimal = { ...EMPTY_STUDENT_ENROL, email: "a@b.test", mobile: "+61412345678", agreed: true };
+  assert.deepEqual(validateStudentEnrol(minimal, today), {});
+  assert.equal(studentEnrolPayload(minimal, today).firstName, "");
   const form = { ...EMPTY_STUDENT_ENROL, firstName: " Stu ", lastName: "Dent", email: "Stu.Dent@Example.test ", mobile: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: " AGT-1 ", agreed: true };
   assert.deepEqual(validateStudentEnrol(form, today), {});
   assert.deepEqual(studentEnrolPayload(form, today), { kind: "student", firstName: "Stu", lastName: "Dent", email: "stu.dent@example.test", phone: "+61412345678", dateOfBirth: "2000-01-02", course: "X - Y", referralCode: "AGT-1" });

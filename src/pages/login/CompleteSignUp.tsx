@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { Button } from "@/pages/admin/components/ui";
 import CompleteStudentProfile from "@/pages/login/CompleteStudentProfile";
 import CompleteAgentProfile from "@/pages/login/CompleteAgentProfile";
 import { readSignUpIntent, rememberSignUpIntent, type SignUpIntent } from "@/lib/authProviders";
@@ -9,9 +10,10 @@ import { readSignUpIntent, rememberSignUpIntent, type SignUpIntent } from "@/lib
  * changeable here), then that form. A student goes straight in; an agent's business waits for review.
  */
 export default function CompleteSignUp({ user, onStudentDone, onAgentDone, onCancel }: {
-  user: User; onStudentDone: () => void; onAgentDone: (businessName: string) => void; onCancel: () => void;
+  user: User; onStudentDone: (apply: boolean) => void; onAgentDone: (businessName: string) => void; onCancel: () => void;
 }) {
   const [kind, setKind] = useState<SignUpIntent>(readSignUpIntent);
+  const [studentReady, setStudentReady] = useState(false);
   const pick = (next: SignUpIntent) => { setKind(next); rememberSignUpIntent(next); };
   const tab = (value: SignUpIntent, label: string) => (
     <button type="button" role="tab" aria-selected={kind === value} onClick={() => pick(value)}
@@ -19,6 +21,7 @@ export default function CompleteSignUp({ user, onStudentDone, onAgentDone, onCan
       {label}
     </button>
   );
+  if (studentReady) return <ApplyQuestion onAnswer={onStudentDone} />;
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-wide text-primary-700">Almost done</p>
@@ -31,9 +34,25 @@ export default function CompleteSignUp({ user, onStudentDone, onAgentDone, onCan
       <div className="mt-5">
         {kind === "agent"
           ? <CompleteAgentProfile user={user} onDone={(name) => { rememberSignUpIntent(null); onAgentDone(name); }} />
-          : <CompleteStudentProfile user={user} onDone={() => { rememberSignUpIntent(null); onStudentDone(); }} onCancel={onCancel} embedded />}
+          : <CompleteStudentProfile user={user} onDone={() => { rememberSignUpIntent(null); setStudentReady(true); }} onCancel={onCancel} embedded />}
       </div>
       {kind === "agent" ? <button type="button" onClick={onCancel} className="mt-3 w-full cursor-pointer text-center text-xs text-foreground-600 hover:text-foreground-900">Not you? Sign out</button> : null}
+    </div>
+  );
+}
+
+/** The student account exists: next step of the sign-up, start an application at SLIT now or go to the portal. */
+export function ApplyQuestion({ onAnswer }: { onAnswer: (apply: boolean) => void }) {
+  return (
+    <div className="text-center">
+      <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 text-3xl text-primary-600"><i className="ri-graduation-cap-line" aria-hidden="true" /></span>
+      <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-primary-700">Your account is ready</p>
+      <h2 className="mt-1 font-heading text-2xl font-bold text-foreground-950">Do you want to apply at SLIT?</h2>
+      <p className="mx-auto mt-2 max-w-sm text-sm text-foreground-600">Start your application now: upload your passport and we fill in your details. You can also come back to it later.</p>
+      <div className="mt-6 space-y-2">
+        <Button type="button" className="w-full" onClick={() => onAnswer(true)}>Yes, start my application</Button>
+        <Button type="button" variant="outline" className="w-full" onClick={() => onAnswer(false)}>Not now</Button>
+      </div>
     </div>
   );
 }

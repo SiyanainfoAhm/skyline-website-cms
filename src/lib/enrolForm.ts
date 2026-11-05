@@ -98,11 +98,12 @@ export type EnrolErrors<T> = Partial<Record<keyof T | "form", string>>;
 
 export function validateStudentEnrol(form: StudentEnrolForm, today?: Date): EnrolErrors<StudentEnrolForm> {
   const errors: EnrolErrors<StudentEnrolForm> = {};
-  const first = nameProblem(form.firstName, "first name"); if (first) errors.firstName = first;
-  const last = nameProblem(form.lastName, "last name"); if (last) errors.lastName = last;
+  // Email and mobile only, like an application; a name or date of birth is checked only when given.
+  const first = form.firstName.trim() ? nameProblem(form.firstName, "first name") : ""; if (first) errors.firstName = first;
+  const last = form.lastName.trim() ? nameProblem(form.lastName, "last name") : ""; if (last) errors.lastName = last;
   if (!validEmail(form.email)) errors.email = "Enter a valid email address.";
   const mobile = mobileProblem(form.mobile); if (mobile) errors.mobile = mobile;
-  const dob = dateOfBirthProblem(form.dateOfBirth, today); if (dob) errors.dateOfBirth = dob;
+  const dob = form.dateOfBirth.trim() ? dateOfBirthProblem(form.dateOfBirth, today) : ""; if (dob) errors.dateOfBirth = dob;
   if (form.referralCode.trim().length > 40 || CONTROL.test(form.referralCode)) errors.referralCode = "Check the referral code.";
   if (!form.agreed) errors.agreed = "Please agree to the terms and privacy policy.";
   return errors;

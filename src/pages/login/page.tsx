@@ -227,7 +227,7 @@ export default function LoginPage() {
           {completing ? (
             <CompleteSignUp
               user={completing}
-              onStudentDone={() => { const id = completing.id; setCompleting(null); setChecking(true); void route(id); }}
+              onStudentDone={(apply) => { const id = completing.id; setCompleting(null); if (apply) { navigate("/agency/applications/new", { replace: true }); return; } setChecking(true); void route(id); }}
               onAgentDone={(name) => {
                 // Nothing to open until SLIT approves the business: end the session and say what happens next.
                 void supabase.auth.signOut({ scope: "local" }).then(() => {
