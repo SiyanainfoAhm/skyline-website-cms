@@ -249,7 +249,11 @@ function AgentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: EnrolRe
       setErrors((prev) => ({ ...prev, abn: undefined }));
       if (!/active/i.test(business.abnStatus)) setLookupNote(`This ABN is listed as ${business.abnStatus || "not active"}. Check it before continuing.`);
     } catch (e) {
-      setLookupNote(e instanceof Error ? e.message : "We could not look this ABN up. Enter the details yourself.");
+      // A network failure (service not reachable) reads as plain words, not the client library's message.
+      const message = e instanceof Error ? e.message : "";
+      setLookupNote(!message || /edge function|failed to fetch|network/i.test(message)
+        ? "ABN Lookup is unavailable right now. Enter your agency name yourself; we check the ABN when we review your application."
+        : message);
     } finally { setLooking(false); }
   };
 
@@ -274,7 +278,8 @@ function AgentStep({ onBack, onDone }: { onBack: () => void; onDone: (r: EnrolRe
       <div className="mt-5 space-y-4">
         <Field label="ABN" required hint={found ? `${found.legalName}${found.entityType ? `, ${found.entityType}` : ""}${found.state ? `, ${found.state} ${found.postcode}` : ""}.` : "We fill in your registered business name."}>
           <div className="flex gap-2">
-            <TextInput inputMode="numeric" value={form.abn} onChange={(e) => { patch({ abn: formatAbn(e.target.value) }); setFound(null); setLookupNote(""); }} placeholder="11 digits" autoComplete="off" />
+            <TextInput inputMode="numeric" value={form.abn} onChange={(e) => { patch({ abn: formatAbn(e.target.value) }); setFound(null); setLookupNote(""); setErrors((prev) => (prev.abn ? { ...prev, abn: undefined } : prev)); }}
+              placeholder="12 345 678 901" autoComplete="off" aria-invalid={Boolean(errors.abn)} />
             <Button type="button" variant="outline" onClick={() => void lookUp()} disabled={looking || !form.abn.trim()}>{looking ? "Looking…" : "Look up"}</Button>
           </div>
           <Problem text={errors.abn} />
