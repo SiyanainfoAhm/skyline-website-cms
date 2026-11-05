@@ -670,9 +670,9 @@ test("enrol: a student gives only email and mobile and agrees (name and date of 
 test("enrol: an agent must give the business, a valid ABN, a contact, a work email and a phone", () => {
   const empty = validateAgentEnrol(EMPTY_AGENT_ENROL);
   assert.deepEqual(Object.keys(empty).sort(), ["abn", "agreed", "businessName", "contactName", "email", "phone"]);
-  const form = { ...EMPTY_AGENT_ENROL, businessName: " Sample Agency ", abn: "85 165 345 717", contactName: "Reg Istrar", email: "Reg@Example.test", phone: "(03) 9876 5432", agreed: true };
+  const form = { ...EMPTY_AGENT_ENROL, businessName: " Sample Agency ", abn: "85 165 345 717", contactName: "Reg Istrar", email: "Reg@Example.test", phone: "+61398765432", agreed: true };
   assert.deepEqual(validateAgentEnrol(form), {});
-  assert.deepEqual(agentEnrolPayload(form), { kind: "agent", businessName: "Sample Agency", abn: "85165345717", contactName: "Reg Istrar", email: "reg@example.test", phone: "(03) 9876 5432" });
+  assert.deepEqual(agentEnrolPayload(form), { kind: "agent", businessName: "Sample Agency", abn: "85165345717", contactName: "Reg Istrar", email: "reg@example.test", phone: "+61398765432" });
   assert.ok(validateAgentEnrol({ ...form, abn: "85165345718" }).abn);
   assert.ok(validateAgentEnrol({ ...form, businessName: "A" }).businessName);
   assert.ok(validateAgentEnrol({ ...form, phone: "12" }).phone);
@@ -694,5 +694,24 @@ test("enrol: the agent's email or phone already used by another company is shown
   assert.equal(isContactConflict("The phone number you entered is already linked to another company. Please enter a different phone number, since this will be the admin account for your company."), true);
   assert.equal(isContactConflict("The ABN you entered already exists in our system. Please contact Skyline to get registered."), false);
   assert.equal(isContactConflict("Enter a phone number."), false);
+});
+
+test("enrol: emails need a real-looking domain; Australian phones are 10 digits starting with 0, entered with the country code", async () => {
+  const { validEmail, emailProblem, validateAgentEnrol, EMPTY_AGENT_ENROL } = await import("../src/lib/enrolForm.ts");
+  for (const ok of ["name@company.com.au", "first.last+tag@mail.example.com", "a@b.io"]) assert.equal(validEmail(ok), true, ok);
+  for (const bad of ["", "name", "name@", "@company.com", "name@company", "name@company.c", "name@@company.com", "na me@company.com",
+    "name@company..com", ".name@company.com", "name.@company.com", "na..me@company.com", "name@-company.com", "name@company-.com", "name@company.123"]) {
+    assert.equal(validEmail(bad), false, bad);
+  }
+  assert.match(emailProblem(""), /enter your email/i);
+  assert.match(emailProblem("name@company"), /valid email/i);
+  const form = { ...EMPTY_AGENT_ENROL, businessName: "Sample", abn: "85 165 345 717", contactName: "Reg Istrar", email: "reg@example.com.au", agreed: true };
+  assert.equal(validateAgentEnrol({ ...form, phone: "+61398765432" }).phone, undefined, "Australian landline");
+  assert.equal(validateAgentEnrol({ ...form, phone: "+61412345678" }).phone, undefined, "Australian mobile");
+  assert.equal(validateAgentEnrol({ ...form, phone: "+919876543210" }).phone, undefined, "overseas number");
+  assert.ok(validateAgentEnrol({ ...form, phone: "+6141234567" }).phone, "Australian number one digit short");
+  assert.ok(validateAgentEnrol({ ...form, phone: "0412345678" }).phone, "without the country-code field");
+  assert.ok(validateAgentEnrol({ ...form, phone: "" }).phone, "empty");
+  assert.match(validateAgentEnrol({ ...form, email: "reg@example" }).email ?? "", /valid email/i);
 });
 

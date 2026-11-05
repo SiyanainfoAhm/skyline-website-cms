@@ -23,9 +23,26 @@ const EMAIL = /^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/;
 // eslint-disable-next-line no-control-regex -- control characters are never valid in names
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
+/**
+ * A real-looking address: one @, a name of allowed characters that does not start or end with a dot and has no "..",
+ * and a domain of dot-separated labels (letters, digits, inner hyphens) ending in a 2+ letter extension (.com, .com.au).
+ */
 export function validEmail(value: string): boolean {
   const email = value.trim().toLowerCase();
-  return email.length > 0 && email.length <= 254 && !CONTROL.test(email) && EMAIL.test(email);
+  if (!email || email.length > 254 || CONTROL.test(email) || !EMAIL.test(email)) return false;
+  const at = email.lastIndexOf("@");
+  const local = email.slice(0, at), domain = email.slice(at + 1);
+  if (email.indexOf("@") !== at || !local || local.length > 64) return false;
+  if (!/^[a-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(local) || local.startsWith(".") || local.endsWith(".") || local.includes("..")) return false;
+  const labels = domain.split(".");
+  if (labels.length < 2 || !/^[a-z]{2,}$/.test(labels[labels.length - 1])) return false;
+  return labels.every((label) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
+/** What is wrong with an email, or "" when it is fine. */
+export function emailProblem(value: string): string {
+  if (!value.trim()) return "Enter your email address.";
+  return validEmail(value) ? "" : "Enter a valid email address, like name@company.com.au.";
 }
 
 function nameProblem(value: string, what: string): string {
@@ -101,7 +118,7 @@ export function validateStudentEnrol(form: StudentEnrolForm, today?: Date): Enro
   // Email and mobile only, like an application; a name or date of birth is checked only when given.
   const first = form.firstName.trim() ? nameProblem(form.firstName, "first name") : ""; if (first) errors.firstName = first;
   const last = form.lastName.trim() ? nameProblem(form.lastName, "last name") : ""; if (last) errors.lastName = last;
-  if (!validEmail(form.email)) errors.email = "Enter a valid email address.";
+  const email = emailProblem(form.email); if (email) errors.email = email;
   const mobile = mobileProblem(form.mobile); if (mobile) errors.mobile = mobile;
   const dob = form.dateOfBirth.trim() ? dateOfBirthProblem(form.dateOfBirth, today) : ""; if (dob) errors.dateOfBirth = dob;
   if (form.referralCode.trim().length > 40 || CONTROL.test(form.referralCode)) errors.referralCode = "Check the referral code.";
@@ -115,9 +132,10 @@ export function validateAgentEnrol(form: AgentEnrolForm): EnrolErrors<AgentEnrol
   if (business.length < 2 || business.length > 200 || CONTROL.test(business)) errors.businessName = "Enter the agency or company name.";
   const abn = abnProblem(form.abn); if (abn) errors.abn = abn;
   const contact = nameProblem(form.contactName, "contact person's name"); if (contact) errors.contactName = contact;
-  if (!validEmail(form.email)) errors.email = "Enter a valid work email address.";
-  const phone = form.phone.replace(/[\s().-]/g, "");
-  if (!/^\+?\d{6,15}$/.test(phone)) errors.phone = "Enter a phone number.";
+  const email = emailProblem(form.email); if (email) errors.email = email.replace("your email address", "your work email address");
+  // The country-code phone field gives +61… (Australian numbers: 10 digits starting with 0) or another country's number.
+  const phone = mobileProblem(form.phone);
+  if (phone) errors.phone = phone.replace("mobile number", "phone number");
   if (!form.agreed) errors.agreed = "Please agree to the terms and privacy policy.";
   return errors;
 }

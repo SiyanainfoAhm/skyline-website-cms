@@ -232,10 +232,12 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
     rememberSignUpBusiness({ abn: chosen.abn, businessName: chosen.businessName, looked: Boolean(chosen.details) });
   };
 
-  const submit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || !business) return;
-    const current = { ...form, abn: formatAbn(business.abn), businessName: business.businessName };
+    // The phone field keeps its value (E.164, with the country code) in a hidden input named "phone".
+    const current = { ...form, abn: formatAbn(business.abn), businessName: business.businessName, phone: String(new FormData(event.currentTarget).get("phone") ?? "") };
+    setForm(current);
     const checked = validateAgentEnrol(current);
     setErrors(checked);
     if (Object.keys(checked).length) return;
@@ -286,7 +288,11 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
         <Field label="Contact person" required><TextInput value={form.contactName} onChange={(e) => patch({ contactName: e.target.value })} autoComplete="name" /><Problem text={errors.contactName} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Work email" required><TextInput type="email" value={form.email} onChange={(e) => patch({ email: e.target.value })} autoComplete="email" /><Problem text={errors.email} /></Field>
-          <Field label="Phone" required><TextInput type="tel" inputMode="tel" value={form.phone} onChange={(e) => patch({ phone: e.target.value })} autoComplete="tel" /><Problem text={errors.phone} /></Field>
+          <div>
+            <label htmlFor="agent-enrol-phone" className="mb-1.5 block text-[13px] font-medium text-foreground-800">Phone <span className="text-primary-600">*</span></label>
+            <PhoneInput id="agent-enrol-phone" name="phone" value={form.phone} required placeholder="041 234 5678" />
+            <Problem text={errors.phone} />
+          </div>
         </div>
         <p className="text-xs text-foreground-500">We email you a link to choose your password. You become the administrator of your agency's workspace once SLIT approves it.</p>
         <div className="hidden" aria-hidden="true"><label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label></div>
