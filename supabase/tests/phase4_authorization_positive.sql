@@ -1,6 +1,6 @@
 -- Positive preservation + direct mutation boundaries, synthetic and rollback-only.
 begin;
-select plan(288);
+select plan(290);
 insert into public.agencies(id,name,code) values ('13000000-0000-0000-0000-000000000001','Positive A','P2-POS-A'),('13000000-0000-0000-0000-000000000002','Positive B','P2-POS-B');
 insert into public.portal_profiles(id,auth_user_id,full_name,email) values
  ('23000000-0000-0000-0000-000000000001','33000000-0000-0000-0000-000000000001','Positive agent','positive@example.test');
@@ -510,6 +510,7 @@ select throws_ok($$select public.portal_self_register('student','{"firstName":"S
 select lives_ok($$select public.portal_self_register('agent','{"businessName":"Self Reg Agency","abn":"85165345717","contactName":"Reg Istrar","email":"reg.istrar@example.test","phone":"0398765432"}')$$,'an agent registers their business');
 select is((select status||':'||(registration_requested_at is not null)::text||':'||(registration_reviewed_at is null)::text from public.agencies where registration_number='85165345717'),'Inactive:true:true','the business waits inactive and unreviewed');
 select is((select role from public.agency_invitations where email='reg.istrar@example.test'),'agency_admin','the registrant is invited as its administrator');
+select is((select role||':'||status||':'||(profile_id is null)::text from public.agents where email='reg.istrar@example.test'),'agency_admin:Active:true','the registrant is listed as the business''s agent straight away (Invited until they sign in)');
 select throws_ok($$select public.portal_self_register('agent','{"businessName":"Again","abn":"85 165 345 717","contactName":"Some One","email":"some.one@example.test","phone":"0398765432"}')$$,'23505','A business with this ABN is already registered. Ask its administrator to invite you, or contact SLIT Administration.','the same ABN cannot register twice, and the message says so');
 set local role authenticated;
 set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
@@ -534,6 +535,7 @@ set local request.jwt.claim.sub='33000000-0000-0000-0000-000000000002';
 select lives_ok($$select public.admin_business_set_status((select id from public.agencies where registration_number='51824753556'),'Inactive')$$,'deactivating a pending business declines it');
 select is((select registration_decision from public.agencies where registration_number='51824753556'),'declined','the decision is declined');
 select is((select status from public.agency_invitations where email='de.clined@example.test'),'revoked','and its invitation is revoked');
+select is((select status from public.agents where email='de.clined@example.test'),'Inactive','and its agent is no longer invited');
 -- Signing up with Google, Facebook or a phone number: the signed-in account completes its details and becomes a student.
 reset role;
 select is((select count(*)::int from public.agents a join public.portal_profiles p on p.id = a.profile_id where p.auth_user_id = '33000000-0000-0000-0000-000000000020'),0,'a student''s sign-in is never mirrored as an agent');
