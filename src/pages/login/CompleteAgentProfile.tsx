@@ -4,6 +4,7 @@ import { supabase } from "@/pages/admin/lib/supabase";
 import { Button, Field, TextInput } from "@/pages/admin/components/ui";
 import { abnProblem, formatAbn, validEmail } from "@/lib/enrolForm";
 import { lookupAbn, type AbnDetails } from "@/lib/selfEnrol";
+import { readSignUpBusiness, rememberSignUpBusiness } from "@/lib/authProviders";
 
 /**
  * After an agent signs up with Google, Facebook or a phone number: the agency details. The business is created inactive
@@ -14,8 +15,10 @@ export default function CompleteAgentProfile({ user, onDone }: { user: User; onD
   const emailVerified = Boolean(user.email && user.email_confirmed_at);
   const phoneVerified = Boolean(user.phone && user.phone_confirmed_at);
   const verifiedPhone = phoneVerified ? `+${String(user.phone).replace(/^\+/, "")}` : "";
-  const [abn, setAbn] = useState("");
-  const [business, setBusiness] = useState("");
+  // The business confirmed on the Enroll now page before leaving for Google / Facebook / phone, when there is one.
+  const [chosen] = useState(readSignUpBusiness);
+  const [abn, setAbn] = useState(chosen ? formatAbn(chosen.abn) : "");
+  const [business, setBusiness] = useState(chosen?.businessName ?? "");
   const [contact, setContact] = useState(String(meta.full_name ?? meta.name ?? "").trim());
   const [email, setEmail] = useState(emailVerified ? String(user.email) : "");
   const [phone, setPhone] = useState(verifiedPhone);
@@ -59,6 +62,7 @@ export default function CompleteAgentProfile({ user, onDone }: { user: User; onD
     });
     setBusy(false);
     if (error) { setErrors({ form: error.message || "We could not submit your application. Please try again." }); return; }
+    rememberSignUpBusiness(null);
     onDone(business.trim());
   };
 

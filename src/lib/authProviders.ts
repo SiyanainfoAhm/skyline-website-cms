@@ -67,6 +67,21 @@ export function readSignUpIntent(): SignUpIntent {
   try { return window.sessionStorage.getItem(INTENT_KEY) === "agent" ? "agent" : "student"; } catch { return "student"; }
 }
 
+/** The business an agent confirmed before leaving for Google / Facebook (ABN and name only; this tab only). */
+const BUSINESS_KEY = "skyline.signup.business";
+export interface SignUpBusiness { abn: string; businessName: string; looked: boolean }
+
+export function rememberSignUpBusiness(business: SignUpBusiness | null): void {
+  try { if (business) window.sessionStorage.setItem(BUSINESS_KEY, JSON.stringify(business)); else window.sessionStorage.removeItem(BUSINESS_KEY); } catch { /* storage unavailable */ }
+}
+
+export function readSignUpBusiness(): SignUpBusiness | null {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(BUSINESS_KEY) ?? "null") as SignUpBusiness | null;
+    return parsed && /^\d{11}$/.test(parsed.abn) && typeof parsed.businessName === "string" ? parsed : null;
+  } catch { return null; }
+}
+
 /** True when the signed-in account came from Google, Facebook or a phone number (not an emailed invitation). */
 export function isSelfSignUpAccount(user: { app_metadata?: Record<string, unknown>; phone?: string | null } | null): boolean {
   if (!user) return false;

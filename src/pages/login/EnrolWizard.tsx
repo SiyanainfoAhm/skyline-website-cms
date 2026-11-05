@@ -4,6 +4,8 @@ import { Button, Field, Select, TextInput } from "@/pages/admin/components/ui";
 import { portalCourseOptions } from "@/pages/agency/lib/portalSections";
 import { PhoneInput } from "@/components/feature/applicationInputs";
 import QuickSignIn from "@/pages/login/QuickSignIn";
+import AgentBusinessStep, { type ChosenBusiness } from "@/pages/login/AgentBusinessStep";
+import { rememberSignUpBusiness } from "@/lib/authProviders";
 import {
   EMPTY_AGENT_ENROL, EMPTY_STUDENT_ENROL, abnProblem, dateOfBirthProblem, dateOfBirthRange, formatAbn, validateAgentEnrol, validateStudentEnrol,
   type AgentEnrolForm, type EnrolErrors, type EnrolKind, type StudentEnrolForm,
@@ -226,64 +228,65 @@ function QuickStart({ onSignedIn, intent }: { onSignedIn: (userId: string) => vo
 /* ----------------------------------------------------------------- step 2: agent */
 
 function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone: (r: EnrolResult) => void; onSignedIn: (userId: string) => void }) {
+  // First the business (ABN Lookup, confirmed by the agent), then how they sign up: Google / Facebook / phone or company email.
+  const [business, setBusiness] = useState<ChosenBusiness | null>(null);
   const [form, setForm] = useState<AgentEnrolForm>(EMPTY_AGENT_ENROL);
   const [errors, setErrors] = useState<EnrolErrors<AgentEnrolForm>>({});
   const [busy, setBusy] = useState(false);
-  const [looking, setLooking] = useState(false);
-  const [found, setFound] = useState<AbnDetails | null>(null);
-  const [lookupNote, setLookupNote] = useState("");
   const [website, setWebsite] = useState("");
   const patch = (next: Partial<AgentEnrolForm>) => setForm((prev) => ({ ...prev, ...next }));
 
-  const lookUp = async () => {
-    const problem = abnProblem(form.abn);
-    if (problem) { setErrors((prev) => ({ ...prev, abn: problem })); return; }
-    setLooking(true); setLookupNote(""); setFound(null);
-    try {
-      const business = await lookupAbn(form.abn);
-      setFound(business);
-      if (!form.businessName.trim()) patch({ businessName: business.businessNames[0] || business.legalName });
-      setErrors((prev) => ({ ...prev, abn: undefined }));
-      if (!/active/i.test(business.abnStatus)) setLookupNote(`This ABN is listed as ${business.abnStatus || "not active"}. Check it before continuing.`);
-    } catch (e) {
-      // A network failure (service not reachable) reads as plain words, not the client library's message.
-      const message = e instanceof Error ? e.message : "";
-      setLookupNote(!message || /edge function|failed to fetch|network/i.test(message)
-        ? "ABN Lookup is unavailable right now. Enter your agency name yourself; we check the ABN when we review your application."
-        : message);
-    } finally { setLooking(false); }
+  const choose = (chosen: ChosenBusiness) => {
+    setBusiness(chosen);
+    setForm((prev) => ({ ...prev, abn: formatAbn(chosen.abn), businessName: chosen.businessName }));
+    rememberSignUpBusiness({ abn: chosen.abn, businessName: chosen.businessName, looked: Boolean(chosen.details) });
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
-    const checked = validateAgentEnrol(form);
+    if (busy || !business) return;
+    const current = { ...form, abn: formatAbn(business.abn), businessName: business.businessName };
+    const checked = validateAgentEnrol(current);
     setErrors(checked);
     if (Object.keys(checked).length) return;
     setBusy(true);
-    try { onDone(await enrolAgent(form, website)); }
+    try { const result = await enrolAgent(current, website); rememberSignUpBusiness(null); onDone(result); }
     catch (e) { setErrors({ form: e instanceof Error ? e.message : "We could not submit your application. Please try again." }); }
     finally { setBusy(false); }
   };
 
+  if (!business) {
+    return (
+      <div>
+        <StepHeader step={2} kind="Agent" title="Let's find your business" onBack={onBack} />
+        <div className="mt-5"><AgentBusinessStep initial={null} onChosen={choose} /></div>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={submit} noValidate>
-      <StepHeader step={2} kind="Agent" title="Agency details" onBack={onBack} />
-      <div className="mt-5 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900" role="status">
+      <StepHeader step={2} kind="Agent" title="Create your agent account" onBack={() => setBusiness(null)} />
+      <div className="mt-5 flex items-start justify-between gap-3 rounded-lg border border-background-300 bg-background-50 p-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+            <i className={business.details ? "ri-check-line" : "ri-edit-line"} aria-hidden="true" /> {business.details ? "From ABN Lookup" : "Entered by you"}
+          </p>
+          <p className="mt-0.5 truncate font-semibold text-foreground-900">{business.businessName}</p>
+          <p className="text-xs text-foreground-600">ABN {formatAbn(business.abn)}{business.details?.state ? ` · ${business.details.state} ${business.details.postcode}` : ""}</p>
+        </div>
+        <button type="button" onClick={() => setBusiness(null)} className="shrink-0 cursor-pointer text-sm font-medium text-primary-700 hover:text-primary-800">Change</button>
+      </div>
+      <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900" role="status">
         <i className="ri-error-warning-line mt-0.5 text-base" aria-hidden="true" /><span>Agent accounts are reviewed by our team before you can sign in.</span>
       </div>
-      <QuickStart onSignedIn={onSignedIn} intent="agent" />
+      <div className="mt-5">
+        <QuickSignIn create intent="agent" label="Sign up with" onSignedIn={onSignedIn} />
+        <div className="mt-5 flex items-center gap-3 text-xs text-foreground-500" aria-hidden="true">
+          <span className="h-px flex-1 bg-background-300" />or use your company email<span className="h-px flex-1 bg-background-300" />
+        </div>
+      </div>
       <div className="mt-5 space-y-4">
-        <Field label="ABN" required hint={found ? `${found.legalName}${found.entityType ? `, ${found.entityType}` : ""}${found.state ? `, ${found.state} ${found.postcode}` : ""}.` : "We fill in your registered business name."}>
-          <div className="flex gap-2">
-            <TextInput inputMode="numeric" value={form.abn} onChange={(e) => { patch({ abn: formatAbn(e.target.value) }); setFound(null); setLookupNote(""); setErrors((prev) => (prev.abn ? { ...prev, abn: undefined } : prev)); }}
-              placeholder="12 345 678 901" autoComplete="off" aria-invalid={Boolean(errors.abn)} />
-            <Button type="button" variant="outline" onClick={() => void lookUp()} disabled={looking || !form.abn.trim()}>{looking ? "Looking…" : "Look up"}</Button>
-          </div>
-          <Problem text={errors.abn} />
-          {lookupNote ? <span className="mt-1 block text-xs text-amber-800">{lookupNote}</span> : null}
-        </Field>
-        <Field label="Agency / company name" required><TextInput value={form.businessName} onChange={(e) => patch({ businessName: e.target.value })} autoComplete="organization" /><Problem text={errors.businessName} /></Field>
         <Field label="Contact person" required><TextInput value={form.contactName} onChange={(e) => patch({ contactName: e.target.value })} autoComplete="name" /><Problem text={errors.contactName} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Work email" required><TextInput type="email" value={form.email} onChange={(e) => patch({ email: e.target.value })} autoComplete="email" /><Problem text={errors.email} /></Field>
@@ -292,6 +295,7 @@ function AgentStep({ onBack, onDone, onSignedIn }: { onBack: () => void; onDone:
         <p className="text-xs text-foreground-500">We email you a link to choose your password. You become the administrator of your agency's workspace once SLIT approves it.</p>
         <div className="hidden" aria-hidden="true"><label>Website<input tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} /></label></div>
         <Agree checked={form.agreed} onChange={(agreed) => patch({ agreed })} error={errors.agreed} />
+        {errors.abn || errors.businessName ? <FormError text={errors.abn || errors.businessName} /> : null}
         <FormError text={errors.form} />
         <Button type="submit" className="w-full" disabled={busy}>{busy ? "Submitting…" : "Submit application"}</Button>
       </div>
